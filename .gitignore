@@ -1,0 +1,9 @@
+venv/
+lumiere-backend/venv/
+__pycache__/
+*.pyc
+.env
+node_modules/
+lumiere-frontend/node_modules/
+lumiere-backend/.env
+lumiere-frontend/.env.local
