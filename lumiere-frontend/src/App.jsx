@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import barba from "@barba/core";
 import gsap from "gsap";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import LandingPage from "./components/LandingPage";
 import RoomScene from "./components/threeD/scene/RoomScene";
 import WallEditor from "./components/threeD/walls/WallEditor";
 import { COLORS } from "./utils/colors";
@@ -48,7 +49,9 @@ function App() {
         <BrowserRouter>
           <Routes>
             {/* Set RoomScene as the Home Page */}
-            <Route path="/" element={<RoomScene />} />
+
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/user/room" element={<RoomScene />} />
             
             {/* Set WallEditor as the secondary page */}
             <Route path="/wall-editor" element={<WallEditor />} />
