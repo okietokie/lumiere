@@ -1,39 +1,34 @@
+# main.py
 import os
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Load environment variables
+from app.routes import auth, model_routes
+from app.services.model_service import sync_from_mega
+
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 
-# Import routers
-from app.routes import auth
-
-# Get frontend URL from environment
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-API_TITLE = "Lumiere API"
-API_VERSION = "1.0.0"
-API_DESCRIPTION = "Backend API for Lumiere Interior Design Platform"
 
-# FastAPI app initialization
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await sync_from_mega()          # downloads new .glb files from Mega once
+    yield
+
+
+
 app = FastAPI(
-    title=API_TITLE,
-    version=API_VERSION,
-    description=API_DESCRIPTION,
+    title="Lumiere API",
+    version="1.0.0",
+    description="Backend API for Lumiere Interior Design Platform",
+    lifespan=lifespan,
 )
-
-origins = [
-    FRONTEND_URL,
-]
-
-# Add common variations for development
-if FRONTEND_URL == "http://localhost:5173":
-    origins.extend([
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ])
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,17 +38,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routers
-app.include_router(
-    auth.router,
-    prefix="/api/auth",
-    tags=["Authentication"]
-)
+app.include_router(auth.router,         prefix="/api/auth",   tags=["Authentication"])
+app.include_router(model_routes.router, prefix="/api/models", tags=["Models"])
+
 
 @app.get("/")
 def root():
     return {"status": "Lumiere backend running", "frontend_url": FRONTEND_URL}
-
-@app.get("/test")
-async def test_endpoint():
-    return {"message": "Backend is working"}

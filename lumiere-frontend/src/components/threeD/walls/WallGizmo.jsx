@@ -1,58 +1,110 @@
-// src/components/walls/WallGizmo.jsx
-import React from 'react';
-import { TransformControls } from "@react-three/drei";
+// src/components/threeD/walls/WallGizmo.jsx
+import React, { useRef, useEffect } from 'react';
+import { TransformControls } from '@react-three/drei';
 
-export default function WallGizmo({ selectedWall, wallRef, gizmoMode, updateWall, setOrbitEnabled }) {
-  if (!selectedWall || !wallRef.current) return null;
+/**
+ * Clean TransformControls gizmo for walls.
+ *
+ * Walls are stored as start/end points, so after the gizmo finishes we:
+ *   1. Read position (new centre), rotation.y (new angle), scale (new size)
+ *   2. Convert back to new start/end + height + thickness
+ *   3. Reset the mesh transform to identity so React re-renders cleanly
+ *
+ * Key fixes vs the old version:
+ *  - We snapshot the wall dimensions at drag-START (not at render time),
+ *    so repeated transforms don't compound.
+ *  - We reset position AND rotation AND scale after every drag, not just scale.
+ *  - onMouseDown/onMouseUp use the TransformControls 'mouseDown'/'mouseUp'
+ *    events (the correct R3F event names).
+ */
+export default function WallGizmo({
+  selectedWall,
+  wallRef,
+  gizmoMode,
+  updateWall,
+  setOrbitEnabled,
+}) {
+  if (!selectedWall || !wallRef?.current) return null;
+
+  return (
+    <WallGizmoInner
+      key={selectedWall.id}          // remount when selection changes
+      selectedWall={selectedWall}
+      wallRef={wallRef}
+      gizmoMode={gizmoMode}
+      updateWall={updateWall}
+      setOrbitEnabled={setOrbitEnabled}
+    />
+  );
+}
+
+function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbitEnabled }) {
+  // Snapshot wall dimensions at the moment the drag starts —
+  // this prevents compounding transforms across multiple drags
+  const snapshot = useRef(null);
+
+  const handleMouseDown = () => {
+    setOrbitEnabled(false);
+    snapshot.current = {
+      length:    Math.hypot(
+        selectedWall.end[0] - selectedWall.start[0],
+        selectedWall.end[1] - selectedWall.start[1],
+      ),
+      height:    selectedWall.height,
+      thickness: selectedWall.thickness,
+    };
+  };
+
+  const handleMouseUp = () => {
+    setOrbitEnabled(true);
+
+    const obj  = wallRef.current;
+    const snap = snapshot.current;
+    if (!obj || !snap) return;
+
+    // 1. New centre position
+    const cx = obj.position.x;
+    const cz = obj.position.z;
+
+    // 2. New angle — ThreeJS stores it as -angle in rotation.y
+    const newAngle = -obj.rotation.y;
+
+    // 3. New dimensions — multiply snapshot by the gizmo scale delta
+    const newLength    = Math.max(0.3, snap.length    * obj.scale.x);
+    const newHeight    = Math.max(0.3, snap.height    * obj.scale.y);
+    const newThickness = Math.max(0.05, snap.thickness * obj.scale.z);
+
+    // 4. Derive new start / end from centre + angle + length
+    const halfX = Math.cos(newAngle) * newLength / 2;
+    const halfZ = Math.sin(newAngle) * newLength / 2;
+
+    // 5. Reset ALL transforms on the mesh BEFORE React re-renders
+    //    (prevents visual pop / double-transform)
+    obj.position.set(
+      (selectedWall.start[0] + selectedWall.end[0]) / 2,
+      newHeight / 2,
+      (selectedWall.start[1] + selectedWall.end[1]) / 2,
+    );
+    obj.rotation.set(0, -newAngle, 0);
+    obj.scale.set(1, 1, 1);
+
+    // 6. Push new values into React state
+    updateWall(selectedWall.id, {
+      start:     [cx - halfX, cz - halfZ],
+      end:       [cx + halfX, cz + halfZ],
+      height:    newHeight,
+      thickness: newThickness,
+    });
+
+    snapshot.current = null;
+  };
 
   return (
     <TransformControls
       object={wallRef.current}
       mode={gizmoMode}
-
-      onMouseDown={() => setOrbitEnabled(false)}
-      onMouseUp={() => {
-        setOrbitEnabled(true);
-        const obj = wallRef.current;
-
-        // 1. Get the new center position from the Gizmo
-        const cx = obj.position.x;
-        const cz = obj.position.z;
-
-        // 2. Get the new rotation angle (We use -y because of ThreeJS orientation)
-        const newAngle = -obj.rotation.y;
-
-        // 3. Get the new scales
-        const scaleX = obj.scale.x;
-        const scaleY = obj.scale.y;
-        const scaleZ = obj.scale.z;
-
-        // 4. Calculate original length
-        const origLength = Math.hypot(selectedWall.end[0] - selectedWall.start[0], selectedWall.end[1] - selectedWall.start[1]);
-
-        // 5. Apply the scales to the dimensions
-        const newLength = origLength * scaleX;
-        const newHeight = selectedWall.height * scaleY;
-        const newThickness = selectedWall.thickness * scaleZ;
-
-        // 6. Calculate the new start and end points based on the new angle and center!
-        const dx = (Math.cos(newAngle) * newLength) / 2;
-        const dz = (Math.sin(newAngle) * newLength) / 2;
-
-        const newStart = [cx - dx, cz - dz];
-        const newEnd = [cx + dx, cz + dz];
-
-        // 7. Reset the 3D mesh scale back to 1 before React updates to prevent visual glitches
-        obj.scale.set(1, 1, 1);
-
-        // 8. Update the main React state
-        updateWall(selectedWall.id, {
-          start: newStart,
-          end: newEnd,
-          height: newHeight,
-          thickness: newThickness
-        });
-      }}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
     />
   );
 }

@@ -1,153 +1,193 @@
-import { useState, useEffect, useRef } from "react";
-import { useThree, useFrame } from "@react-three/fiber";
-import { PointerLockControls } from "@react-three/drei";
-import * as THREE from "three";
-import { gsap } from "gsap"; // Added GSAP for smooth teleporting
+// src/components/threeD/camera/FirstPersonControls.jsx
+import { useEffect, useRef } from 'react';
+import { useThree, useFrame } from '@react-three/fiber';
+import { PointerLockControls } from '@react-three/drei';
+import * as THREE from 'three';
 
-export default function FirstPersonControls({ position, setPosition, dimensions, isLocked, setIsLocked }) {
+const EYE_LEVEL    = 1.6;
+const WALK_SPEED   = 4.0;
+const SPRINT_SPEED = 7.5;
+const JUMP_FORCE   = 5.0;
+const GRAVITY      = 12.0;
+const BOB_FREQ     = 8.0;
+const BOB_AMP      = 0.055;
+const MOUSE_SPEED  = 0.65;
+
+// How far from room centre the player can wander before soft pushback kicks in
+const SOFT_LIMIT   = 10.0;  // metres — comfortably outside any wall
+const PUSH_STRENGTH = 6.0;  // how hard the pushback force is
+
+export default function FirstPersonControls({
+  walls,
+  isLocked,
+  setIsLocked,
+  onTeleport,
+}) {
   const { camera, gl } = useThree();
-  const [moveState, setMoveState] = useState({ 
-    forward: false, 
-    backward: false, 
-    left: false, 
-    right: false,
-    sprint: false,
-    jump: false 
-  });
-  
   const controlsRef = useRef();
-  const velocity = useRef(new THREE.Vector3(0, 0, 0)); 
 
-  // 1. Listen for position changes (like clicking a Preset View)
+  const keys = useRef({
+    forward: false, backward: false,
+    left: false,    right: false,
+    sprint: false,  jump: false,
+  });
+  const velocityY   = useRef(0);
+  const bobTime     = useRef(0);
+
+  // Room centre — computed from walls, used for pushback
+  const roomCentre = useRef(new THREE.Vector3(0, 0, 0));
   useEffect(() => {
-    // Instead of snapping, we smoothly glide the player to the preset location
-    gsap.to(camera.position, {
-      x: position[0],
-      y: position[1], 
-      z: position[2],
-      duration: 1.2,
-      ease: "power3.inOut"
+    if (!walls || walls.length === 0) return;
+    let sx = 0, sz = 0, count = 0;
+    walls.forEach(({ start, end }) => {
+      sx += start[0] + end[0];
+      sz += start[1] + end[1];
+      count += 2;
     });
-    
-    // Optionally make the camera look at the center of the room when teleporting
-    // Only do this if the player isn't actively walking around
-    if (!isLocked) {
-        gsap.to(camera.rotation, {
-            x: 0,
-            y: 0, // Faces forward roughly
-            z: 0,
-            duration: 1.2,
-            ease: "power3.inOut"
-        });
-    }
-  }, [position, camera, isLocked]); // Now it listens to the position prop!
+    roomCentre.current.set(sx / count, 0, sz / count);
+  }, [walls]);
 
-  // 2. Handle Keyboard Inputs
+  // ── Keyboard ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      switch(e.code) {
-        case 'KeyW': setMoveState(prev => ({ ...prev, forward: true })); break;
-        case 'KeyS': setMoveState(prev => ({ ...prev, backward: true })); break;
-        case 'KeyA': setMoveState(prev => ({ ...prev, left: true })); break;
-        case 'KeyD': setMoveState(prev => ({ ...prev, right: true })); break;
-        case 'ShiftLeft': 
-        case 'ShiftRight': setMoveState(prev => ({ ...prev, sprint: true })); break;
-        case 'Space': setMoveState(prev => ({ ...prev, jump: true })); break;
+    const down = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      switch (e.code) {
+        case 'KeyW': case 'ArrowUp':        keys.current.forward  = true;  break;
+        case 'KeyS': case 'ArrowDown':      keys.current.backward = true;  break;
+        case 'KeyA': case 'ArrowLeft':      keys.current.left     = true;  break;
+        case 'KeyD': case 'ArrowRight':     keys.current.right    = true;  break;
+        case 'ShiftLeft': case 'ShiftRight':keys.current.sprint   = true;  break;
+        case 'Space': keys.current.jump = true; e.preventDefault();        break;
         default: break;
       }
     };
-    const handleKeyUp = (e) => {
-      switch(e.code) {
-        case 'KeyW': setMoveState(prev => ({ ...prev, forward: false })); break;
-        case 'KeyS': setMoveState(prev => ({ ...prev, backward: false })); break;
-        case 'KeyA': setMoveState(prev => ({ ...prev, left: false })); break;
-        case 'KeyD': setMoveState(prev => ({ ...prev, right: false })); break;
-        case 'ShiftLeft': 
-        case 'ShiftRight': setMoveState(prev => ({ ...prev, sprint: false })); break;
-        case 'Space': setMoveState(prev => ({ ...prev, jump: false })); break;
+    const up = (e) => {
+      switch (e.code) {
+        case 'KeyW': case 'ArrowUp':        keys.current.forward  = false; break;
+        case 'KeyS': case 'ArrowDown':      keys.current.backward = false; break;
+        case 'KeyA': case 'ArrowLeft':      keys.current.left     = false; break;
+        case 'KeyD': case 'ArrowRight':     keys.current.right    = false; break;
+        case 'ShiftLeft': case 'ShiftRight':keys.current.sprint   = false; break;
+        case 'Space':                       keys.current.jump     = false; break;
         default: break;
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup',   up);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup',   up);
     };
   }, []);
 
-  // 3. Handle Pointer Lock Status & Sync State
+  // ── Pointer lock ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const handlePointerLockChange = () => {
+    const onChange = () => {
       const locked = document.pointerLockElement === gl.domElement;
       setIsLocked(locked);
-      
       if (!locked) {
-        setPosition([camera.position.x, camera.position.y, camera.position.z]);
+        Object.keys(keys.current).forEach((k) => { keys.current[k] = false; });
+        velocityY.current = 0;
       }
     };
-    document.addEventListener('pointerlockchange', handlePointerLockChange);
-    return () => document.removeEventListener('pointerlockchange', handlePointerLockChange);
-  }, [gl.domElement, setIsLocked, setPosition, camera]);
+    document.addEventListener('pointerlockchange', onChange);
+    return () => document.removeEventListener('pointerlockchange', onChange);
+  }, [gl.domElement, setIsLocked]);
 
-  // 4. Native Engine Loop
-  useFrame((state, delta) => {
+  // ── Teleport ─────────────────────────────────────────────────────────────────
+  const prevTeleport = useRef(null);
+  useEffect(() => {
+    if (!onTeleport) return;
+    if (
+      prevTeleport.current &&
+      prevTeleport.current[0] === onTeleport[0] &&
+      prevTeleport.current[2] === onTeleport[2]
+    ) return;
+    prevTeleport.current = onTeleport;
+    camera.position.set(onTeleport[0], EYE_LEVEL, onTeleport[2]);
+    velocityY.current = 0;
+  }, [onTeleport, camera]);
+
+  // ── Frame loop ───────────────────────────────────────────────────────────────
+  useFrame((_, delta) => {
     if (!isLocked) return;
 
-    const dt = Math.min(delta, 0.1); 
-    
-    const baseSpeed = 3.0;
-    const currentSpeed = moveState.sprint ? baseSpeed * 1.8 : baseSpeed;
+    const dt    = Math.min(delta, 0.05);
+    const k     = keys.current;
+    const speed = k.sprint ? SPRINT_SPEED : WALK_SPEED;
 
-    const forwardVector = new THREE.Vector3();
-    camera.getWorldDirection(forwardVector);
-    forwardVector.y = 0; 
-    forwardVector.normalize();
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    fwd.y = 0;
+    fwd.normalize();
+    const right = new THREE.Vector3()
+      .crossVectors(new THREE.Vector3(0, 1, 0), fwd)
+      .normalize();
 
-    const rightVector = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forwardVector).normalize();
-    const movement = new THREE.Vector3();
+    const move = new THREE.Vector3();
+    if (k.forward)  move.add(fwd);
+    if (k.backward) move.sub(fwd);
+    if (k.left)     move.sub(right);
+    if (k.right)    move.add(right);
 
-    if (moveState.forward) movement.add(forwardVector);
-    if (moveState.backward) movement.sub(forwardVector);
-    if (moveState.left) movement.sub(rightVector);
-    if (moveState.right) movement.add(rightVector);
+    const moving = move.lengthSq() > 0;
+    if (moving) move.normalize().multiplyScalar(speed * dt);
 
-    if (movement.length() > 0) {
-      movement.normalize().multiplyScalar(currentSpeed * dt);
+    // Jump + gravity
+    if (k.jump && camera.position.y <= EYE_LEVEL + 0.05) {
+      velocityY.current = JUMP_FORCE;
+      k.jump = false;
+    }
+    velocityY.current -= GRAVITY * dt;
+
+    let nx = camera.position.x + move.x;
+    let ny = camera.position.y + velocityY.current * dt;
+    let nz = camera.position.z + move.z;
+
+    // Floor
+    if (ny <= EYE_LEVEL) {
+      ny = EYE_LEVEL;
+      velocityY.current = 0;
     }
 
-    const eyeLevel = 1.6;
-    if (moveState.jump && camera.position.y <= eyeLevel) {
-      velocity.current.y = 4.0; 
-    }
-    velocity.current.y -= 9.8 * dt; 
+    // ── Soft pushback beyond SOFT_LIMIT ─────────────────────────────────────
+    // Instead of a hard clamp, we apply a gentle force pushing back toward
+    // the room centre when the player ventures too far. This feels natural —
+    // like walking into thick fog — rather than hitting an invisible wall.
+    const cx  = roomCentre.current.x;
+    const cz  = roomCentre.current.z;
+    const dx  = nx - cx;
+    const dz  = nz - cz;
+    const dist = Math.sqrt(dx * dx + dz * dz);
 
-    let newX = camera.position.x + movement.x;
-    let newY = camera.position.y + velocity.current.y * dt;
-    let newZ = camera.position.z + movement.z;
-
-    if (newY < eyeLevel) {
-      newY = eyeLevel;
-      velocity.current.y = 0;
-    }
-
-    if (dimensions) {
-      const roomWidth = dimensions.width;
-      const roomDepth = dimensions.depth;
-      newX = Math.max(-roomWidth/2 + 0.5, Math.min(roomWidth/2 - 0.5, newX));
-      newZ = Math.max(-roomDepth/2 + 0.5, Math.min(roomDepth/2 - 0.5, newZ));
+    if (dist > SOFT_LIMIT) {
+      // How far past the limit (0 at boundary, grows outward)
+      const overflow = dist - SOFT_LIMIT;
+      // Normalised direction back toward centre
+      const pushX = -(dx / dist) * overflow * PUSH_STRENGTH * dt;
+      const pushZ = -(dz / dist) * overflow * PUSH_STRENGTH * dt;
+      nx += pushX;
+      nz += pushZ;
     }
 
-    camera.position.set(newX, newY, newZ);
+    // Head bob
+    if (moving && ny <= EYE_LEVEL + 0.02) {
+      bobTime.current += dt * BOB_FREQ * (k.sprint ? 1.4 : 1.0);
+      ny = EYE_LEVEL + Math.sin(bobTime.current * Math.PI * 2) * BOB_AMP;
+    } else {
+      bobTime.current = 0;
+      ny = THREE.MathUtils.lerp(camera.position.y, EYE_LEVEL, Math.min(dt * 12, 1));
+    }
+
+    camera.position.set(nx, ny, nz);
   });
 
   return (
     <PointerLockControls
       ref={controlsRef}
-      camera={camera}
       domElement={gl.domElement}
-      selector="#__next" 
-      pointerSpeed={0.5}
+      pointerSpeed={MOUSE_SPEED}
+      makeDefault
     />
   );
 }
