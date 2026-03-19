@@ -174,6 +174,7 @@ export default function LightingPanel({
         </div>
       </Section>
 
+      <div id="light-selected" />
       {/* ── Selected light controls ──────────────────────────────────────── */}
       {selectedLight && (
         <Section title={`${LIGHT_TYPES[selectedLight.type].icon} ${LIGHT_TYPES[selectedLight.type].label}`} highlight>

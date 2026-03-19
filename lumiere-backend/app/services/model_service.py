@@ -1,6 +1,8 @@
 # app/services/model_service.py
 import os
+import shutil
 import logging
+from pathlib import Path
 from fastapi import UploadFile
 from app.database import database
 
@@ -10,9 +12,62 @@ MODEL_STORAGE_PATH = os.getenv("MODEL_STORAGE_PATH", "./models")
 os.makedirs(MODEL_STORAGE_PATH, exist_ok=True)
 
 
+def _patch_mega():
+    """Fix WinError 32 in mega.py by replacing shutil.move with shutil.copy2."""
+    try:
+        import mega as _mega_mod
+        p = Path(_mega_mod.__file__).parent / "mega.py"
+        t = p.read_text(encoding="utf-8")
+        if "shutil.move(temp_output_file.name, output_path)" in t:
+            t = t.replace(
+                "shutil.move(temp_output_file.name, output_path)",
+                "shutil.copy2(temp_output_file.name, output_path)"
+            )
+            p.write_text(t, encoding="utf-8")
+            logger.info("mega.py patched: shutil.move → shutil.copy2")
+    except Exception as e:
+        logger.warning(f"Could not patch mega.py (non-fatal): {e}")
+
+_patch_mega()
+
+
 # ---------------------------------------------------------------------------
-# Mega Cloud sync
+# Local disk scan — runs instantly on startup, registers already-cached files
 # ---------------------------------------------------------------------------
+
+async def sync_from_local():
+    """
+    Walks MODEL_STORAGE_PATH and upserts every .glb/.gltf into MongoDB.
+    upsert=True means stale/mismatched existing docs are always corrected.
+    Runs at startup before Mega so the list is populated instantly.
+    """
+    found = 0
+    for root, dirs, files in os.walk(MODEL_STORAGE_PATH):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for filename in files:
+            if not filename.lower().endswith((".glb", ".gltf")):
+                continue
+            abs_path = os.path.join(root, filename)
+            rel_path = os.path.relpath(abs_path, MODEL_STORAGE_PATH).replace(os.sep, "/")
+            parent       = os.path.basename(root)
+            category     = parent.lower() if parent != os.path.basename(MODEL_STORAGE_PATH) else "uncategorized"
+            display_name = filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").title()
+
+            await database["models"].update_one(
+                {"filename": rel_path},
+                {"$set": {
+                    "name":        display_name,
+                    "filename":    rel_path,
+                    "category":    category,
+                    "description": None,
+                }},
+                upsert=True,
+            )
+            found += 1
+            logger.debug(f"Upserted: {rel_path}")
+
+    logger.info(f"Local scan: {found} model(s) on disk registered/verified in MongoDB.")
+
 
 async def sync_from_mega():
     """
@@ -69,8 +124,6 @@ async def sync_from_mega():
         else:
             try:
                 logger.info(f"Downloading from Mega: {name}")
-                # mega.py download() expects a (handle, file_data) tuple
-                # and a destination folder path
                 client.download((handle, file_data), dest_path=category_dir)
                 logger.info(f"Downloaded: {category}/{name}")
             except Exception as e:
@@ -137,9 +190,13 @@ async def save_model(
 
 
 async def list_models():
+    """Returns only models whose files actually exist on disk."""
     cursor = database["models"].find()
     models = []
     async for doc in cursor:
+        filepath = os.path.join(MODEL_STORAGE_PATH, doc.get("filename", ""))
+        if not os.path.exists(filepath):
+            continue  # skip stale DB entries for files not yet downloaded
         doc["id"] = str(doc.pop("_id"))
         models.append(doc)
     return models

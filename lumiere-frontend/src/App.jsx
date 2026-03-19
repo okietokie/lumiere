@@ -5,7 +5,6 @@ import gsap from "gsap";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import LandingPage from "./components/LandingPage";
 import RoomScene from "./components/threeD/scene/RoomScene";
-import WallEditor from "./components/threeD/walls/WallEditor";
 import { COLORS } from "./utils/colors";
 
 function App() {
@@ -54,7 +53,6 @@ function App() {
             <Route path="/user/room" element={<RoomScene />} />
             
             {/* Set WallEditor as the secondary page */}
-            <Route path="/wall-editor" element={<WallEditor />} />
           </Routes>
         </BrowserRouter>
       </div>

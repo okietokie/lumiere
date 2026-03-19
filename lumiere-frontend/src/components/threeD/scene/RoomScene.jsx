@@ -11,6 +11,7 @@ import {
   CameraOutlined,
   UndoOutlined,
   RedoOutlined,
+  SaveOutlined,
   AppstoreOutlined,
   ColumnWidthOutlined,
   BulbOutlined,
@@ -47,7 +48,17 @@ import PlacedLight   from "../lighting/PlacedLight";
 
 // ── Materials ────────────────────────────────────────────────────────────────
 import MaterialPanel   from "../materials/MaterialPanel";
+
+// ── UI / UX ──────────────────────────────────────────────────────────────────
+import ContextToolbar, { WorldProjector } from "../ui/ContextToolbar";
+import ReplaceModal   from "../ui/ReplaceModal";
+import useContextNav  from "../../../hooks/useContextNav";
 import SurfaceMaterial from "../materials/SurfaceMaterial";
+import ScorePanel          from "../ui/ScorePanel";
+import CollisionHighlight  from "../furniture/CollisionHighlight";
+import useSpatialAnalysis  from "../../../hooks/useSpatialAnalysis";
+import SaveModal       from "../ui/SaveModal";
+import useProjectSave  from "../../../hooks/useProjectSave";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -74,6 +85,7 @@ export default function RoomScene() {
   // Pass setWalls (the history setter) so undo/redo tracks material changes
   const {
     floorMaterial, ceilingMaterial,
+    setFloorMaterial, setCeilingMaterial,
     applyTexture, updateSurface, applyTheme, activeTheme,
   } = useMaterials(walls, setWalls);
 
@@ -98,6 +110,12 @@ export default function RoomScene() {
   const [orbitEnabled,         setOrbitEnabled]         = useState(true);
   const [teleportTarget,       setTeleportTarget]       = useState(null);
   const [activeTab,            setActiveTab]            = useState('walls');
+  const [replaceModalOpen,     setReplaceModalOpen]     = useState(false);
+  const [saveModalOpen,        setSaveModalOpen]        = useState(false);
+  const [currentProjectId,     setCurrentProjectId]     = useState(null);
+  const [wallToolbarPos,       setWallToolbarPos]       = useState(null);
+  const [furnitureToolbarPos,  setFurnitureToolbarPos]  = useState(null);
+  const [lightToolbarPos,      setLightToolbarPos]      = useState(null);
 
   const orbitControlsRef = useRef(null);
   const sceneRef         = useRef(null);
@@ -106,6 +124,21 @@ export default function RoomScene() {
 
   const screens  = Grid.useBreakpoint();
   const isMobile = !screens.lg;
+  const { navigateTo } = useContextNav(setActiveTab);
+  const sidebarRef = useRef(null);  // ref to sidebar scroll container
+
+  const projectSave = useProjectSave({
+    walls, setWalls,
+    placedItems, setPlacedItems,
+    floorMaterial, setFloorMaterial,
+    ceilingMaterial, setCeilingMaterial,
+    lightingState,
+    canvasRef: canvasWrapperRef,
+    currentProjectId, setCurrentProjectId,
+  });
+
+  // ── Spatial analysis ──────────────────────────────────────────────────────
+  const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
 
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
@@ -123,6 +156,22 @@ export default function RoomScene() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo, selectedFurnitureId]);
+
+  // ── Mobile touch safety — prevents OrbitControls crash on finger lift ──────
+  useEffect(() => {
+    const canvas = canvasWrapperRef.current?.querySelector('canvas');
+    if (!canvas) return;
+
+    // OrbitControls crashes when touches[1] disappears mid-gesture.
+    // Intercept touchmove and cancel if fewer than 2 touches remain
+    // for multi-touch gestures (dolly/pan).
+    const safeTouchMove = (e) => {
+      if (e.touches.length === 1 && e.targetTouches.length === 1) return;
+      if (e.touches.length < 2) e.stopImmediatePropagation();
+    };
+    canvas.addEventListener('touchmove', safeTouchMove, { capture: true, passive: true });
+    return () => canvas.removeEventListener('touchmove', safeTouchMove, { capture: true });
+  }, []);
 
   useEffect(() => {
     if (sceneRef.current)
@@ -172,6 +221,21 @@ export default function RoomScene() {
     if (selectedFurnitureId === id) setSelectedFurnitureId(null);
   };
 
+  // Replace selected furniture item — preserves position/rotation/scale
+  const replaceItem = (newMeta) => {
+    if (!selectedFurniture) return;
+    const newItem = {
+      id:       uuidv4(),
+      filename: newMeta.filename,
+      name:     newMeta.name,
+      position: newMeta.position,
+      rotation: newMeta.rotation,
+      scale:    newMeta.scale,
+    };
+    setPlacedItems((p) => [...p.filter((i) => i.id !== selectedFurnitureId), newItem]);
+    setSelectedFurnitureId(newItem.id);
+  };
+
   // ── Camera helpers ────────────────────────────────────────────────────────
   const applyCameraPreset = (preset) => {
     if (cameraMode === 'orbit' && orbitControlsRef.current) {
@@ -188,6 +252,9 @@ export default function RoomScene() {
     setSelectedWallId(null);
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
+    setWallToolbarPos(null);
+    setFurnitureToolbarPos(null);
+    setLightToolbarPos(null);
   };
 
   // ── Tab definitions ───────────────────────────────────────────────────────
@@ -257,7 +324,7 @@ export default function RoomScene() {
   return (
     <div style={{ height: '100vh', width: '100vw', background: COLORS.background, overflow: 'hidden', fontFamily: 'Inter, sans-serif', position: 'fixed', top: 0, left: 0 }}>
 
-      {/* Undo / Redo toolbar */}
+      {/* Undo / Redo + Save toolbar */}
       <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, background: `${COLORS.surface}CC`, padding: '8px', borderRadius: '12px', border: `1px solid ${COLORS.secondary}60`, backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
         <Space>
           <Tooltip title="Undo (Ctrl+Z)">
@@ -266,6 +333,18 @@ export default function RoomScene() {
           <Tooltip title="Redo (Ctrl+Y)">
             <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} style={{ color: canRedo ? COLORS.text : `${COLORS.text}40` }} />
           </Tooltip>
+          <div style={{ width: 1, height: 20, background: `${COLORS.secondary}40`, margin: '0 4px' }} />
+          <Tooltip title="Save / Snapshot">
+            <Button
+              type="text"
+              icon={<SaveOutlined />}
+              onClick={() => setSaveModalOpen(true)}
+              style={{ color: COLORS.action }}
+            />
+          </Tooltip>
+          {projectSave.saveStatus === 'saved' && (
+            <span style={{ color: '#52c41a', fontSize: 11, fontFamily: 'Inter, sans-serif', marginLeft: 2 }}>Saved</span>
+          )}
         </Space>
       </div>
 
@@ -273,7 +352,7 @@ export default function RoomScene() {
 
         {/* ── Sidebar ──────────────────────────────────────────────────────── */}
         <Splitter.Panel defaultSize="40%" min="20%" max="70%" style={{ background: COLORS.background }}>
-          <div style={{ height: '100%', width: '100%', padding: '40px 28px 28px', background: `linear-gradient(145deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`, borderRight: `2px solid ${COLORS.action}30`, boxShadow: '8px 0 30px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+          <div ref={sidebarRef} style={{ height: '100%', width: '100%', padding: '40px 28px 28px', background: `linear-gradient(145deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`, borderRight: `2px solid ${COLORS.action}30`, boxShadow: '8px 0 30px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
 
             {/* Branding */}
             <div style={{ marginBottom: 36 }}>
@@ -352,7 +431,7 @@ export default function RoomScene() {
                 shadows
                 frameloop={cameraMode === 'firstPerson' ? 'always' : 'demand'}
                 performance={{ min: 0.5 }}
-                gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.85, powerPreference: 'high-performance' }}
+                gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.85, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
                 onPointerMissed={handlePointerMissed}
               >
                 {/* ── Lighting ─────────────────────────────────────── */}
@@ -367,9 +446,15 @@ export default function RoomScene() {
                 {cameraMode === 'orbit' ? (
                   <OrbitControls
                     ref={orbitControlsRef}
-                    enableDamping dampingFactor={0.06}
+                    enableDamping
+                    dampingFactor={0.06}
                     maxPolarAngle={Math.PI / 2.4}
                     enabled={orbitEnabled}
+                    touches={{
+                      ONE:   THREE.TOUCH.ROTATE,
+                      TWO:   THREE.TOUCH.DOLLY_PAN,
+                    }}
+                    onTouchStart={(e) => { if (e?.touches?.length < 2) return; }}
                   />
                 ) : (
                   <FirstPersonControls
@@ -402,6 +487,40 @@ export default function RoomScene() {
                   setOrbitEnabled={setOrbitEnabled}
                 />
 
+                {/* ── World projectors — pure R3F, no DOM ── */}
+                {selectedWall && (
+                  <WorldProjector
+                    type="wall"
+                    worldPosition={[
+                      (selectedWall.start[0] + selectedWall.end[0]) / 2,
+                      selectedWall.height + 0.6,
+                      (selectedWall.start[1] + selectedWall.end[1]) / 2,
+                    ]}
+                    onScreenPos={setWallToolbarPos}
+                  />
+                )}
+                {selectedFurniture && (
+                  <WorldProjector
+                    type="furniture"
+                    worldPosition={[
+                      selectedFurniture.position[0],
+                      selectedFurniture.position[1] + 1.8,
+                      selectedFurniture.position[2],
+                    ]}
+                    onScreenPos={setFurnitureToolbarPos}
+                  />
+                )}
+                {placedLights.find((l) => l.id === selectedLightId) && (() => {
+                  const sl = placedLights.find((l) => l.id === selectedLightId);
+                  return (
+                    <WorldProjector
+                      type="light"
+                      worldPosition={[sl.position[0], sl.position[1] + 0.5, sl.position[2]]}
+                      onScreenPos={setLightToolbarPos}
+                    />
+                  );
+                })()}
+
                 {/* ── Furniture ────────────────────────────────────── */}
                 <Suspense fallback={null}>
                   {placedItems.map((item) => (
@@ -422,6 +541,13 @@ export default function RoomScene() {
                   gizmoMode={gizmoMode}
                   updateItem={updateItem}
                   setOrbitEnabled={setOrbitEnabled}
+                />
+
+                {/* ── Collision highlights ───────────────────────── */}
+                <CollisionHighlight
+                  placedItems={placedItems}
+                  itemStates={spatial.itemStates}
+                  furnitureRefs={furnitureRefs}
                 />
 
                 {/* ── Placed lights ────────────────────────────────── */}
@@ -465,6 +591,64 @@ export default function RoomScene() {
           </div>
         </Splitter.Panel>
       </Splitter>
+
+      {/* ── Context toolbars — pure DOM, outside Canvas ─────────── */}
+      <ContextToolbar
+        type="wall"
+        screenPos={selectedWall ? wallToolbarPos : null}
+        gizmoMode={gizmoMode}
+        onGizmoChange={setGizmoMode}
+        onDelete={() => selectedWall && deleteWall(selectedWall.id)}
+        onSplit={splitWall}
+        navigateTo={navigateTo}
+      />
+      <ContextToolbar
+        type="furniture"
+        screenPos={selectedFurniture ? furnitureToolbarPos : null}
+        gizmoMode={gizmoMode}
+        onGizmoChange={setGizmoMode}
+        onDelete={() => selectedFurniture && deleteItem(selectedFurniture.id)}
+        onReplace={() => setReplaceModalOpen(true)}
+        navigateTo={navigateTo}
+      />
+      <ContextToolbar
+        type="light"
+        screenPos={placedLights.find((l) => l.id === selectedLightId) ? lightToolbarPos : null}
+        gizmoMode={gizmoMode}
+        onGizmoChange={setGizmoMode}
+        onDelete={() => lightingState.deleteLight(selectedLightId)}
+        navigateTo={navigateTo}
+      />
+
+      {/* ── Spatial score panel ─────────────────────────────────── */}
+      <ScorePanel
+        score={spatial.score}
+        suggestions={spatial.suggestions}
+        visible={placedItems.length > 0}
+      />
+
+      {/* ── Save modal ───────────────────────────────────────────── */}
+      <SaveModal
+        open={saveModalOpen}
+        onClose={() => setSaveModalOpen(false)}
+        projectName={projectSave.projectName}
+        setProjectName={projectSave.setProjectName}
+        saveStatus={projectSave.saveStatus}
+        saveProject={projectSave.saveProject}
+        downloadSnapshot={projectSave.downloadSnapshot}
+        exportJSON={projectSave.exportJSON}
+        importJSON={projectSave.importJSON}
+        autosaveEnabled={projectSave.autosaveEnabled}
+        setAutosaveEnabled={projectSave.setAutosaveEnabled}
+      />
+
+      {/* ── Replace furniture modal ─────────────────────────────── */}
+      <ReplaceModal
+        open={replaceModalOpen}
+        onClose={() => setReplaceModalOpen(false)}
+        selectedItem={selectedFurniture}
+        onReplace={replaceItem}
+      />
 
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }

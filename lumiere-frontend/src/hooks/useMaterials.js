@@ -98,5 +98,5 @@ export default function useMaterials(walls, setWalls) {
     setWalls((prev) => prev.map((w) => ({ ...w, ...theme.wall })));
   }, [setWalls]);
 
-  return { floorMaterial, ceilingMaterial, applyTexture, updateSurface, applyTheme, activeTheme };
+  return { floorMaterial, ceilingMaterial, setFloorMaterial, setCeilingMaterial, applyTexture, updateSurface, applyTheme, activeTheme };
 }

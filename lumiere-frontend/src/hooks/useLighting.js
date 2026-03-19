@@ -122,7 +122,7 @@ export default function useLighting() {
   return {
     timeOfDay, setTimeOfDay,
     activeMood, applyMood,
-    placedLights, addLight, updateLight, deleteLight,
+    placedLights, setPlacedLights, addLight, updateLight, deleteLight,
     selectedLightId, setSelectedLightId, selectedLight,
     globalBrightness, setGlobalBrightness,
     previewMode, setPreviewMode,

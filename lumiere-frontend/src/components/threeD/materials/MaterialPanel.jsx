@@ -75,6 +75,7 @@ export default function MaterialPanel({
         style={{ background: `${COLORS.background}CC` }}
       />
 
+      <div id="mat-walls" />
       {/* ── Wall: apply scope ────────────────────────────────────────────── */}
       {activeSurface === 'wall' && (
         <div style={{

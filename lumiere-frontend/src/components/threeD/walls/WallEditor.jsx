@@ -84,6 +84,7 @@ export default function WallEditorPanel({
                 </div>
               </Row>
 
+              <div id="wall-dimensions" />
               {/* ── Height slider ──────────────────────────────────────── */}
               <SliderRow
                 label="Height"
@@ -114,6 +115,7 @@ export default function WallEditorPanel({
               </div>
 
               {/* ── Gizmo mode ────────────────────────────────────────── */}
+              <div id="wall-gizmo" />
               <GizmoToolbar gizmoMode={gizmoMode} setGizmoMode={setGizmoMode} />
 
               {/* ── Actions ────────────────────────────────────────────── */}

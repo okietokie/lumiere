@@ -39,9 +39,13 @@ export default function WallGizmo({
 }
 
 function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbitEnabled }) {
-  // Snapshot wall dimensions at the moment the drag starts —
-  // this prevents compounding transforms across multiple drags
-  const snapshot = useRef(null);
+  const snapshot    = useRef(null);
+  const controlsRef = useRef(null);
+
+  // Imperative mode update — fires when gizmoMode changes without remounting
+  useEffect(() => {
+    if (controlsRef.current) controlsRef.current.setMode(gizmoMode);
+  }, [gizmoMode]);
 
   const handleMouseDown = () => {
     setOrbitEnabled(false);
@@ -101,6 +105,7 @@ function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbit
 
   return (
     <TransformControls
+      ref={controlsRef}
       object={wallRef.current}
       mode={gizmoMode}
       onMouseDown={handleMouseDown}
