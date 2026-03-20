@@ -7,9 +7,9 @@ import {
 } from '@ant-design/icons';
 import { COLORS } from '../../../utils/colors';
 import ModelPreview from './ModelPreview';
+import FurnitureTint from './FurnitureTint';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-const POLL_MS   = 2500;
 
 
 
@@ -17,6 +17,7 @@ const POLL_MS   = 2500;
 
 export default function FurniturePicker({
   selectedItem, placedItems, addItem, deleteItem, gizmoMode, setGizmoMode,
+  furnitureRefs, tint, setTint,
 }) {
   const [models,          setModels]         = useState([]);
   const [loading,         setLoading]        = useState(false);
@@ -26,28 +27,20 @@ export default function FurniturePicker({
   const [previewAnchor,   setPreviewAnchor]  = useState(null);
   const hideTimer = useRef(null);
 
-  const fetchModels = useCallback(async (silent = false) => {
-    if (!silent) { setLoading(true); setError(null); }
+  const fetchModels = useCallback(async () => {
+    setLoading(true); setError(null);
     try {
       const res  = await fetch(`${API_BASE}/api/models/list`);
       if (!res.ok) throw new Error();
-      const data = await res.json();
-      setModels(data);
-      setError(null);
+      setModels(await res.json());
     } catch {
-      if (!silent) setError('Could not reach backend. Is it running?');
+      setError('Could not reach backend. Is it running?');
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    // Fetch immediately on mount
-    fetchModels();
-    // Poll every 4s so models appearing from Mega download show up automatically
-    const t = setInterval(() => fetchModels(true), 4000);
-    return () => clearInterval(t);
-  }, [fetchModels]);
+  useEffect(() => { fetchModels(); }, [fetchModels]);
 
   // ── Categories: specific ones first, "all" at the end ────────────────────
   const rawCats      = [...new Set(models.map((m) => m.category || 'uncategorized'))];
@@ -146,6 +139,14 @@ export default function FurniturePicker({
               </Button>
             ))}
           </div>
+          <FurnitureTint
+            selectedItem={selectedItem}
+            furnitureRefs={furnitureRefs}
+            updateItem={() => {}}
+            tint={tint}
+            setTint={setTint}
+          />
+
           <Popconfirm title="Remove this item?" onConfirm={() => deleteItem(selectedItem.id)}>
             <Button danger icon={<DeleteOutlined />} block style={{ background: 'transparent' }}>Remove</Button>
           </Popconfirm>

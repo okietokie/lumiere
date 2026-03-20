@@ -1,47 +1,40 @@
 // src/components/threeD/lighting/SceneLighting.jsx
-import { useRef, useMemo } from 'react';
+import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 export default function SceneLighting({ lighting, globalBrightness, placedLights, moodAmbient }) {
   const ambientRef = useRef();
   const sunRef     = useRef();
+  const fillRef    = useRef();
 
-  // ── Pre-allocate THREE.Color objects ONCE — never inside useFrame ────────────
   const colors = useRef({
-    ambient: new THREE.Color(lighting.ambientColor),
-    sun:     new THREE.Color(lighting.sunColor),
-    // Reusable target colors — set() them instead of new THREE.Color() each frame
+    ambient:       new THREE.Color(lighting.ambientColor),
+    sun:           new THREE.Color(lighting.sunColor),
     targetAmbient: new THREE.Color(),
     targetSun:     new THREE.Color(),
   });
 
-  // Track smooth current intensities
   const intensities = useRef({
     ambient: lighting.ambientIntensity * globalBrightness,
     sun:     lighting.sunIntensity     * globalBrightness,
   });
 
   useFrame((_, delta) => {
-    const speed = Math.min(delta * 2.0, 1); // cap so tab-switch doesn't jump
+    const speed = Math.min(delta * 2.0, 1);
     const col   = colors.current;
     const ints  = intensities.current;
 
-    // Set target colors using .set() — no allocation
     col.targetAmbient.set(moodAmbient || lighting.ambientColor);
     col.targetSun.set(lighting.sunColor);
-
-    // Lerp current colors toward targets
     col.ambient.lerp(col.targetAmbient, speed);
     col.sun.lerp(col.targetSun, speed);
 
-    // Lerp intensities
     const targetAmbientI = lighting.ambientIntensity * globalBrightness;
     const targetSunI     = lighting.sunIntensity     * globalBrightness;
     ints.ambient = THREE.MathUtils.lerp(ints.ambient, targetAmbientI, speed);
     ints.sun     = THREE.MathUtils.lerp(ints.sun,     targetSunI,     speed);
 
-    // Apply — mutate existing objects, never replace
     if (ambientRef.current) {
       ambientRef.current.intensity = ints.ambient;
       ambientRef.current.color.copy(col.ambient);
@@ -49,6 +42,10 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
     if (sunRef.current) {
       sunRef.current.intensity = ints.sun;
       sunRef.current.color.copy(col.sun);
+    }
+    // Fill light tracks at half sun intensity for soft shadow fill
+    if (fillRef.current) {
+      fillRef.current.intensity = ints.sun * 0.35;
     }
   });
 
@@ -59,10 +56,12 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
         intensity={lighting.ambientIntensity * globalBrightness}
         color={lighting.ambientColor}
       />
+
+      {/* ── Key light — repositioned above-front-centre, softened ── */}
       <directionalLight
         ref={sunRef}
-        position={[8, 8, 5]}
-        intensity={lighting.sunIntensity * globalBrightness}
+        position={[2, 10, 6]}
+        intensity={lighting.sunIntensity * globalBrightness * 0.75}
         color={lighting.sunColor}
         castShadow
         shadow-mapSize={[1024, 1024]}
@@ -75,7 +74,15 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
         shadow-camera-bottom={-12}
       />
 
-      {/* Placed lights — NO castShadow on point/spot lights (too expensive) */}
+      {/* ── Fill light — left side, no shadow, half intensity ── */}
+      <directionalLight
+        ref={fillRef}
+        position={[-6, 6, 2]}
+        intensity={lighting.sunIntensity * globalBrightness * 0.35}
+        color={lighting.sunColor}
+        castShadow={false}
+      />
+
       {placedLights.map((light) => (
         <PlacedLightSource key={light.id} light={light} />
       ))}
@@ -86,7 +93,6 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
 function PlacedLightSource({ light }) {
   if (!light.enabled) return null;
   const [x, y, z] = light.position;
-
   if (light.type === 'spot') {
     return (
       <spotLight

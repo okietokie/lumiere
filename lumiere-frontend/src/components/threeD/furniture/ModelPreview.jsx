@@ -1,5 +1,7 @@
 // src/components/threeD/furniture/ModelPreview.jsx
-import React, { Suspense, useEffect, useRef } from 'react';
+// Uses a single persistent Canvas shared across all previews — no WebGL
+// context creation on every hover. Model swaps instantly via useGLTF cache.
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { SkeletonUtils } from 'three-stdlib';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { useGLTF, OrbitControls, Center, Bounds } from '@react-three/drei';
@@ -7,34 +9,47 @@ import * as THREE from 'three';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
-export default function ModelPreview({ model, anchorEl, onClose }) {
+function toDirectUrl(b2Url) {
+  return b2Url || null;
+}
+
+// ── Single persistent Canvas mounted once at app level ────────────────────────
+// The panel moves via CSS; the Canvas never unmounts.
+let _setPreviewModel = null;
+
+export function PreviewPortal() {
+  const [model,  setModel]  = useState(null);
+  const [pos,    setPos]    = useState({ left: -9999, top: -9999 });
   const panelRef = useRef(null);
 
+  // Expose setters so ModelPreview can update from outside
   useEffect(() => {
-    if (!anchorEl || !panelRef.current) return;
-    const rect  = anchorEl.getBoundingClientRect();
-    const panel = panelRef.current;
-    const spaceRight = window.innerWidth - rect.right;
-    if (spaceRight >= 200) {
-      panel.style.left = `${rect.right + 8}px`;
-      panel.style.top  = `${Math.min(rect.top, window.innerHeight - 230)}px`;
-    } else {
-      panel.style.left = `${rect.left}px`;
-      panel.style.top  = `${rect.top - 220}px`;
-    }
-  }, [anchorEl]);
+    _setPreviewModel = ({ model, left, top }) => {
+      setModel(model);
+      setPos({ left, top });
+    };
+    return () => { _setPreviewModel = null; };
+  }, []);
 
   return (
     <div
       ref={panelRef}
       style={{
-        position: 'fixed', zIndex: 9999,
-        width: 200, height: 200,
-        borderRadius: 14, overflow: 'hidden',
-        border: '1px solid rgba(196,154,108,0.35)',
+        position:  'fixed',
+        zIndex:    9999,
+        left:      pos.left,
+        top:       pos.top,
+        width:     200,
+        height:    200,
+        borderRadius: 14,
+        overflow:  'hidden',
+        border:    '1px solid rgba(196,154,108,0.35)',
         background: '#1E1917',
         boxShadow: '0 16px 40px rgba(0,0,0,0.6)',
         pointerEvents: 'none',
+        // Hide when no model selected
+        opacity:   model ? 1 : 0,
+        transition: 'opacity 0.1s',
       }}
     >
       {/* Name badge */}
@@ -47,11 +62,12 @@ export default function ModelPreview({ model, anchorEl, onClose }) {
         textAlign: 'center', zIndex: 1,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {model.name}
+        {model?.name || ''}
       </div>
 
+      {/* Single persistent Canvas — never remounts */}
       <Canvas
-        frameloop="demand"
+        frameloop="always"
         camera={{ position: [2, 2, 2], fov: 45 }}
         gl={{
           antialias: true, alpha: false,
@@ -65,10 +81,13 @@ export default function ModelPreview({ model, anchorEl, onClose }) {
         <directionalLight position={[3, 5, 3]} intensity={0.8} color="#FFEAD2" />
         <pointLight position={[-2, 3, -2]} intensity={0.3} color="#C49A6C" />
 
-        {/* Suspense handles the GLTF load — spinner while loading, model when ready */}
-        <Suspense fallback={<LoadingSpinner />}>
-          <PreviewModel filename={model.filename} />
-        </Suspense>
+        {model && (
+          <PreviewErrorBoundary key={model.url}>
+            <Suspense fallback={<LoadingSpinner />}>
+              <PreviewModel url={toDirectUrl(model.url)} />
+            </Suspense>
+          </PreviewErrorBoundary>
+        )}
 
         <OrbitControls
           autoRotate autoRotateSpeed={2.5}
@@ -79,29 +98,54 @@ export default function ModelPreview({ model, anchorEl, onClose }) {
   );
 }
 
-// ── Loads and displays the model — only mounts inside Suspense ────────────────
-function PreviewModel({ filename }) {
-  const url         = `${API_BASE}/api/models/download/${filename}`;
-  const { scene }   = useGLTF(url);
+// ── Lightweight trigger — just moves the panel, no Canvas created ─────────────
+export default function ModelPreview({ model, anchorEl }) {
+  useEffect(() => {
+    if (!anchorEl || !model || !_setPreviewModel) return;
+    const rect       = anchorEl.getBoundingClientRect();
+    const spaceRight = window.innerWidth - rect.right;
+    const left = spaceRight >= 210 ? rect.right + 8 : rect.left;
+    const top  = spaceRight >= 210
+      ? Math.min(rect.top, window.innerHeight - 230)
+      : rect.top - 220;
+    _setPreviewModel({ model, left, top });
+    return () => { if (_setPreviewModel) _setPreviewModel({ model: null, left: -9999, top: -9999 }); };
+  }, [model, anchorEl]);
 
+  return null; // renders nothing — panel lives in PreviewPortal
+}
+
+// ── Model renderer ────────────────────────────────────────────────────────────
+function PreviewModel({ url }) {
+  if (!url) return <NotAvailablePlaceholder />;
+  const { scene } = useGLTF(url);
   const cloned = React.useMemo(() => {
     const clone = SkeletonUtils.clone(scene);
-    clone.traverse((child) => {
-      if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
-    });
+    clone.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
     return clone;
   }, [scene]);
+  return <Bounds fit clip observe margin={1.2}><Center><primitive object={cloned} /></Center></Bounds>;
+}
 
+class PreviewErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err) { console.warn('[ModelPreview] Load failed:', err?.message); }
+  render() {
+    if (this.state.failed) return <NotAvailablePlaceholder />;
+    return this.props.children;
+  }
+}
+
+function NotAvailablePlaceholder() {
   return (
-    <Bounds fit clip observe margin={1.2}>
-      <Center>
-        <primitive object={cloned} />
-      </Center>
-    </Bounds>
+    <mesh>
+      <boxGeometry args={[0.8, 0.8, 0.8]} />
+      <meshBasicMaterial color="#7A6559" wireframe />
+    </mesh>
   );
 }
 
-// ── Spinning ring shown while the GLB is loading ──────────────────────────────
 function LoadingSpinner() {
   const ref = useRef();
   useFrame((_, delta) => { if (ref.current) ref.current.rotation.z += delta * 2; });

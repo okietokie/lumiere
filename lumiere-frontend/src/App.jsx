@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import barba from "@barba/core";
 import gsap from "gsap";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import LandingPage from "./components/LandingPage";
+import LandingPage from "./components/Landingpage";
 import RoomScene from "./components/threeD/scene/RoomScene";
 import { COLORS } from "./utils/colors";
 

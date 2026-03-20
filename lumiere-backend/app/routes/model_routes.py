@@ -1,40 +1,31 @@
 # app/routes/model_routes.py
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
-from app.services.model_service import save_model, list_models, get_model_file
+# B2 edition — no file serving, models are fetched directly from B2 by the browser.
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+from app.services.model_service import list_models, upsert_model
 
 router = APIRouter()
 
 
-@router.post("/upload")
-async def upload_model(
-    file: UploadFile = File(...),
-    name: str = Form(...),
-    category: str = Form("uncategorized"),
-    description: str = Form(None),
-):
-    if not file.filename.lower().endswith((".glb", ".gltf")):
-        raise HTTPException(status_code=400, detail="Only GLB/GLTF files allowed")
-    model_id = await save_model(file, name, description, category)
-    return {"message": "Model uploaded", "id": model_id}
+class ModelUpsertRequest(BaseModel):
+    name:     str
+    filename: str
+    category: str
+    url:      str
 
 
 @router.get("/list")
 async def get_models():
+    """Returns all models with their direct B2 URLs."""
     return await list_models()
 
 
-@router.get("/download/{filename:path}")
-async def download_model(filename: str):
-    """
-    The :path converter lets filenames contain slashes
-    (e.g. chairs/modern_chair.glb) so Mega sub-folder structure is preserved.
-    """
-    filepath = await get_model_file(filename)
-    if filepath:
-        return FileResponse(
-            filepath,
-            media_type="model/gltf-binary",
-            filename=filename.split("/")[-1],
-        )
-    raise HTTPException(status_code=404, detail="File not found")
+@router.post("/register")
+async def register_model(body: ModelUpsertRequest):
+    """Called by the upload script after uploading a file to B2."""
+    model_id = await upsert_model(
+        name=body.name, filename=body.filename,
+        category=body.category, url=body.url,
+    )
+    return {"id": model_id, "url": body.url}

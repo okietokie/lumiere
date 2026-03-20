@@ -40,6 +40,7 @@ import WallEditorPanel from "../walls/WallEditor";
 import FurnitureItem  from "../furniture/FurnitureItem";
 import FurnitureGizmo from "../furniture/FurnitureGizmo";
 import FurniturePicker from "../furniture/FurniturePicker";
+import { PreviewPortal } from "../furniture/ModelPreview";
 
 // ── Lighting ─────────────────────────────────────────────────────────────────
 import SceneLighting from "../lighting/SceneLighting";
@@ -51,7 +52,6 @@ import MaterialPanel   from "../materials/MaterialPanel";
 
 // ── UI / UX ──────────────────────────────────────────────────────────────────
 import ContextToolbar, { WorldProjector } from "../ui/ContextToolbar";
-import ReplaceModal   from "../ui/ReplaceModal";
 import useContextNav  from "../../../hooks/useContextNav";
 import SurfaceMaterial from "../materials/SurfaceMaterial";
 import ScorePanel          from "../ui/ScorePanel";
@@ -76,9 +76,9 @@ export default function RoomScene() {
     state: walls, set: setWalls,
     undo, redo, canUndo, canRedo,
   } = useHistory([
-    { id: uuidv4(), start: [-3, -3], end: [3, -3],  height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null },
-    { id: uuidv4(), start: [-3, -3], end: [-3, 3],  height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null },
-    { id: uuidv4(), start: [3, -3],  end: [3, 3],   height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null },
+    { id: uuidv4(), start: [-3, -3], end: [3, -3],  height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] },
+    { id: uuidv4(), start: [-3, -3], end: [-3, 3],  height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] },
+    { id: uuidv4(), start: [3, -3],  end: [3, 3],   height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] },
   ]);
 
   // ── Materials ────────────────────────────────────────────────────────────
@@ -110,8 +110,8 @@ export default function RoomScene() {
   const [orbitEnabled,         setOrbitEnabled]         = useState(true);
   const [teleportTarget,       setTeleportTarget]       = useState(null);
   const [activeTab,            setActiveTab]            = useState('walls');
-  const [replaceModalOpen,     setReplaceModalOpen]     = useState(false);
   const [saveModalOpen,        setSaveModalOpen]        = useState(false);
+  const [furnitureTint,        setFurnitureTint]        = useState(null);
   const [currentProjectId,     setCurrentProjectId]     = useState(null);
   const [wallToolbarPos,       setWallToolbarPos]       = useState(null);
   const [furnitureToolbarPos,  setFurnitureToolbarPos]  = useState(null);
@@ -140,8 +140,34 @@ export default function RoomScene() {
   // ── Spatial analysis ──────────────────────────────────────────────────────
   const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
 
+  // Reset tint when furniture selection changes
+  useEffect(() => { setFurnitureTint(null); }, [selectedFurnitureId]);
+
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
+
+  // ── Apply ghost opacity directly to wall meshes via refs ───────────────────
+  // This bypasses InteractiveWall entirely — works regardless of material type
+  useEffect(() => {
+    walls.forEach((wall) => {
+      const mesh = wallRefs.current[wall.id];
+      if (!mesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      mats.forEach((m) => {
+        if (!m) return;
+        if (wall.ghost) {
+          m.transparent = true;
+          m.opacity     = 0.15;
+          m.depthWrite  = false;
+        } else {
+          m.transparent = false;
+          m.opacity     = 1;
+          m.depthWrite  = true;
+        }
+        m.needsUpdate = true;
+      });
+    });
+  }, [walls]);
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
   useEffect(() => {
@@ -188,7 +214,7 @@ export default function RoomScene() {
   };
 
   const addWall = () => {
-    const w = { id: uuidv4(), start: [-1, 0], end: [1, 0], height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null };
+    const w = { id: uuidv4(), start: [-1, 0], end: [1, 0], height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] };
     setWalls((p) => [...p, w]);
     setSelectedWallId(w.id);
   };
@@ -199,15 +225,15 @@ export default function RoomScene() {
     const mid = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
     setWalls((p) => [
       ...p.filter((w) => w.id !== id),
-      { id: uuidv4(), start, end: mid, height, thickness, color, roughness, metalness, textureUrl },
-      { id: uuidv4(), start: mid, end, height, thickness, color, roughness, metalness, textureUrl },
+      { id: uuidv4(), start, end: mid, height, thickness, color, roughness, metalness, textureUrl, doors: [], windows: [] },
+      { id: uuidv4(), start: mid, end, height, thickness, color, roughness, metalness, textureUrl, doors: [], windows: [] },
     ]);
     setSelectedWallId(null);
   };
 
   // ── Furniture helpers ─────────────────────────────────────────────────────
   const addItem = (modelMeta) => {
-    const item = { id: uuidv4(), filename: modelMeta.filename, name: modelMeta.name, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
+    const item = { id: uuidv4(), filename: modelMeta.filename, name: modelMeta.name, url: modelMeta.url, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
     setPlacedItems((p) => [...p, item]);
     setSelectedFurnitureId(item.id);
     setActiveTab('furniture');
@@ -221,16 +247,18 @@ export default function RoomScene() {
     if (selectedFurnitureId === id) setSelectedFurnitureId(null);
   };
 
-  // Replace selected furniture item — preserves position/rotation/scale
+  // Replace selected furniture item — keeps position/rotation/scale of the OLD item
   const replaceItem = (newMeta) => {
     if (!selectedFurniture) return;
     const newItem = {
       id:       uuidv4(),
       filename: newMeta.filename,
       name:     newMeta.name,
-      position: newMeta.position,
-      rotation: newMeta.rotation,
-      scale:    newMeta.scale,
+      url:      newMeta.url,
+      // Preserve the existing item's transform — not the new model's defaults
+      position: [...selectedFurniture.position],
+      rotation: [...selectedFurniture.rotation],
+      scale:    [...selectedFurniture.scale],
     };
     setPlacedItems((p) => [...p.filter((i) => i.id !== selectedFurnitureId), newItem]);
     setSelectedFurnitureId(newItem.id);
@@ -315,6 +343,9 @@ export default function RoomScene() {
           deleteItem={deleteItem}
           gizmoMode={gizmoMode}
           setGizmoMode={setGizmoMode}
+          furnitureRefs={furnitureRefs}
+          tint={furnitureTint}
+          setTint={setFurnitureTint}
         />
       ),
     },
@@ -600,6 +631,8 @@ export default function RoomScene() {
         onGizmoChange={setGizmoMode}
         onDelete={() => selectedWall && deleteWall(selectedWall.id)}
         onSplit={splitWall}
+        onGhost={() => selectedWall && updateWall(selectedWall.id, { ghost: !selectedWall.ghost })}
+        wallGhost={selectedWall?.ghost || false}
         navigateTo={navigateTo}
       />
       <ContextToolbar
@@ -608,8 +641,9 @@ export default function RoomScene() {
         gizmoMode={gizmoMode}
         onGizmoChange={setGizmoMode}
         onDelete={() => selectedFurniture && deleteItem(selectedFurniture.id)}
-        onReplace={() => setReplaceModalOpen(true)}
         navigateTo={navigateTo}
+        selectedFurnitureRef={{ current: furnitureRefs.current[selectedFurnitureId] }}
+        onTintChange={(tint) => selectedFurniture && updateItem(selectedFurniture.id, { tint })}
       />
       <ContextToolbar
         type="light"
@@ -619,6 +653,9 @@ export default function RoomScene() {
         onDelete={() => lightingState.deleteLight(selectedLightId)}
         navigateTo={navigateTo}
       />
+
+      {/* ── Model preview portal — single persistent Canvas ────────── */}
+      <PreviewPortal />
 
       {/* ── Spatial score panel ─────────────────────────────────── */}
       <ScorePanel
@@ -642,13 +679,6 @@ export default function RoomScene() {
         setAutosaveEnabled={projectSave.setAutosaveEnabled}
       />
 
-      {/* ── Replace furniture modal ─────────────────────────────── */}
-      <ReplaceModal
-        open={replaceModalOpen}
-        onClose={() => setReplaceModalOpen(false)}
-        selectedItem={selectedFurniture}
-        onReplace={replaceItem}
-      />
 
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
