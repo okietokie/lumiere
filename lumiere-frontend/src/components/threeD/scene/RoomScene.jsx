@@ -124,7 +124,6 @@ export default function RoomScene() {
   const canvasWrapperRef = useRef(null);
   const wallRefs         = useRef({});
 
-  const screens  = Grid.useBreakpoint();
   const { navigateTo } = useContextNav(setActiveTab);
   const toast = useToast();
 
@@ -499,6 +498,7 @@ export default function RoomScene() {
                       isSelected={item.id === selectedFurnitureId}
                       onSelect={() => { setSelectedFurnitureId(item.id); setSelectedWallId(null); setSelectedLightId(null); setActiveTab('furniture'); }}
                       setOrbitEnabled={setOrbitEnabled}
+                      updateItem={updateItem}
                     />
                   ))}
                 </Suspense>
@@ -794,6 +794,10 @@ export default function RoomScene() {
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body, html { overflow: hidden; height: 100vh; width: 100vw; touch-action: none; }
+        /* Remove ALL outlines/borders from canvas and its wrappers */
+        canvas { outline: none !important; border: none !important; display: block !important; }
+        .ant-splitter { border: none !important; outline: none !important; }
+        .ant-splitter-panel { border: none !important; outline: none !important; }
         .ant-splitter-trigger { background: ${COLORS.action} !important; opacity: 0.8; width: 4px !important; }
         .ant-tabs-tab { color: ${COLORS.secondary} !important; }
         .ant-tabs-tab-active .ant-tabs-tab-btn { color: ${COLORS.action} !important; }

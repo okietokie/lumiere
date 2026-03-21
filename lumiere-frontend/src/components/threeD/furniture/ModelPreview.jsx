@@ -1,118 +1,122 @@
 // src/components/threeD/furniture/ModelPreview.jsx
-// Uses a single persistent Canvas shared across all previews — no WebGL
-// context creation on every hover. Model swaps instantly via useGLTF cache.
-import React, { Suspense, useEffect, useRef, useState } from 'react';
+// Preview panel — uses a Canvas that only mounts when actively hovering.
+// Destroyed after a short delay when hover ends to free WebGL context.
+import React, { Suspense, useEffect, useRef, useState, useCallback } from 'react';
 import { SkeletonUtils } from 'three-stdlib';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { useGLTF, OrbitControls, Center, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+function toDirectUrl(b2Url) { return b2Url || null; }
 
-function toDirectUrl(b2Url) {
-  return b2Url || null;
-}
-
-// ── Single persistent Canvas mounted once at app level ────────────────────────
-// The panel moves via CSS; the Canvas never unmounts.
-let _setPreviewModel = null;
+// ── Module-level state shared between ModelPreview triggers and PreviewPortal ─
+let _setPreviewState = null;
 
 export function PreviewPortal() {
-  const [model,  setModel]  = useState(null);
-  const [pos,    setPos]    = useState({ left: -9999, top: -9999 });
-  const panelRef = useRef(null);
+  const [state, setState] = useState({ model: null, left: -9999, top: -9999, mounted: false });
+  const hideTimer = useRef(null);
 
-  // Expose setters so ModelPreview can update from outside
   useEffect(() => {
-    _setPreviewModel = ({ model, left, top }) => {
-      setModel(model);
-      setPos({ left, top });
+    _setPreviewState = ({ model, left, top }) => {
+      clearTimeout(hideTimer.current);
+      if (model) {
+        // Show immediately
+        setState({ model, left, top, mounted: true });
+      } else {
+        // Hide visually right away, but keep Canvas mounted briefly to avoid flicker
+        setState((prev) => ({ ...prev, left: -9999, top: -9999 }));
+        // Fully unmount Canvas after 2s of inactivity — frees WebGL context
+        hideTimer.current = setTimeout(() => {
+          setState({ model: null, left: -9999, top: -9999, mounted: false });
+        }, 2000);
+      }
     };
-    return () => { _setPreviewModel = null; };
+    return () => {
+      _setPreviewState = null;
+      clearTimeout(hideTimer.current);
+    };
   }, []);
 
+  const visible = state.left > 0 && state.model;
+
   return (
-    <div
-      ref={panelRef}
-      style={{
-        position:  'fixed',
-        zIndex:    9999,
-        left:      pos.left,
-        top:       pos.top,
-        width:     200,
-        height:    200,
-        borderRadius: 14,
-        overflow:  'hidden',
-        border:    '1px solid rgba(196,154,108,0.35)',
-        background: '#1E1917',
-        boxShadow: '0 16px 40px rgba(0,0,0,0.6)',
-        pointerEvents: 'none',
-        // Hide when no model selected
-        opacity:   model ? 1 : 0,
-        transition: 'opacity 0.1s',
-      }}
-    >
-      {/* Name badge */}
+    <div style={{
+      position:      'fixed',
+      zIndex:        9999,
+      left:          state.left,
+      top:           state.top,
+      width:         200,
+      height:        200,
+      borderRadius:  14,
+      overflow:      'hidden',
+      border:        '1px solid rgba(196,154,108,0.35)',
+      background:    '#1E1917',
+      boxShadow:     '0 16px 40px rgba(0,0,0,0.6)',
+      pointerEvents: 'none',
+      opacity:       visible ? 1 : 0,
+      transition:    'opacity 0.15s',
+    }}>
+      {/* Label */}
       <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1,
         padding: '6px 10px',
         background: 'linear-gradient(transparent, rgba(0,0,0,0.75))',
         color: '#C49A6C', fontSize: 11,
         fontFamily: 'Inter, sans-serif', fontWeight: 500,
-        textAlign: 'center', zIndex: 1,
+        textAlign: 'center',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {model?.name || ''}
+        {state.model?.name || ''}
       </div>
 
-      {/* Single persistent Canvas — never remounts */}
-      <Canvas
-        frameloop="always"
-        camera={{ position: [2, 2, 2], fov: 45 }}
-        gl={{
-          antialias: true, alpha: false,
-          powerPreference: 'high-performance',
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 0.9,
-        }}
-        style={{ background: 'linear-gradient(135deg, #2C2420 0%, #1A1410 100%)' }}
-      >
-        <ambientLight intensity={0.4} color="#FFF5E6" />
-        <directionalLight position={[3, 5, 3]} intensity={0.8} color="#FFEAD2" />
-        <pointLight position={[-2, 3, -2]} intensity={0.3} color="#C49A6C" />
+      {/* Canvas — only mounted when needed */}
+      {state.mounted && state.model && (
+        <Canvas
+          frameloop="always"
+          camera={{ position: [2, 2, 2], fov: 45 }}
+          gl={{
+            antialias:             true,
+            alpha:                 false,
+            powerPreference:       'low-power',   // ← use low-power to save contexts
+            toneMapping:           THREE.ACESFilmicToneMapping,
+            toneMappingExposure:   0.9,
+          }}
+          style={{ background: 'linear-gradient(135deg, #2C2420 0%, #1A1410 100%)' }}
+        >
+          <ambientLight intensity={0.4} color="#FFF5E6" />
+          <directionalLight position={[3, 5, 3]} intensity={0.8} color="#FFEAD2" />
 
-        {model && (
-          <PreviewErrorBoundary key={model.url}>
+          <PreviewErrorBoundary key={state.model.url}>
             <Suspense fallback={<LoadingSpinner />}>
-              <PreviewModel url={toDirectUrl(model.url)} />
+              <PreviewModel url={toDirectUrl(state.model.url)} />
             </Suspense>
           </PreviewErrorBoundary>
-        )}
 
-        <OrbitControls
-          autoRotate autoRotateSpeed={2.5}
-          enableZoom={false} enablePan={false} enableRotate={false}
-        />
-      </Canvas>
+          <OrbitControls
+            autoRotate autoRotateSpeed={2.5}
+            enableZoom={false} enablePan={false} enableRotate={false}
+          />
+        </Canvas>
+      )}
     </div>
   );
 }
 
-// ── Lightweight trigger — just moves the panel, no Canvas created ─────────────
+// ── Lightweight trigger ───────────────────────────────────────────────────────
 export default function ModelPreview({ model, anchorEl }) {
   useEffect(() => {
-    if (!anchorEl || !model || !_setPreviewModel) return;
+    if (!anchorEl || !model || !_setPreviewState) return;
     const rect       = anchorEl.getBoundingClientRect();
     const spaceRight = window.innerWidth - rect.right;
-    const left = spaceRight >= 210 ? rect.right + 8 : rect.left;
+    const left = spaceRight >= 210 ? rect.right + 8 : rect.left - 210;
     const top  = spaceRight >= 210
       ? Math.min(rect.top, window.innerHeight - 230)
-      : rect.top - 220;
-    _setPreviewModel({ model, left, top });
-    return () => { if (_setPreviewModel) _setPreviewModel({ model: null, left: -9999, top: -9999 }); };
+      : rect.top;
+    _setPreviewState({ model, left: Math.max(8, left), top: Math.max(8, top) });
+    return () => { _setPreviewState?.({ model: null, left: -9999, top: -9999 }); };
   }, [model, anchorEl]);
 
-  return null; // renders nothing — panel lives in PreviewPortal
+  return null;
 }
 
 // ── Model renderer ────────────────────────────────────────────────────────────

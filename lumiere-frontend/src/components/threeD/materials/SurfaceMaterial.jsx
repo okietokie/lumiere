@@ -226,8 +226,8 @@ function buildTexture(textureId, color) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function SurfaceMaterial({ mat, repeat = [4, 4] }) {
-  const texture = useMemo(() => {
+export default function SurfaceMaterial({ mat, repeat = [4, 4], transparent = false, opacity = 1, depthWrite = true }) {
+    const texture = useMemo(() => {
     if (!mat?.textureId) return null;
     try {
       const canvas = buildTexture(mat.textureId, mat.color);
@@ -244,10 +244,14 @@ export default function SurfaceMaterial({ mat, repeat = [4, 4] }) {
 
   return (
     <meshStandardMaterial
-      map={texture}
+      map={texture ?? null}
       color={texture ? '#ffffff' : mat?.color}
       roughness={mat?.roughness ?? 0.65}
       metalness={mat?.metalness ?? 0.0}
+      transparent={transparent}
+      opacity={opacity}
+      depthWrite={depthWrite}
+      envMapIntensity={0}
     />
   );
 }
