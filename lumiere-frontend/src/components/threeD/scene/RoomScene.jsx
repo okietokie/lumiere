@@ -58,6 +58,8 @@ import ScorePanel          from "../ui/ScorePanel";
 import CollisionHighlight  from "../furniture/CollisionHighlight";
 import useSpatialAnalysis  from "../../../hooks/useSpatialAnalysis";
 import SaveModal       from "../ui/SaveModal";
+import { useToast }    from "../../../ui/ToastNotification";
+import { SlidePanel, BottomNav, MobileTopBar } from "./MobileLayout";
 import useProjectSave  from "../../../hooks/useProjectSave";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,8 +125,22 @@ export default function RoomScene() {
   const wallRefs         = useRef({});
 
   const screens  = Grid.useBreakpoint();
-  const isMobile = !screens.lg;
   const { navigateTo } = useContextNav(setActiveTab);
+  const toast = useToast();
+
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
+  const openMobilePanel = (tab) => {
+    setActiveTab(tab);
+    setMobilePanelOpen(true);
+  };
   const sidebarRef = useRef(null);  // ref to sidebar scroll container
 
   const projectSave = useProjectSave({
@@ -351,88 +367,9 @@ export default function RoomScene() {
     },
   ];
 
-  // ── Render ────────────────────────────────────────────────────────────────
-  return (
-    <div style={{ height: '100vh', width: '100vw', background: COLORS.background, overflow: 'hidden', fontFamily: 'Inter, sans-serif', position: 'fixed', top: 0, left: 0 }}>
-
-      {/* Undo / Redo + Save toolbar */}
-      <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, background: `${COLORS.surface}CC`, padding: '8px', borderRadius: '12px', border: `1px solid ${COLORS.secondary}60`, backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-        <Space>
-          <Tooltip title="Undo (Ctrl+Z)">
-            <Button type="text" disabled={!canUndo} icon={<UndoOutlined />} onClick={undo} style={{ color: canUndo ? COLORS.text : `${COLORS.text}40` }} />
-          </Tooltip>
-          <Tooltip title="Redo (Ctrl+Y)">
-            <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} style={{ color: canRedo ? COLORS.text : `${COLORS.text}40` }} />
-          </Tooltip>
-          <div style={{ width: 1, height: 20, background: `${COLORS.secondary}40`, margin: '0 4px' }} />
-          <Tooltip title="Save / Snapshot">
-            <Button
-              type="text"
-              icon={<SaveOutlined />}
-              onClick={() => setSaveModalOpen(true)}
-              style={{ color: COLORS.action }}
-            />
-          </Tooltip>
-          {projectSave.saveStatus === 'saved' && (
-            <span style={{ color: '#52c41a', fontSize: 11, fontFamily: 'Inter, sans-serif', marginLeft: 2 }}>Saved</span>
-          )}
-        </Space>
-      </div>
-
-      <Splitter vertical={isMobile} style={{ height: '100%', width: '100%', background: COLORS.background }}>
-
-        {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-        <Splitter.Panel defaultSize="40%" min="20%" max="70%" style={{ background: COLORS.background }}>
-          <div ref={sidebarRef} style={{ height: '100%', width: '100%', padding: '40px 28px 28px', background: `linear-gradient(145deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`, borderRight: `2px solid ${COLORS.action}30`, boxShadow: '8px 0 30px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-
-            {/* Branding */}
-            <div style={{ marginBottom: 36 }}>
-              <div style={{ color: COLORS.action, fontSize: 13, letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: 12, fontWeight: 500 }}>Spatial Design</div>
-              <div style={{ color: COLORS.text, fontSize: 32, fontWeight: 350, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Room<br />Composer</div>
-              <div style={{ width: 70, height: 3, background: COLORS.action, marginTop: 20, borderRadius: 2 }} />
-            </div>
-
-            {/* Camera controls */}
-            <div style={{ marginBottom: 32 }}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-                <CameraOutlined style={{ marginRight: 10, color: COLORS.action, fontSize: 18 }} />
-                <span style={{ color: COLORS.text, fontSize: 17, fontWeight: 500 }}>Camera & Navigation</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px', background: `${COLORS.background}CC`, borderRadius: 16, border: `1px solid ${COLORS.secondary}60` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: COLORS.text, fontSize: 14, fontWeight: 450 }}>Mode</span>
-                  <Space>
-                    <Button type={cameraMode === 'orbit' ? 'primary' : 'default'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }} style={{ background: cameraMode === 'orbit' ? COLORS.action : 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}>Orbit</Button>
-                    <Button type={cameraMode === 'firstPerson' ? 'primary' : 'default'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }} style={{ background: cameraMode === 'firstPerson' ? COLORS.action : 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}>Walk</Button>
-                  </Space>
-                </div>
-                <Space wrap style={{ gap: 8 }}>
-                  {Object.keys(CAMERA_PRESETS).map((k) => (
-                    <Tooltip key={k} title={k}>
-                      <Button
-                        icon={k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <BorderOutlined /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
-                        onClick={() => applyCameraPreset(k)}
-                        style={{ background: 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}
-                      />
-                    </Tooltip>
-                  ))}
-                </Space>
-              </div>
-            </div>
-
-            {/* Main tabs */}
-            <Tabs
-              activeKey={activeTab}
-              onChange={setActiveTab}
-              items={tabItems}
-              style={{ flex: 1 }}
-              tabBarStyle={{ borderBottom: `1px solid ${COLORS.secondary}40`, marginBottom: 20 }}
-            />
-          </div>
-        </Splitter.Panel>
-
-        {/* ── 3D Scene ──────────────────────────────────────────────────────── */}
-        <Splitter.Panel style={{ background: COLORS.background }}>
+  // ── The 3D canvas block (shared between mobile and desktop) ─────────────
+  const canvasBlock = (
+        <div ref={sceneRef} style={{ height: '100%', width: '100%', position: 'relative' }}>
           <div ref={sceneRef} style={{ height: '100%', width: '100%', position: 'relative' }}>
 
             {/* Walk mode HUD overlay */}
@@ -620,8 +557,182 @@ export default function RoomScene() {
               </Canvas>
             </div>
           </div>
-        </Splitter.Panel>
-      </Splitter>
+        </div>
+  ); // end canvasBlock
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ height: '100vh', width: '100vw', background: COLORS.background, overflow: 'hidden', fontFamily: 'Inter, sans-serif', position: 'fixed', top: 0, left: 0 }}>
+
+      {isMobile ? (
+        /* ════════════════════════════════════════════════════════════
+           MOBILE LAYOUT — full screen canvas + bottom nav + panels
+           ════════════════════════════════════════════════════════════ */
+        <>
+          {/* Mobile top bar */}
+          <MobileTopBar
+            projectName={projectSave.projectName}
+            cameraMode={cameraMode}
+            onCameraToggle={() => {
+              if (cameraMode === 'orbit') {
+                setCameraMode('firstPerson');
+                setTeleportTarget([0, 1.6, 0]);
+              } else {
+                setCameraMode('orbit');
+                if (document.pointerLockElement) document.exitPointerLock();
+              }
+            }}
+          />
+
+          {/* Full screen 3D canvas — padded for top bar + bottom nav */}
+          <div style={{ position: 'fixed', inset: 0, paddingTop: 64, paddingBottom: 72 }}>
+            {canvasBlock}
+          </div>
+
+          {/* Bottom navigation */}
+          <BottomNav
+            activeTab={activeTab}
+            onTabChange={openMobilePanel}
+            onSave={() => setSaveModalOpen(true)}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+
+          {/* Slide-up panel */}
+          <SlidePanel
+            open={mobilePanelOpen}
+            onClose={() => setMobilePanelOpen(false)}
+            title={
+              activeTab === 'walls' ? 'Walls' :
+              activeTab === 'materials' ? 'Materials & Style' :
+              activeTab === 'lighting' ? 'Lighting' : 'Furniture'
+            }
+            height={activeTab === 'furniture' ? '82vh' : '72vh'}
+          >
+            {activeTab === 'walls' && (
+              <WallEditorPanel
+                selectedWall={selectedWall}
+                addWall={addWall}
+                splitWall={splitWall}
+                deleteWall={deleteWall}
+                updateWall={updateWall}
+                gizmoMode={gizmoMode}
+                setGizmoMode={setGizmoMode}
+                envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
+                setEnvColors={(updater) => {
+                  const next = typeof updater === 'function'
+                    ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
+                    : updater;
+                  if (next.floor   !== floorMaterial.color)   updateSurface('floor',   { color: next.floor });
+                  if (next.ceiling !== ceilingMaterial.color) updateSurface('ceiling', { color: next.ceiling });
+                }}
+              />
+            )}
+            {activeTab === 'materials' && (
+              <MaterialPanel
+                selectedWall={selectedWall}
+                walls={walls}
+                floorMaterial={floorMaterial}
+                ceilingMaterial={ceilingMaterial}
+                applyTexture={applyTexture}
+                updateSurface={updateSurface}
+                applyTheme={applyTheme}
+                activeTheme={activeTheme}
+              />
+            )}
+            {activeTab === 'lighting' && <LightingPanel {...lightingState} />}
+            {activeTab === 'furniture' && (
+              <FurniturePicker
+                selectedItem={selectedFurniture}
+                placedItems={placedItems}
+                addItem={(model) => { addItem(model); setMobilePanelOpen(false); }}
+                deleteItem={deleteItem}
+                gizmoMode={gizmoMode}
+                setGizmoMode={setGizmoMode}
+                furnitureRefs={furnitureRefs}
+                tint={furnitureTint}
+                setTint={setFurnitureTint}
+              />
+            )}
+          </SlidePanel>
+        </>
+      ) : (
+        /* ════════════════════════════════════════════════════════════
+           DESKTOP LAYOUT — splitter sidebar + 3D canvas
+           ════════════════════════════════════════════════════════════ */
+        <>
+          {/* Undo / Redo + Save toolbar */}
+          <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, background: `${COLORS.surface}CC`, padding: '8px', borderRadius: '12px', border: `1px solid ${COLORS.secondary}60`, backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <Space>
+              <Tooltip title="Undo (Ctrl+Z)">
+                <Button type="text" disabled={!canUndo} icon={<UndoOutlined />} onClick={undo} style={{ color: canUndo ? COLORS.text : `${COLORS.text}40` }} />
+              </Tooltip>
+              <Tooltip title="Redo (Ctrl+Y)">
+                <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} style={{ color: canRedo ? COLORS.text : `${COLORS.text}40` }} />
+              </Tooltip>
+              <div style={{ width: 1, height: 20, background: `${COLORS.secondary}40`, margin: '0 4px' }} />
+              <Tooltip title="Save / Snapshot">
+                <Button type="text" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)} style={{ color: COLORS.action }} />
+              </Tooltip>
+              {projectSave.saveStatus === 'saved' && (
+                <span style={{ color: '#52c41a', fontSize: 11, fontFamily: 'Inter, sans-serif', marginLeft: 2 }}>Saved</span>
+              )}
+            </Space>
+          </div>
+
+          <Splitter style={{ height: '100%', width: '100%', background: COLORS.background }}>
+            {/* Sidebar */}
+            <Splitter.Panel defaultSize="40%" min="20%" max="70%" style={{ background: COLORS.background }}>
+              <div ref={sidebarRef} style={{ height: '100%', width: '100%', padding: '40px 28px 28px', background: `linear-gradient(145deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`, borderRight: `2px solid ${COLORS.action}30`, boxShadow: '8px 0 30px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+                <div style={{ marginBottom: 36 }}>
+                  <div style={{ color: COLORS.action, fontSize: 13, letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: 12, fontWeight: 500 }}>Spatial Design</div>
+                  <div style={{ color: COLORS.text, fontSize: 32, fontWeight: 350, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Room<br />Composer</div>
+                  <div style={{ width: 70, height: 3, background: COLORS.action, marginTop: 20, borderRadius: 2 }} />
+                </div>
+                <div style={{ marginBottom: 32 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+                    <CameraOutlined style={{ marginRight: 10, color: COLORS.action, fontSize: 18 }} />
+                    <span style={{ color: COLORS.text, fontSize: 17, fontWeight: 500 }}>Camera & Navigation</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px', background: `${COLORS.background}CC`, borderRadius: 16, border: `1px solid ${COLORS.secondary}60` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: COLORS.text, fontSize: 14, fontWeight: 450 }}>Mode</span>
+                      <Space>
+                        <Button type={cameraMode === 'orbit' ? 'primary' : 'default'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }} style={{ background: cameraMode === 'orbit' ? COLORS.action : 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}>Orbit</Button>
+                        <Button type={cameraMode === 'firstPerson' ? 'primary' : 'default'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }} style={{ background: cameraMode === 'firstPerson' ? COLORS.action : 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}>Walk</Button>
+                      </Space>
+                    </div>
+                    <Space wrap style={{ gap: 8 }}>
+                      {Object.keys(CAMERA_PRESETS).map((k) => (
+                        <Tooltip key={k} title={k}>
+                          <Button
+                            icon={k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <BorderOutlined /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
+                            onClick={() => applyCameraPreset(k)}
+                            style={{ background: 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}
+                          />
+                        </Tooltip>
+                      ))}
+                    </Space>
+                  </div>
+                </div>
+                <Tabs
+                  activeKey={activeTab}
+                  onChange={setActiveTab}
+                  items={tabItems}
+                  style={{ flex: 1 }}
+                  tabBarStyle={{ borderBottom: `1px solid ${COLORS.secondary}40`, marginBottom: 20 }}
+                />
+              </div>
+            </Splitter.Panel>
+            {/* 3D Scene */}
+            <Splitter.Panel style={{ background: COLORS.background }}>
+              {canvasBlock}
+            </Splitter.Panel>
+          </Splitter>
+        </>
+      )}
 
       {/* ── Context toolbars — pure DOM, outside Canvas ─────────── */}
       <ContextToolbar
@@ -682,13 +793,18 @@ export default function RoomScene() {
 
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body, html { overflow: hidden; height: 100vh; width: 100vw; }
+        body, html { overflow: hidden; height: 100vh; width: 100vw; touch-action: none; }
         .ant-splitter-trigger { background: ${COLORS.action} !important; opacity: 0.8; width: 4px !important; }
         .ant-tabs-tab { color: ${COLORS.secondary} !important; }
         .ant-tabs-tab-active .ant-tabs-tab-btn { color: ${COLORS.action} !important; }
         .ant-tabs-ink-bar { background: ${COLORS.action} !important; }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: ${COLORS.secondary}; border-radius: 3px; }
+        /* Mobile: larger tap targets */
+        @media (max-width: 767px) {
+          button { min-height: 44px; }
+          .ant-btn { min-height: 44px !important; font-size: 15px !important; }
+        }
       `}</style>
     </div>
   );
