@@ -1,6 +1,6 @@
 // src/components/threeD/scene/RoomScene.jsx
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Grid as DreiGrid } from "@react-three/drei";
+import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { useState, useEffect, useRef, Suspense } from "react";
 import { Splitter, Button, Tooltip, Space, Grid, Tabs } from "antd";
 import {
@@ -22,50 +22,50 @@ import { v4 as uuidv4 } from "uuid";
 import { COLORS } from "../../../utils/colors";
 import * as THREE from "three";
 
-// ── Hooks ───────────────────────────────────────────────────────────────────
+// ── Hooks ────────────────────────────────────────────────────────────────────
 import useHistory   from "../../../hooks/useHistory";
 import useMaterials from "../../../hooks/useMaterials";
 import useLighting  from "../../../hooks/useLighting";
 
-// ── Camera ───────────────────────────────────────────────────────────────────
+// ── Camera ────────────────────────────────────────────────────────────────────
 import FirstPersonControls from "../camera/FirstPersonControls";
 import WalkHUD             from "../camera/WalkHUD";
 
-// ── Walls ────────────────────────────────────────────────────────────────────
+// ── Walls ─────────────────────────────────────────────────────────────────────
 import InteractiveWall from "../walls/InteractiveWall";
 import WallGizmo       from "../walls/WallGizmo";
 import WallEditorPanel from "../walls/WallEditor";
 
-// ── Furniture ────────────────────────────────────────────────────────────────
-import FurnitureItem  from "../furniture/FurnitureItem";
-import FurnitureGizmo from "../furniture/FurnitureGizmo";
+// ── Furniture ─────────────────────────────────────────────────────────────────
+import FurnitureItem   from "../furniture/FurnitureItem";
+import FurnitureGizmo  from "../furniture/FurnitureGizmo";
 import FurniturePicker from "../furniture/FurniturePicker";
 import { PreviewPortal } from "../furniture/ModelPreview";
 
-// ── Lighting ─────────────────────────────────────────────────────────────────
+// ── Lighting ──────────────────────────────────────────────────────────────────
 import SceneLighting from "../lighting/SceneLighting";
 import LightingPanel from "../lighting/LightingPanel";
 import PlacedLight   from "../lighting/PlacedLight";
 
-// ── Materials ────────────────────────────────────────────────────────────────
-import MaterialPanel   from "../materials/MaterialPanel";
+// ── Materials ─────────────────────────────────────────────────────────────────
+import MaterialPanel from "../materials/MaterialPanel";
 
-// ── UI / UX ──────────────────────────────────────────────────────────────────
+// ── UI / UX ───────────────────────────────────────────────────────────────────
 import ContextToolbar, { WorldProjector } from "../ui/ContextToolbar";
-import useContextNav  from "../../../hooks/useContextNav";
-import SurfaceMaterial from "../materials/SurfaceMaterial";
+import useContextNav       from "../../../hooks/useContextNav";
+import SurfaceMaterial     from "../materials/SurfaceMaterial";
 import ScorePanel          from "../ui/ScorePanel";
 import CollisionHighlight  from "../furniture/CollisionHighlight";
 import useSpatialAnalysis  from "../../../hooks/useSpatialAnalysis";
-import SaveModal       from "../ui/SaveModal";
-import { useToast }    from "../../../ui/ToastNotification";
+import SaveModal           from "../ui/SaveModal";
+import { useToast }        from "../../../ui/ToastNotification";
 import { SlidePanel, BottomNav, MobileTopBar } from "./MobileLayout";
-import useProjectSave  from "../../../hooks/useProjectSave";
+import useProjectSave      from "../../../hooks/useProjectSave";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CAMERA_PRESETS = {
-  perspective: { position: [7, 4, 9],   target: [0, 1.5, 0] },
+  perspective: { position: [7, 4, 9],    target: [0, 1.5, 0] },
   top:         { position: [0, 10, 0.1], target: [0, 1.5, 0] },
   front:       { position: [0, 1.5, 10], target: [0, 1.5, 0] },
   side:        { position: [10, 1.5, 0], target: [0, 1.5, 0] },
@@ -73,7 +73,7 @@ const CAMERA_PRESETS = {
 
 export default function RoomScene() {
 
-  // ── Walls (undo/redo history) ────────────────────────────────────────────
+  // ── Walls (undo/redo history) ─────────────────────────────────────────────
   const {
     state: walls, set: setWalls,
     undo, redo, canUndo, canRedo,
@@ -83,15 +83,14 @@ export default function RoomScene() {
     { id: uuidv4(), start: [3, -3],  end: [3, 3],   height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] },
   ]);
 
-  // ── Materials ────────────────────────────────────────────────────────────
-  // Pass setWalls (the history setter) so undo/redo tracks material changes
+  // ── Materials ─────────────────────────────────────────────────────────────
   const {
     floorMaterial, ceilingMaterial,
     setFloorMaterial, setCeilingMaterial,
     applyTexture, updateSurface, applyTheme, activeTheme,
   } = useMaterials(walls, setWalls);
 
-  // ── Lighting ─────────────────────────────────────────────────────────────
+  // ── Lighting ──────────────────────────────────────────────────────────────
   const lightingState = useLighting();
   const {
     lighting, placedLights,
@@ -99,33 +98,37 @@ export default function RoomScene() {
     previewMode,
   } = lightingState;
 
-  // ── Furniture ────────────────────────────────────────────────────────────
+  // ── Furniture ─────────────────────────────────────────────────────────────
   const [placedItems,         setPlacedItems]         = useState([]);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState(null);
   const furnitureRefs = useRef({});
 
-  // ── UI state ─────────────────────────────────────────────────────────────
-  const [selectedWallId,       setSelectedWallId]       = useState(null);
-  const [cameraMode,           setCameraMode]           = useState('orbit');
-  const [gizmoMode,            setGizmoMode]            = useState('translate');
-  const [isPointerLocked,      setIsPointerLocked]      = useState(false);
-  const [orbitEnabled,         setOrbitEnabled]         = useState(true);
-  const [teleportTarget,       setTeleportTarget]       = useState(null);
-  const [activeTab,            setActiveTab]            = useState('walls');
-  const [saveModalOpen,        setSaveModalOpen]        = useState(false);
-  const [furnitureTint,        setFurnitureTint]        = useState(null);
-  const [currentProjectId,     setCurrentProjectId]     = useState(null);
-  const [wallToolbarPos,       setWallToolbarPos]       = useState(null);
-  const [furnitureToolbarPos,  setFurnitureToolbarPos]  = useState(null);
-  const [lightToolbarPos,      setLightToolbarPos]      = useState(null);
+  // ── UI state ──────────────────────────────────────────────────────────────
+  const [selectedWallId,      setSelectedWallId]      = useState(null);
+  const [cameraMode,          setCameraMode]          = useState('orbit');
+  const [gizmoMode,           setGizmoMode]           = useState('translate');
+  const [isPointerLocked,     setIsPointerLocked]     = useState(false);
+  const [orbitEnabled,        setOrbitEnabled]        = useState(true);
+  const [teleportTarget,      setTeleportTarget]      = useState(null);
+  const [activeTab,           setActiveTab]           = useState('walls');
+  const [saveModalOpen,       setSaveModalOpen]       = useState(false);
+  const [furnitureTint,       setFurnitureTint]       = useState(null);
+  const [currentProjectId,    setCurrentProjectId]    = useState(null);
+  const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
+  const [furnitureToolbarPos, setFurnitureToolbarPos] = useState(null);
+  const [lightToolbarPos,     setLightToolbarPos]     = useState(null);
 
   const orbitControlsRef = useRef(null);
   const sceneRef         = useRef(null);
   const canvasWrapperRef = useRef(null);
   const wallRefs         = useRef({});
 
+  const screens = Grid.useBreakpoint();
   const { navigateTo } = useContextNav(setActiveTab);
   const toast = useToast();
+
+  // Whether anything is selected (drives GizmoHelper visibility)
+  const anythingSelected = !!(selectedWallId || selectedFurnitureId || selectedLightId);
 
   // ── Mobile detection ──────────────────────────────────────────────────────
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -136,11 +139,8 @@ export default function RoomScene() {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
-  const openMobilePanel = (tab) => {
-    setActiveTab(tab);
-    setMobilePanelOpen(true);
-  };
-  const sidebarRef = useRef(null);  // ref to sidebar scroll container
+  const openMobilePanel = (tab) => { setActiveTab(tab); setMobilePanelOpen(true); };
+  const sidebarRef = useRef(null);
 
   const projectSave = useProjectSave({
     walls, setWalls,
@@ -155,14 +155,12 @@ export default function RoomScene() {
   // ── Spatial analysis ──────────────────────────────────────────────────────
   const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
 
-  // Reset tint when furniture selection changes
   useEffect(() => { setFurnitureTint(null); }, [selectedFurnitureId]);
 
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
 
-  // ── Apply ghost opacity directly to wall meshes via refs ───────────────────
-  // This bypasses InteractiveWall entirely — works regardless of material type
+  // ── Apply ghost opacity to wall meshes ────────────────────────────────────
   useEffect(() => {
     walls.forEach((wall) => {
       const mesh = wallRefs.current[wall.id];
@@ -170,21 +168,14 @@ export default function RoomScene() {
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       mats.forEach((m) => {
         if (!m) return;
-        if (wall.ghost) {
-          m.transparent = true;
-          m.opacity     = 0.15;
-          m.depthWrite  = false;
-        } else {
-          m.transparent = false;
-          m.opacity     = 1;
-          m.depthWrite  = true;
-        }
+        if (wall.ghost) { m.transparent = true;  m.opacity = 0.15; m.depthWrite = false; }
+        else            { m.transparent = false; m.opacity = 1;    m.depthWrite = true;  }
         m.needsUpdate = true;
       });
     });
   }, [walls]);
 
-  // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
@@ -198,14 +189,10 @@ export default function RoomScene() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo, selectedFurnitureId]);
 
-  // ── Mobile touch safety — prevents OrbitControls crash on finger lift ──────
+  // ── Mobile touch safety ───────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasWrapperRef.current?.querySelector('canvas');
     if (!canvas) return;
-
-    // OrbitControls crashes when touches[1] disappears mid-gesture.
-    // Intercept touchmove and cancel if fewer than 2 touches remain
-    // for multi-touch gestures (dolly/pan).
     const safeTouchMove = (e) => {
       if (e.touches.length === 1 && e.targetTouches.length === 1) return;
       if (e.touches.length < 2) e.stopImmediatePropagation();
@@ -262,15 +249,10 @@ export default function RoomScene() {
     if (selectedFurnitureId === id) setSelectedFurnitureId(null);
   };
 
-  // Replace selected furniture item — keeps position/rotation/scale of the OLD item
   const replaceItem = (newMeta) => {
     if (!selectedFurniture) return;
     const newItem = {
-      id:       uuidv4(),
-      filename: newMeta.filename,
-      name:     newMeta.name,
-      url:      newMeta.url,
-      // Preserve the existing item's transform — not the new model's defaults
+      id: uuidv4(), filename: newMeta.filename, name: newMeta.name, url: newMeta.url,
       position: [...selectedFurniture.position],
       rotation: [...selectedFurniture.rotation],
       scale:    [...selectedFurniture.scale],
@@ -290,7 +272,6 @@ export default function RoomScene() {
     }
   };
 
-  // Deselect everything when clicking empty canvas
   const handlePointerMissed = () => {
     setSelectedWallId(null);
     setSelectedFurnitureId(null);
@@ -314,7 +295,6 @@ export default function RoomScene() {
           updateWall={updateWall}
           gizmoMode={gizmoMode}
           setGizmoMode={setGizmoMode}
-          // envColors kept for WallEditor's environment section
           envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
           setEnvColors={(updater) => {
             const next = typeof updater === 'function'
@@ -366,260 +346,246 @@ export default function RoomScene() {
     },
   ];
 
-  // ── The 3D canvas block (shared between mobile and desktop) ─────────────
+  // ── 3D canvas block ───────────────────────────────────────────────────────
   const canvasBlock = (
-        <div ref={sceneRef} style={{ height: '100%', width: '100%', position: 'relative' }}>
-          <div ref={sceneRef} style={{ height: '100%', width: '100%', position: 'relative' }}>
+    <div ref={sceneRef} style={{ height: '100%', width: '100%', position: 'relative' }}>
 
-            {/* Walk mode HUD overlay */}
-            {cameraMode === 'firstPerson' && (
-              <WalkHUD
-                isLocked={isPointerLocked}
-                onLock={() => { const c = canvasWrapperRef.current?.querySelector('canvas'); if (c) c.requestPointerLock(); }}
+      {cameraMode === 'firstPerson' && (
+        <WalkHUD
+          isLocked={isPointerLocked}
+          onLock={() => { const c = canvasWrapperRef.current?.querySelector('canvas'); if (c) c.requestPointerLock(); }}
+        />
+      )}
+
+      <div
+        ref={canvasWrapperRef}
+        style={{ height: '100%', width: '100%' }}
+        onClick={() => {
+          if (cameraMode === 'firstPerson' && !isPointerLocked) {
+            const c = canvasWrapperRef.current?.querySelector('canvas');
+            if (c) c.requestPointerLock();
+          }
+        }}
+      >
+        <Canvas
+          camera={cameraMode === 'firstPerson'
+            ? { position: [0, 1.6, 0], fov: 70, near: 0.1, far: 1000 }
+            : { position: [7, 4, 9],   fov: 50, near: 0.1, far: 1000 }
+          }
+          style={{ background: lighting.skyColor }}
+          shadows
+          frameloop={cameraMode === 'firstPerson' ? 'always' : 'demand'}
+          performance={{ min: 0.5 }}
+          gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.85, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
+          onPointerMissed={handlePointerMissed}
+        >
+          {/* ── Lighting ────────────────────────────────────────── */}
+          <SceneLighting
+            lighting={lighting}
+            globalBrightness={lightingState.globalBrightness}
+            placedLights={placedLights}
+            moodAmbient={lightingState.moodAmbientOverride}
+          />
+
+          {/* ── Camera controls ─────────────────────────────────── */}
+          {cameraMode === 'orbit' ? (
+            <OrbitControls
+              ref={orbitControlsRef}
+              enableDamping dampingFactor={0.06}
+              maxPolarAngle={Math.PI / 2.4}
+              enabled={orbitEnabled}
+              touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+              onTouchStart={(e) => { if (e?.touches?.length < 2) return; }}
+            />
+          ) : (
+            <FirstPersonControls
+              walls={walls}
+              isLocked={isPointerLocked}
+              setIsLocked={setIsPointerLocked}
+              onTeleport={teleportTarget}
+            />
+          )}
+
+          {/* ── GizmoHelper — visible whenever something is selected ─
+               Placed at top-left so it doesn't conflict with the
+               context toolbar (which floats near the selected object).
+               On mobile the top-left is always clear of the bottom nav. */}
+          {anythingSelected && cameraMode === 'orbit' && (
+            <GizmoHelper alignment="top-left" margin={[60, 60]}>
+              <GizmoViewport
+                axisColors={['#E05252', '#52C052', '#5252E0']}
+                labelColor="#E8E0D8"
+                hideNegativeAxes
               />
-            )}
+            </GizmoHelper>
+          )}
 
-            <div
-              ref={canvasWrapperRef}
-              style={{ height: '100%', width: '100%' }}
-              onClick={() => {
-                if (cameraMode === 'firstPerson' && !isPointerLocked) {
-                  const c = canvasWrapperRef.current?.querySelector('canvas');
-                  if (c) c.requestPointerLock();
-                }
-              }}
-            >
-              <Canvas
-                camera={cameraMode === 'firstPerson'
-                  ? { position: [0, 1.6, 0], fov: 70, near: 0.1, far: 1000 }
-                  : { position: [7, 4, 9],   fov: 50, near: 0.1, far: 1000 }
-                }
-                style={{ background: lighting.skyColor }}
-                shadows
-                frameloop={cameraMode === 'firstPerson' ? 'always' : 'demand'}
-                performance={{ min: 0.5 }}
-                gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.85, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
-                onPointerMissed={handlePointerMissed}
-              >
-                {/* ── Lighting ─────────────────────────────────────── */}
-                <SceneLighting
-                  lighting={lighting}
-                  globalBrightness={lightingState.globalBrightness}
-                  placedLights={placedLights}
-                  moodAmbient={lightingState.moodAmbientOverride}
-                />
+          {/* ── Walls ───────────────────────────────────────────── */}
+          {walls.map((wall) => (
+            <InteractiveWall
+              key={wall.id}
+              ref={(r) => { if (r) wallRefs.current[wall.id] = r; }}
+              wall={wall}
+              isSelected={wall.id === selectedWallId}
+              onSelect={() => { setSelectedWallId(wall.id); setSelectedFurnitureId(null); setSelectedLightId(null); setActiveTab('walls'); }}
+              updateWall={updateWall}
+              setOrbitEnabled={setOrbitEnabled}
+              cameraMode={cameraMode}
+            />
+          ))}
 
-                {/* ── Camera controls ──────────────────────────────── */}
-                {cameraMode === 'orbit' ? (
-                  <OrbitControls
-                    ref={orbitControlsRef}
-                    enableDamping
-                    dampingFactor={0.06}
-                    maxPolarAngle={Math.PI / 2.4}
-                    enabled={orbitEnabled}
-                    touches={{
-                      ONE:   THREE.TOUCH.ROTATE,
-                      TWO:   THREE.TOUCH.DOLLY_PAN,
-                    }}
-                    onTouchStart={(e) => { if (e?.touches?.length < 2) return; }}
-                  />
-                ) : (
-                  <FirstPersonControls
-                    walls={walls}
-                    isLocked={isPointerLocked}
-                    setIsLocked={setIsPointerLocked}
-                    onTeleport={teleportTarget}
-                  />
-                )}
+          <WallGizmo
+            selectedWall={selectedWall}
+            wallRef={{ current: wallRefs.current[selectedWallId] }}
+            gizmoMode={gizmoMode}
+            updateWall={updateWall}
+            setOrbitEnabled={setOrbitEnabled}
+          />
 
-                {/* ── Walls ────────────────────────────────────────── */}
-                {walls.map((wall) => (
-                  <InteractiveWall
-                    key={wall.id}
-                    ref={(r) => { if (r) wallRefs.current[wall.id] = r; }}
-                    wall={wall}
-                    isSelected={wall.id === selectedWallId}
-                    onSelect={() => { setSelectedWallId(wall.id); setSelectedFurnitureId(null); setSelectedLightId(null); setActiveTab('walls'); }}
-                    updateWall={updateWall}
-                    setOrbitEnabled={setOrbitEnabled}
-                    cameraMode={cameraMode}
-                  />
-                ))}
+          {/* ── World projectors ────────────────────────────────── */}
+          {selectedWall && (
+            <WorldProjector
+              type="wall"
+              worldPosition={[
+                (selectedWall.start[0] + selectedWall.end[0]) / 2,
+                selectedWall.height + 0.6,
+                (selectedWall.start[1] + selectedWall.end[1]) / 2,
+              ]}
+              onScreenPos={setWallToolbarPos}
+            />
+          )}
+          {selectedFurniture && (
+            <WorldProjector
+              type="furniture"
+              worldPosition={[
+                selectedFurniture.position[0],
+                selectedFurniture.position[1] + 1.8,
+                selectedFurniture.position[2],
+              ]}
+              onScreenPos={setFurnitureToolbarPos}
+            />
+          )}
+          {placedLights.find((l) => l.id === selectedLightId) && (() => {
+            const sl = placedLights.find((l) => l.id === selectedLightId);
+            return (
+              <WorldProjector
+                type="light"
+                worldPosition={[sl.position[0], sl.position[1] + 0.5, sl.position[2]]}
+                onScreenPos={setLightToolbarPos}
+              />
+            );
+          })()}
 
-                <WallGizmo
-                  selectedWall={selectedWall}
-                  wallRef={{ current: wallRefs.current[selectedWallId] }}
-                  gizmoMode={gizmoMode}
-                  updateWall={updateWall}
-                  setOrbitEnabled={setOrbitEnabled}
-                />
+          {/* ── Furniture ───────────────────────────────────────── */}
+          <Suspense fallback={null}>
+            {placedItems.map((item) => (
+              <FurnitureItem
+                key={item.id}
+                ref={(r) => { if (r) furnitureRefs.current[item.id] = r; }}
+                item={item}
+                isSelected={item.id === selectedFurnitureId}
+                onSelect={() => { setSelectedFurnitureId(item.id); setSelectedWallId(null); setSelectedLightId(null); setActiveTab('furniture'); }}
+                setOrbitEnabled={setOrbitEnabled}
+                updateItem={updateItem}
+              />
+            ))}
+          </Suspense>
 
-                {/* ── World projectors — pure R3F, no DOM ── */}
-                {selectedWall && (
-                  <WorldProjector
-                    type="wall"
-                    worldPosition={[
-                      (selectedWall.start[0] + selectedWall.end[0]) / 2,
-                      selectedWall.height + 0.6,
-                      (selectedWall.start[1] + selectedWall.end[1]) / 2,
-                    ]}
-                    onScreenPos={setWallToolbarPos}
-                  />
-                )}
-                {selectedFurniture && (
-                  <WorldProjector
-                    type="furniture"
-                    worldPosition={[
-                      selectedFurniture.position[0],
-                      selectedFurniture.position[1] + 1.8,
-                      selectedFurniture.position[2],
-                    ]}
-                    onScreenPos={setFurnitureToolbarPos}
-                  />
-                )}
-                {placedLights.find((l) => l.id === selectedLightId) && (() => {
-                  const sl = placedLights.find((l) => l.id === selectedLightId);
-                  return (
-                    <WorldProjector
-                      type="light"
-                      worldPosition={[sl.position[0], sl.position[1] + 0.5, sl.position[2]]}
-                      onScreenPos={setLightToolbarPos}
-                    />
-                  );
-                })()}
+          <FurnitureGizmo
+            selectedItem={selectedFurniture}
+            itemRef={{ current: furnitureRefs.current[selectedFurnitureId] }}
+            gizmoMode={gizmoMode}
+            updateItem={updateItem}
+            setOrbitEnabled={setOrbitEnabled}
+          />
 
-                {/* ── Furniture ────────────────────────────────────── */}
-                <Suspense fallback={null}>
-                  {placedItems.map((item) => (
-                    <FurnitureItem
-                      key={item.id}
-                      ref={(r) => { if (r) furnitureRefs.current[item.id] = r; }}
-                      item={item}
-                      isSelected={item.id === selectedFurnitureId}
-                      onSelect={() => { setSelectedFurnitureId(item.id); setSelectedWallId(null); setSelectedLightId(null); setActiveTab('furniture'); }}
-                      setOrbitEnabled={setOrbitEnabled}
-                      updateItem={updateItem}
-                    />
-                  ))}
-                </Suspense>
+          {/* ── Collision highlights ─────────────────────────────── */}
+          <CollisionHighlight
+            placedItems={placedItems}
+            itemStates={spatial.itemStates}
+            furnitureRefs={furnitureRefs}
+          />
 
-                <FurnitureGizmo
-                  selectedItem={selectedFurniture}
-                  itemRef={{ current: furnitureRefs.current[selectedFurnitureId] }}
-                  gizmoMode={gizmoMode}
-                  updateItem={updateItem}
-                  setOrbitEnabled={setOrbitEnabled}
-                />
+          {/* ── Placed lights ────────────────────────────────────── */}
+          {placedLights.map((light) => (
+            <PlacedLight
+              key={light.id}
+              light={light}
+              isSelected={light.id === selectedLightId}
+              onSelect={() => { setSelectedLightId(light.id); setSelectedWallId(null); setSelectedFurnitureId(null); setActiveTab('lighting'); }}
+              updateLight={lightingState.updateLight}
+              setOrbitEnabled={setOrbitEnabled}
+            />
+          ))}
 
-                {/* ── Collision highlights ───────────────────────── */}
-                <CollisionHighlight
-                  placedItems={placedItems}
-                  itemStates={spatial.itemStates}
-                  furnitureRefs={furnitureRefs}
-                />
+          {/* ── Floor ───────────────────────────────────────────── */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+            <planeGeometry args={[20, 20]} />
+            <Suspense fallback={<meshStandardMaterial color={floorMaterial.color} roughness={floorMaterial.roughness} metalness={floorMaterial.metalness} />}>
+              <SurfaceMaterial mat={floorMaterial} repeat={[6, 6]} />
+            </Suspense>
+          </mesh>
 
-                {/* ── Placed lights ────────────────────────────────── */}
-                {placedLights.map((light) => (
-                  <PlacedLight
-                    key={light.id}
-                    light={light}
-                    isSelected={light.id === selectedLightId}
-                    onSelect={() => { setSelectedLightId(light.id); setSelectedWallId(null); setSelectedFurnitureId(null); setActiveTab('lighting'); }}
-                    updateLight={lightingState.updateLight}
-                    setOrbitEnabled={setOrbitEnabled}
-                  />
-                ))}
+          {/* ── Ceiling ─────────────────────────────────────────── */}
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 3.2, 0]} receiveShadow>
+            <planeGeometry args={[20, 20]} />
+            <Suspense fallback={<meshStandardMaterial color={ceilingMaterial.color} roughness={ceilingMaterial.roughness} metalness={ceilingMaterial.metalness} />}>
+              <SurfaceMaterial mat={ceilingMaterial} repeat={[4, 4]} />
+            </Suspense>
+          </mesh>
 
-                {/* ── Floor ────────────────────────────────────────── */}
-                <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-                  <planeGeometry args={[20, 20]} />
-                  <Suspense fallback={<meshStandardMaterial color={floorMaterial.color} roughness={floorMaterial.roughness} metalness={floorMaterial.metalness} />}>
-                    <SurfaceMaterial mat={floorMaterial} repeat={[6, 6]} />
-                  </Suspense>
-                </mesh>
-
-                {/* ── Ceiling ──────────────────────────────────────── */}
-                <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 3.2, 0]} receiveShadow>
-                  <planeGeometry args={[20, 20]} />
-                  <Suspense fallback={<meshStandardMaterial color={ceilingMaterial.color} roughness={ceilingMaterial.roughness} metalness={ceilingMaterial.metalness} />}>
-                    <SurfaceMaterial mat={ceilingMaterial} repeat={[4, 4]} />
-                  </Suspense>
-                </mesh>
-
-                {/* ── Grid + Fog ────────────────────────────────────── */}
-                <DreiGrid
-                  args={[20, 20]} cellSize={0.5} cellThickness={0.5}
-                  cellColor={COLORS.accent} sectionSize={2} sectionThickness={1}
-                  sectionColor={COLORS.action} fadeDistance={30}
-                  position={[0, 0.001, 0]}
-                />
-                <fog attach="fog" args={[lighting.fogColor, 15, 30]} />
-              </Canvas>
-            </div>
-          </div>
-        </div>
-  ); // end canvasBlock
+          {/* ── Grid + Fog ──────────────────────────────────────── */}
+          <DreiGrid
+            args={[20, 20]} cellSize={0.5} cellThickness={0.5}
+            cellColor={COLORS.accent} sectionSize={2} sectionThickness={1}
+            sectionColor={COLORS.action} fadeDistance={30}
+            position={[0, 0.001, 0]}
+          />
+          <fog attach="fog" args={[lighting.fogColor, 15, 30]} />
+        </Canvas>
+      </div>
+    </div>
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ height: '100vh', width: '100vw', background: COLORS.background, overflow: 'hidden', fontFamily: 'Inter, sans-serif', position: 'fixed', top: 0, left: 0 }}>
 
       {isMobile ? (
-        /* ════════════════════════════════════════════════════════════
-           MOBILE LAYOUT — full screen canvas + bottom nav + panels
-           ════════════════════════════════════════════════════════════ */
         <>
-          {/* Mobile top bar */}
           <MobileTopBar
             projectName={projectSave.projectName}
             cameraMode={cameraMode}
             onCameraToggle={() => {
-              if (cameraMode === 'orbit') {
-                setCameraMode('firstPerson');
-                setTeleportTarget([0, 1.6, 0]);
-              } else {
-                setCameraMode('orbit');
-                if (document.pointerLockElement) document.exitPointerLock();
-              }
+              if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }
+              else { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }
             }}
           />
-
-          {/* Full screen 3D canvas — padded for top bar + bottom nav */}
           <div style={{ position: 'fixed', inset: 0, paddingTop: 64, paddingBottom: 72 }}>
             {canvasBlock}
           </div>
-
-          {/* Bottom navigation */}
           <BottomNav
             activeTab={activeTab}
             onTabChange={openMobilePanel}
             onSave={() => setSaveModalOpen(true)}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            onUndo={undo}
-            onRedo={redo}
+            canUndo={canUndo} canRedo={canRedo}
+            onUndo={undo} onRedo={redo}
           />
-
-          {/* Slide-up panel */}
           <SlidePanel
             open={mobilePanelOpen}
             onClose={() => setMobilePanelOpen(false)}
             title={
-              activeTab === 'walls' ? 'Walls' :
+              activeTab === 'walls'     ? 'Walls' :
               activeTab === 'materials' ? 'Materials & Style' :
-              activeTab === 'lighting' ? 'Lighting' : 'Furniture'
+              activeTab === 'lighting'  ? 'Lighting' : 'Furniture'
             }
             height={activeTab === 'furniture' ? '82vh' : '72vh'}
           >
             {activeTab === 'walls' && (
               <WallEditorPanel
-                selectedWall={selectedWall}
-                addWall={addWall}
-                splitWall={splitWall}
-                deleteWall={deleteWall}
-                updateWall={updateWall}
-                gizmoMode={gizmoMode}
-                setGizmoMode={setGizmoMode}
+                selectedWall={selectedWall} addWall={addWall} splitWall={splitWall}
+                deleteWall={deleteWall} updateWall={updateWall}
+                gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
                 envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
                 setEnvColors={(updater) => {
                   const next = typeof updater === 'function'
@@ -632,38 +598,26 @@ export default function RoomScene() {
             )}
             {activeTab === 'materials' && (
               <MaterialPanel
-                selectedWall={selectedWall}
-                walls={walls}
-                floorMaterial={floorMaterial}
-                ceilingMaterial={ceilingMaterial}
-                applyTexture={applyTexture}
-                updateSurface={updateSurface}
-                applyTheme={applyTheme}
-                activeTheme={activeTheme}
+                selectedWall={selectedWall} walls={walls}
+                floorMaterial={floorMaterial} ceilingMaterial={ceilingMaterial}
+                applyTexture={applyTexture} updateSurface={updateSurface}
+                applyTheme={applyTheme} activeTheme={activeTheme}
               />
             )}
             {activeTab === 'lighting' && <LightingPanel {...lightingState} />}
             {activeTab === 'furniture' && (
               <FurniturePicker
-                selectedItem={selectedFurniture}
-                placedItems={placedItems}
+                selectedItem={selectedFurniture} placedItems={placedItems}
                 addItem={(model) => { addItem(model); setMobilePanelOpen(false); }}
-                deleteItem={deleteItem}
-                gizmoMode={gizmoMode}
-                setGizmoMode={setGizmoMode}
-                furnitureRefs={furnitureRefs}
-                tint={furnitureTint}
-                setTint={setFurnitureTint}
+                deleteItem={deleteItem} gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
+                furnitureRefs={furnitureRefs} tint={furnitureTint} setTint={setFurnitureTint}
               />
             )}
           </SlidePanel>
         </>
       ) : (
-        /* ════════════════════════════════════════════════════════════
-           DESKTOP LAYOUT — splitter sidebar + 3D canvas
-           ════════════════════════════════════════════════════════════ */
         <>
-          {/* Undo / Redo + Save toolbar */}
+          {/* Desktop undo / save bar */}
           <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, background: `${COLORS.surface}CC`, padding: '8px', borderRadius: '12px', border: `1px solid ${COLORS.secondary}60`, backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
             <Space>
               <Tooltip title="Undo (Ctrl+Z)">
@@ -683,7 +637,6 @@ export default function RoomScene() {
           </div>
 
           <Splitter style={{ height: '100%', width: '100%', background: COLORS.background }}>
-            {/* Sidebar */}
             <Splitter.Panel defaultSize="40%" min="20%" max="70%" style={{ background: COLORS.background }}>
               <div ref={sidebarRef} style={{ height: '100%', width: '100%', padding: '40px 28px 28px', background: `linear-gradient(145deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`, borderRight: `2px solid ${COLORS.action}30`, boxShadow: '8px 0 30px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
                 <div style={{ marginBottom: 36 }}>
@@ -726,7 +679,6 @@ export default function RoomScene() {
                 />
               </div>
             </Splitter.Panel>
-            {/* 3D Scene */}
             <Splitter.Panel style={{ background: COLORS.background }}>
               {canvasBlock}
             </Splitter.Panel>
@@ -734,7 +686,7 @@ export default function RoomScene() {
         </>
       )}
 
-      {/* ── Context toolbars — pure DOM, outside Canvas ─────────── */}
+      {/* ── Context toolbars ─────────────────────────────────────────────── */}
       <ContextToolbar
         type="wall"
         screenPos={selectedWall ? wallToolbarPos : null}
@@ -745,6 +697,8 @@ export default function RoomScene() {
         onGhost={() => selectedWall && updateWall(selectedWall.id, { ghost: !selectedWall.ghost })}
         wallGhost={selectedWall?.ghost || false}
         navigateTo={navigateTo}
+        selectedItem={selectedWall}
+        onPrecisionUpdate={(updates) => selectedWall && updateWall(selectedWall.id, updates)}
       />
       <ContextToolbar
         type="furniture"
@@ -755,6 +709,8 @@ export default function RoomScene() {
         navigateTo={navigateTo}
         selectedFurnitureRef={{ current: furnitureRefs.current[selectedFurnitureId] }}
         onTintChange={(tint) => selectedFurniture && updateItem(selectedFurniture.id, { tint })}
+        selectedItem={selectedFurniture}
+        onPrecisionUpdate={(updates) => selectedFurniture && updateItem(selectedFurniture.id, updates)}
       />
       <ContextToolbar
         type="light"
@@ -765,17 +721,17 @@ export default function RoomScene() {
         navigateTo={navigateTo}
       />
 
-      {/* ── Model preview portal — single persistent Canvas ────────── */}
+      {/* ── Model preview portal ─────────────────────────────────────────── */}
       <PreviewPortal />
 
-      {/* ── Spatial score panel ─────────────────────────────────── */}
+      {/* ── Spatial score panel ──────────────────────────────────────────── */}
       <ScorePanel
         score={spatial.score}
         suggestions={spatial.suggestions}
         visible={placedItems.length > 0}
       />
 
-      {/* ── Save modal ───────────────────────────────────────────── */}
+      {/* ── Save modal ───────────────────────────────────────────────────── */}
       <SaveModal
         open={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
@@ -790,11 +746,9 @@ export default function RoomScene() {
         setAutosaveEnabled={projectSave.setAutosaveEnabled}
       />
 
-
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body, html { overflow: hidden; height: 100vh; width: 100vw; touch-action: none; }
-        /* Remove ALL outlines/borders from canvas and its wrappers */
         canvas { outline: none !important; border: none !important; display: block !important; }
         .ant-splitter { border: none !important; outline: none !important; }
         .ant-splitter-panel { border: none !important; outline: none !important; }
@@ -804,11 +758,13 @@ export default function RoomScene() {
         .ant-tabs-ink-bar { background: ${COLORS.action} !important; }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: ${COLORS.secondary}; border-radius: 3px; }
-        /* Mobile: larger tap targets */
         @media (max-width: 767px) {
           button { min-height: 44px; }
           .ant-btn { min-height: 44px !important; font-size: 15px !important; }
         }
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
       `}</style>
     </div>
   );

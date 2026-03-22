@@ -51,8 +51,8 @@ export default function ScorePanel({ score, suggestions, visible }) {
     <div
       style={{
         position:   'fixed',
-        bottom:     24,
-        right:      24,
+        bottom:     90,
+        right:      16,
         zIndex:     800,
         fontFamily: 'Inter, sans-serif',
         display:    'flex',

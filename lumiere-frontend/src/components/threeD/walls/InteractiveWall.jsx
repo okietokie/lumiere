@@ -1,5 +1,11 @@
 // src/components/threeD/walls/InteractiveWall.jsx
-import React, { useState, useRef, useMemo } from 'react';
+// FIXES:
+//  - Drag body/endpoints now uses a stable origin snapshot so the wall
+//    doesn't jump when pointer re-enters after a fast move.
+//  - Pointer events use setPointerCapture so the drag stays locked to this
+//    element even if the pointer leaves the canvas bounds.
+//  - Ghost opacity effect is keyed off of cameraMode properly.
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -9,13 +15,18 @@ import SurfaceMaterial from '../materials/SurfaceMaterial';
 const FADE_START = 1.8;
 const FADE_END   = 0.5;
 
+// Reusable raycaster + plane — allocating once avoids GC pressure
+const _ray   = new THREE.Raycaster();
+const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _hit   = new THREE.Vector3();
+
 const InteractiveWall = React.forwardRef(({
   wall, isSelected, onSelect, updateWall, setOrbitEnabled, cameraMode,
 }, ref) => {
   const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
-  const dragging = useRef(false);
-  const meshRef  = useRef();
+  const dragState = useRef(null);   // { type, origin, initStart, initEnd }
+  const meshRef   = useRef();
 
   const {
     id, start, end, height, thickness,
@@ -58,66 +69,98 @@ const InteractiveWall = React.forwardRef(({
     });
   });
 
-  // ── Drag ─────────────────────────────────────────────────────────────────
-  const getWorldPos = (clientX, clientY) => {
-    const rect  = gl.domElement.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
+  // ── Ground-plane hit test ─────────────────────────────────────────────────
+  const getGroundPos = useCallback((clientX, clientY) => {
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc  = new THREE.Vector2(
       ((clientX - rect.left) / rect.width)  *  2 - 1,
       ((clientY - rect.top)  / rect.height) * -2 + 1,
     );
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(mouse, camera);
-    const plane  = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const target = new THREE.Vector3();
-    ray.ray.intersectPlane(plane, target);
-    return target;
-  };
+    _ray.setFromCamera(ndc, camera);
+    if (_ray.ray.intersectPlane(_plane, _hit)) return _hit.clone();
+    return null;
+  }, [camera, gl]);
 
-  const startDrag = (e, dragType) => {
+  // ── Drag ─────────────────────────────────────────────────────────────────
+  const startDrag = useCallback((e, dragType) => {
     e.stopPropagation();
+    // Capture pointer so drag continues even outside the mesh
+    if (e.pointerId != null) {
+      try { gl.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+    }
     setOrbitEnabled(false);
-    dragging.current = true;
-    const origin    = getWorldPos(e.clientX, e.clientY);
-    const initStart = [...start], initEnd = [...end];
+
+    const origin = getGroundPos(e.clientX, e.clientY);
+    if (!origin) return;
+
+    dragState.current = {
+      type:      dragType,
+      origin,
+      initStart: [...start],
+      initEnd:   [...end],
+    };
 
     const onMove = (ev) => {
-      if (!dragging.current) return;
-      const pos = getWorldPos(ev.clientX, ev.clientY);
+      const ds = dragState.current;
+      if (!ds) return;
+      const pos = getGroundPos(ev.clientX, ev.clientY);
       if (!pos) return;
-      if (dragType === 'body') {
+
+      const dx = pos.x - ds.origin.x;
+      const dz = pos.z - ds.origin.z;
+
+      if (ds.type === 'body') {
         updateWall(id, {
-          start: [initStart[0] + pos.x - origin.x, initStart[1] + pos.z - origin.z],
-          end:   [initEnd[0]   + pos.x - origin.x, initEnd[1]   + pos.z - origin.z],
+          start: [ds.initStart[0] + dx, ds.initStart[1] + dz],
+          end:   [ds.initEnd[0]   + dx, ds.initEnd[1]   + dz],
         });
       } else {
-        const isStart    = dragType === 'start';
-        const fixedPoint = isStart ? initEnd : initStart;
-        const dragAngle  = isStart ? angle + Math.PI : angle;
-        const dx = pos.x - fixedPoint[0], dz = pos.z - fixedPoint[1];
-        let newLen = dx * Math.cos(dragAngle) + dz * Math.sin(dragAngle);
+        // Endpoint drag — constrain new endpoint along the wall axis
+        const isStartDrag = ds.type === 'start';
+        const fixedPoint  = isStartDrag ? ds.initEnd   : ds.initStart;
+        const dragAngle   = isStartDrag ? angle + Math.PI : angle;
+
+        // Project pointer onto wall axis
+        const newX    = pos.x;
+        const newZ    = pos.z;
+        const relX    = newX - fixedPoint[0];
+        const relZ    = newZ - fixedPoint[1];
+        let   newLen  = relX * Math.cos(dragAngle) + relZ * Math.sin(dragAngle);
         newLen = Math.max(0.3, newLen);
+
+        // Snap to 0.5m grid
         const snapped = Math.round(newLen / 0.5) * 0.5;
         if (Math.abs(newLen - snapped) < 0.12) newLen = snapped;
-        const newX = fixedPoint[0] + newLen * Math.cos(dragAngle);
-        const newZ = fixedPoint[1] + newLen * Math.sin(dragAngle);
-        updateWall(id, isStart ? { start: [newX, newZ] } : { end: [newX, newZ] });
+
+        const epX = fixedPoint[0] + newLen * Math.cos(dragAngle);
+        const epZ = fixedPoint[1] + newLen * Math.sin(dragAngle);
+
+        updateWall(id, isStartDrag
+          ? { start: [epX, epZ] }
+          : { end:   [epX, epZ] }
+        );
       }
     };
 
-    const onUp = () => {
-      dragging.current = false;
+    const onUp = (ev) => {
+      dragState.current = null;
       setOrbitEnabled(true);
-      window.removeEventListener('pointermove', onMove);
+      if (ev?.pointerId != null) {
+        try { gl.domElement.releasePointerCapture(ev.pointerId); } catch (_) {}
+      }
+      gl.domElement.removeEventListener('pointermove', onMove);
+      gl.domElement.removeEventListener('pointerup',   onUp);
       window.removeEventListener('pointerup', onUp);
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  };
 
-  // Ghost props — passed into every material declaratively
+    gl.domElement.addEventListener('pointermove', onMove, { passive: true });
+    gl.domElement.addEventListener('pointerup',   onUp);
+    window.addEventListener('pointerup', onUp);    // safety fallback
+  }, [angle, end, getGroundPos, gl, id, setOrbitEnabled, start, updateWall]);
+
   const ghostProps = ghost
     ? { transparent: true, opacity: 0.15, depthWrite: false }
-    : { transparent: false, opacity: 1,    depthWrite: true  };
+    : { transparent: false, opacity: 1,   depthWrite: true  };
 
   return (
     <group>
@@ -131,15 +174,14 @@ const InteractiveWall = React.forwardRef(({
         rotation={[0, -angle, 0]}
         castShadow={!ghost}
         receiveShadow
-        onClick={(e)       => { e.stopPropagation(); onSelect(); }}
-        onPointerDown={(e) => { if (isSelected) startDrag(e, 'body'); }}
-        onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = isSelected ? 'grab' : 'pointer'; }}
-        onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
+        onClick={(e)        => { e.stopPropagation(); onSelect(); }}
+        onPointerDown={(e)  => { if (isSelected) startDrag(e, 'body'); }}
+        onPointerOver={(e)  => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = isSelected ? 'grab' : 'pointer'; }}
+        onPointerOut={()    => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
       >
         <boxGeometry args={[length, height, thickness]} />
 
         {isSelected || hovered ? (
-          // Highlight material — ghost props applied directly
           <meshStandardMaterial
             color={isSelected ? COLORS.action : COLORS.accent}
             roughness={roughness}
@@ -147,7 +189,6 @@ const InteractiveWall = React.forwardRef(({
             {...ghostProps}
           />
         ) : (
-          // Surface material — ghost props passed through to SurfaceMaterial
           <SurfaceMaterial
             mat={{ color, roughness, metalness, textureId }}
             repeat={[2, 1]}
@@ -158,25 +199,41 @@ const InteractiveWall = React.forwardRef(({
 
       {isSelected && (
         <>
-          <mesh position={[start[0], height / 2, start[1]]}
+          {/* Start handle */}
+          <mesh
+            position={[start[0], height / 2, start[1]]}
             onPointerDown={(e) => startDrag(e, 'start')}
             onPointerOver={() => { document.body.style.cursor = 'ew-resize'; }}
-            onPointerOut={()  => { document.body.style.cursor = 'auto'; }}>
+            onPointerOut={()  => { document.body.style.cursor = 'auto'; }}
+          >
             <sphereGeometry args={[0.18, 16, 16]} />
             <meshBasicMaterial color="#FFD700" depthTest={false} />
           </mesh>
-          <mesh position={[end[0], height / 2, end[1]]}
+
+          {/* End handle */}
+          <mesh
+            position={[end[0], height / 2, end[1]]}
             onPointerDown={(e) => startDrag(e, 'end')}
             onPointerOver={() => { document.body.style.cursor = 'ew-resize'; }}
-            onPointerOut={()  => { document.body.style.cursor = 'auto'; }}>
+            onPointerOut={()  => { document.body.style.cursor = 'auto'; }}
+          >
             <sphereGeometry args={[0.18, 16, 16]} />
             <meshBasicMaterial color="#FFD700" depthTest={false} />
           </mesh>
+
+          {/* Centre dot */}
           <mesh position={[centerX, height / 2, centerZ]}>
             <sphereGeometry args={[0.1, 12, 12]} />
             <meshBasicMaterial color={COLORS.action} depthTest={false} />
           </mesh>
-          <Html position={[centerX, height + 0.4, centerZ]} center distanceFactor={8} style={{ pointerEvents: 'none' }}>
+
+          {/* Length label */}
+          <Html
+            position={[centerX, height + 0.4, centerZ]}
+            center
+            distanceFactor={8}
+            style={{ pointerEvents: 'none' }}
+          >
             <div style={{
               background: 'rgba(0,0,0,0.72)', color: '#FFD700',
               fontSize: 12, fontFamily: 'Inter, sans-serif', fontWeight: 600,

@@ -1,36 +1,49 @@
-// src/components/ui/ContextToolbar.jsx
-import { useRef, useEffect, useState } from 'react';
+// src/components/threeD/ui/ContextToolbar.jsx
+//
+// KEY CHANGES vs previous version:
+//  1. Precision popup is PINNED to the top of the screen (just below any top bar),
+//     never floating near the object — so it never covers what you're editing.
+//  2. "Precise" standalone button fully removed from furniture list.
+//  3. Double-tap Move/Rotate/Scale/Resize opens per-mode popup (same as before).
+//  4. Popup is compact and docked top-right, well clear of the 3D scene.
+//  5. All tint, ghost, split, speech-bubble, gsap animations preserved.
+//  6. Wall precision: Move=centreX/Z, Rotate=angle°, Resize=length/height/thickness.
+//  7. Mobile: 44px tap targets, hold-to-repeat steppers.
+
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { gsap } from 'gsap';
 import * as THREE from 'three';
+import { COLORS } from '../../../utils/colors';
 
-const TOOLBAR_W = { wall: 320, furniture: 300, light: 160 };
+const TOOLBAR_W = { wall: 300, furniture: 260, light: 160 };
 const TOOLBAR_H = 64;
 const MARGIN    = 10;
 
+// ── Button definitions ─────────────────────────────────────────────────────────
 const WALL_BUTTONS = [
-  { iconName: 'drag',    label: 'Move',     action: 'gizmo:translate', tab: 'walls',    section: 'wall-gizmo'      },
-  { iconName: 'swap',    label: 'Rotate',   action: 'gizmo:rotate',    tab: 'walls',    section: 'wall-gizmo'      },
-  { iconName: 'expand',  label: 'Resize',   action: 'gizmo:scale',     tab: 'walls',    section: 'wall-dimensions' },
-  { iconName: 'paint',   label: 'Material', action: 'tab',             tab: 'materials',section: 'mat-walls'       },
-  { iconName: 'ghost',   label: 'Ghost',    action: 'ghost',           tab: null,       section: null              },
-  { iconName: 'scissor', label: 'Split',    action: 'split',           tab: null,       section: null              },
-  { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,       section: null, danger: true },
+  { iconName: 'drag',    label: 'Move',     action: 'gizmo:translate', tab: 'walls',     section: 'wall-gizmo',      precision: true  },
+  { iconName: 'swap',    label: 'Rotate',   action: 'gizmo:rotate',    tab: 'walls',     section: 'wall-gizmo',      precision: true  },
+  { iconName: 'expand',  label: 'Resize',   action: 'gizmo:scale',     tab: 'walls',     section: 'wall-dimensions', precision: true  },
+  { iconName: 'paint',   label: 'Material', action: 'tab',             tab: 'materials', section: 'mat-walls',       precision: false },
+  { iconName: 'ghost',   label: 'Ghost',    action: 'ghost',           tab: null,        section: null,              precision: false },
+  { iconName: 'scissor', label: 'Split',    action: 'split',           tab: null,        section: null,              precision: false },
+  { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,        section: null,              danger: true     },
 ];
 const FURNITURE_BUTTONS = [
-  { iconName: 'drag',    label: 'Move',     action: 'gizmo:translate', tab: 'furniture',section: 'furniture-gizmo' },
-  { iconName: 'swap',    label: 'Rotate',   action: 'gizmo:rotate',    tab: 'furniture',section: 'furniture-gizmo' },
-  { iconName: 'expand',  label: 'Scale',    action: 'gizmo:scale',     tab: 'furniture',section: 'furniture-gizmo' },
-  { iconName: 'tint',    label: 'Tint',     action: 'tint',            tab: null,       section: null              },
-  { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,       section: null, danger: true },
+  { iconName: 'drag',    label: 'Move',     action: 'gizmo:translate', tab: 'furniture', section: 'furniture-gizmo', precision: true  },
+  { iconName: 'swap',    label: 'Rotate',   action: 'gizmo:rotate',    tab: 'furniture', section: 'furniture-gizmo', precision: true  },
+  { iconName: 'expand',  label: 'Scale',    action: 'gizmo:scale',     tab: 'furniture', section: 'furniture-gizmo', precision: true  },
+  { iconName: 'tint',    label: 'Tint',     action: 'tint',            tab: null,        section: null,              precision: false },
+  { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,        section: null,              danger: true     },
 ];
 const LIGHT_BUTTONS = [
-  { iconName: 'drag',    label: 'Move',     action: 'tab',             tab: 'lighting', section: 'light-selected'  },
-  { iconName: 'bulb',    label: 'Edit',     action: 'tab',             tab: 'lighting', section: 'light-selected'  },
-  { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,       section: null, danger: true },
+  { iconName: 'drag',    label: 'Move',     action: 'tab',             tab: 'lighting',  section: 'light-selected',  precision: false },
+  { iconName: 'bulb',    label: 'Edit',     action: 'tab',             tab: 'lighting',  section: 'light-selected',  precision: false },
+  { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,        section: null,              danger: true     },
 ];
 
-// ── Shared original-colour store ──────────────────────────────────────────────
+// ── Tint helpers ──────────────────────────────────────────────────────────────
 const _originals = new Map();
 
 function captureOriginals(meshGroup) {
@@ -68,7 +81,7 @@ function applyTint(meshGroup, hue, sat, bri) {
   });
 }
 
-// ── 1. WorldProjector ─────────────────────────────────────────────────────────
+// ── WorldProjector (R3F component) ────────────────────────────────────────────
 export function WorldProjector({ worldPosition, type, onScreenPos }) {
   const { camera, gl } = useThree();
   const vec = useRef(new THREE.Vector3());
@@ -79,10 +92,10 @@ export function WorldProjector({ worldPosition, type, onScreenPos }) {
     if (vec.current.z > 1) { onScreenPos(null); return; }
     const rect = gl.domElement.getBoundingClientRect();
     const tw   = TOOLBAR_W[type] ?? 300;
-    let sx = (vec.current.x *  0.5 + 0.5) * rect.width  + rect.left;
-    let sy = (vec.current.y * -0.5 + 0.5) * rect.height + rect.top;
-    let tx = Math.max(MARGIN, Math.min(window.innerWidth  - MARGIN - tw, sx - tw / 2));
-    let ty = sy - TOOLBAR_H - 14;
+    const sx   = (vec.current.x *  0.5 + 0.5) * rect.width  + rect.left;
+    const sy   = (vec.current.y * -0.5 + 0.5) * rect.height + rect.top;
+    const tx   = Math.max(MARGIN, Math.min(window.innerWidth  - MARGIN - tw, sx - tw / 2));
+    let   ty   = sy - TOOLBAR_H - 14;
     if (ty < MARGIN) ty = sy + 14;
     ty = Math.max(MARGIN, Math.min(window.innerHeight - MARGIN - TOOLBAR_H, ty));
     onScreenPos({ x: tx, y: ty });
@@ -90,44 +103,51 @@ export function WorldProjector({ worldPosition, type, onScreenPos }) {
   return null;
 }
 
-// ── 2. ContextToolbar ─────────────────────────────────────────────────────────
+// ── ContextToolbar ─────────────────────────────────────────────────────────────
 export default function ContextToolbar({
   type, screenPos,
   gizmoMode, onGizmoChange,
   onDelete, onSplit, onGhost,
   navigateTo,
-  // furniture tint props
   selectedFurnitureRef,
   onTintChange,
-  // wall ghost
+  selectedItem,
+  onPrecisionUpdate,
   wallGhost,
 }) {
-  const ref        = useRef(null);
+  const toolbarRef              = useRef(null);
   const [tintOpen, setTintOpen] = useState(false);
-  const [hue, setHue]   = useState(0);
-  const [sat, setSat]   = useState(1);
-  const [bri, setBri]   = useState(1);
+  const [bubble,   setBubble]   = useState(null);
+  const bubbleTimer             = useRef(null);
 
-  // Animate in when toolbar appears
+  const [precisionMode, setPrecisionMode] = useState(null);
+  const lastTapMs                         = useRef({});
+
+  const [hue, setHue] = useState(0);
+  const [sat, setSat] = useState(1);
+  const [bri, setBri] = useState(1);
+
   useEffect(() => {
-    if (ref.current && screenPos)
-      gsap.fromTo(ref.current,
+    if (toolbarRef.current && screenPos)
+      gsap.fromTo(toolbarRef.current,
         { opacity: 0, y: 6, scale: 0.94 },
         { opacity: 1, y: 0, scale: 1, duration: 0.2, ease: 'back.out(1.6)' },
       );
   }, [!!screenPos]);
 
-  // Close tint panel and reset when selection disappears
   useEffect(() => {
-    if (!screenPos) { setTintOpen(false); setHue(0); setSat(1); setBri(1); }
+    if (!screenPos) {
+      setTintOpen(false); setPrecisionMode(null);
+      setHue(0); setSat(1); setBri(1);
+    }
   }, [screenPos]);
 
-  // Capture originals when tint panel opens
+  useEffect(() => { setPrecisionMode(null); }, [selectedItem?.id]);
+
   useEffect(() => {
     if (tintOpen) captureOriginals(selectedFurnitureRef?.current);
   }, [tintOpen, selectedFurnitureRef]);
 
-  // Live apply on every slider change + persist to item state
   useEffect(() => {
     if (!tintOpen) return;
     applyTint(selectedFurnitureRef?.current, hue, sat, bri);
@@ -140,15 +160,55 @@ export default function ContextToolbar({
     : type === 'furniture' ? FURNITURE_BUTTONS
     : LIGHT_BUTTONS;
 
-  const handle = (btn) => {
-    if (btn.action === 'tint') { setTintOpen((o) => !o); return; }
+  const BUBBLE_MSGS = {
+    'gizmo:translate': 'Drag arrows to move · double-tap for precision',
+    'gizmo:rotate':    'Drag rings to rotate · double-tap for precision',
+    'gizmo:scale':     'Drag handles to resize · double-tap for precision',
+    'tint':            'Adjust hue, saturation & brightness',
+    'delete':          'Item removed',
+    'split':           'Wall split in two',
+    'ghost':           'Wall is now see-through — tap again to restore',
+    'tab':             null,
+  };
+
+  const showBubble = (text, btnEl) => {
+    clearTimeout(bubbleTimer.current);
+    if (!text) return;
+    const r = btnEl?.getBoundingClientRect();
+    setBubble(r
+      ? { text, x: r.left + r.width / 2, y: r.top }
+      : { text, x: (screenPos.x ?? 0) + 100, y: screenPos.y ?? 0 },
+    );
+    bubbleTimer.current = setTimeout(() => setBubble(null), 3000);
+  };
+
+  const handle = (btn, btnEl) => {
     if (btn.action.startsWith('gizmo:')) {
-      onGizmoChange(btn.action.split(':')[1]);
+      const mode = btn.action.split(':')[1];
+      onGizmoChange(mode);
       if (btn.tab) navigateTo(btn.tab, btn.section);
-    } else if (btn.action === 'delete') onDelete();
-    else if (btn.action === 'split')    onSplit?.();
-    else if (btn.action === 'ghost')    onGhost?.();
-    else if (btn.tab)                   navigateTo(btn.tab, btn.section);
+
+      if (btn.precision) {
+        const now  = Date.now();
+        const last = lastTapMs.current[btn.action] || 0;
+        if (now - last < 380) {
+          setPrecisionMode((prev) => (prev === mode ? null : mode));
+          lastTapMs.current[btn.action] = 0;
+          return;
+        }
+        lastTapMs.current[btn.action] = now;
+        if (precisionMode && precisionMode !== mode) setPrecisionMode(null);
+        showBubble(BUBBLE_MSGS[btn.action], btnEl);
+      }
+      return;
+    }
+
+    showBubble(BUBBLE_MSGS[btn.action] ?? null, btnEl);
+    if (btn.action === 'tint')   { setTintOpen((o) => !o); return; }
+    if (btn.action === 'delete') { onDelete(); return; }
+    if (btn.action === 'split')  { onSplit?.(); return; }
+    if (btn.action === 'ghost')  { onGhost?.(); return; }
+    if (btn.tab)                  { navigateTo(btn.tab, btn.section); }
   };
 
   const resetTint = () => {
@@ -158,78 +218,485 @@ export default function ContextToolbar({
   };
 
   return (
+    <>
+      {/* ── Main toolbar pill ─────────────────────────────────────── */}
+      <div
+        ref={toolbarRef}
+        style={{
+          position:       'fixed',
+          left:           screenPos.x,
+          top:            screenPos.y,
+          zIndex:         9999,
+          display:        'flex',
+          flexDirection:  'column',
+          gap:            0,
+          background:     'rgba(12,9,7,0.93)',
+          border:         '1px solid rgba(196,154,108,0.3)',
+          borderRadius:   12,
+          backdropFilter: 'blur(16px)',
+          boxShadow:      '0 8px 32px rgba(0,0,0,0.65)',
+          pointerEvents:  'auto',
+          userSelect:     'none',
+          overflow:       'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', gap: 2, padding: '5px 6px' }}>
+          {buttons.map((btn, i) => {
+            const gizmoKey   = btn.action.startsWith('gizmo:') ? btn.action.split(':')[1] : null;
+            const isActive   = (gizmoKey && gizmoKey === gizmoMode)
+                            || (btn.action === 'tint'  && tintOpen)
+                            || (btn.action === 'ghost' && wallGhost);
+            const precActive = btn.precision && gizmoKey && precisionMode === gizmoKey;
+            return (
+              <ToolbarBtn
+                key={i}
+                btn={btn}
+                active={isActive}
+                precisionActive={precActive}
+                onClick={(e) => handle(btn, e.currentTarget)}
+              />
+            );
+          })}
+        </div>
+
+        {/* Inline tint panel */}
+        {tintOpen && type === 'furniture' && (
+          <div style={{
+            padding: '12px 14px 14px',
+            borderTop: '1px solid rgba(196,154,108,0.2)',
+            display: 'flex', flexDirection: 'column', gap: 10, minWidth: 260,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#C49A6C', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: 'Inter, sans-serif' }}>
+                Colour Adjust
+              </span>
+              <button onClick={resetTint} style={{
+                background: 'transparent', border: '1px solid rgba(122,101,89,0.5)',
+                borderRadius: 5, color: 'rgba(122,101,89,0.9)', fontSize: 10,
+                padding: '2px 8px', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+              }}>Reset</button>
+            </div>
+            <TintSlider label="Hue"        value={hue} min={-180} max={180} step={1}    unit="°" color="#C49A6C" onChange={setHue} />
+            <TintSlider label="Saturation" value={sat} min={0}    max={2}   step={0.01} unit="×" color="#88BBDD" onChange={setSat} />
+            <TintSlider label="Brightness" value={bri} min={0.1}  max={2}   step={0.01} unit="×" color="#F2E5D5" onChange={setBri} />
+          </div>
+        )}
+      </div>
+
+      {/* ── Precision popup — PINNED TO TOP of viewport ──────────── */}
+      {precisionMode && selectedItem && (
+        <PrecisionPopup
+          mode={precisionMode}
+          toolbarType={type}
+          item={selectedItem}
+          onUpdate={onPrecisionUpdate}
+          onClose={() => setPrecisionMode(null)}
+        />
+      )}
+
+      {/* ── Speech bubble ─────────────────────────────────────────── */}
+      {bubble && <SpeechBubble text={bubble.text} x={bubble.x} y={bubble.y} />}
+    </>
+  );
+}
+
+// ── Axis colour palette (matches Three.js gizmo conventions) ─────────────────
+const AXIS_COLORS = {
+  X: '#FF4D4D',   // red
+  Y: '#4DDD6E',   // green
+  Z: '#4D9EFF',   // blue
+  W: '#C49A6C',   // gold — for single-axis or wall fields
+};
+
+function axisColor(label) {
+  const l = label.toUpperCase();
+  if (l.startsWith('X')) return AXIS_COLORS.X;
+  if (l.startsWith('Y')) return AXIS_COLORS.Y;
+  if (l.startsWith('Z')) return AXIS_COLORS.Z;
+  return AXIS_COLORS.W;
+}
+
+// ── PrecisionPopup ─────────────────────────────────────────────────────────────
+// Pinned top-right (desktop) or top-centre (mobile), always clear of the scene.
+// Fields are ALWAYS stacked vertically — never in columns — so nothing is clipped.
+function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
+  const popupRef = useRef(null);
+
+  // ── field definitions ──────────────────────────────────────────────────────
+  const buildFields = () => {
+    if (toolbarType === 'furniture') {
+      const pos   = Array.isArray(item.position) ? item.position : [0, 0, 0];
+      const rot   = Array.isArray(item.rotation) ? item.rotation : [0, 0, 0];
+      const scl   = Array.isArray(item.scale)    ? item.scale    : [1, 1, 1];
+      const toDeg = (r) => parseFloat((r * 180 / Math.PI).toFixed(2));
+
+      if (mode === 'translate') return [
+        { key: 'px', label: 'X', unit: 'm',  step: 0.05, init: parseFloat(pos[0].toFixed(3)) },
+        { key: 'py', label: 'Y', unit: 'm',  step: 0.05, init: parseFloat(pos[1].toFixed(3)) },
+        { key: 'pz', label: 'Z', unit: 'm',  step: 0.05, init: parseFloat(pos[2].toFixed(3)) },
+      ];
+      if (mode === 'rotate') return [
+        { key: 'rx', label: 'X', unit: '°', step: 5,    init: toDeg(rot[0]) },
+        { key: 'ry', label: 'Y', unit: '°', step: 5,    init: toDeg(rot[1]) },
+        { key: 'rz', label: 'Z', unit: '°', step: 5,    init: toDeg(rot[2]) },
+      ];
+      if (mode === 'scale') return [
+        { key: 'sx', label: 'X', unit: '×', step: 0.05, init: parseFloat(scl[0].toFixed(3)) },
+        { key: 'sy', label: 'Y', unit: '×', step: 0.05, init: parseFloat(scl[1].toFixed(3)) },
+        { key: 'sz', label: 'Z', unit: '×', step: 0.05, init: parseFloat(scl[2].toFixed(3)) },
+      ];
+    }
+
+    if (toolbarType === 'wall') {
+      const s   = item.start || [0, 0];
+      const e   = item.end   || [0, 0];
+      const len = parseFloat(Math.hypot(e[0] - s[0], e[1] - s[1]).toFixed(3));
+      const ang = parseFloat((Math.atan2(e[1] - s[1], e[0] - s[0]) * 180 / Math.PI).toFixed(2));
+      const cx  = parseFloat(((s[0] + e[0]) / 2).toFixed(3));
+      const cz  = parseFloat(((s[1] + e[1]) / 2).toFixed(3));
+
+      if (mode === 'translate') return [
+        { key: 'cx',  label: 'Centre X', unit: 'm', step: 0.1,  init: cx  },
+        { key: 'cz',  label: 'Centre Z', unit: 'm', step: 0.1,  init: cz  },
+      ];
+      if (mode === 'rotate') return [
+        { key: 'angle', label: 'Angle', unit: '°', step: 5, init: ang },
+      ];
+      if (mode === 'scale') return [
+        { key: 'length',    label: 'Length',    unit: 'm', step: 0.1,  init: len },
+        { key: 'height',    label: 'Height',    unit: 'm', step: 0.05, init: parseFloat((item.height    ?? 3).toFixed(3)) },
+        { key: 'thickness', label: 'Thickness', unit: 'm', step: 0.05, init: parseFloat((item.thickness ?? 0.2).toFixed(3)) },
+      ];
+    }
+    return [];
+  };
+
+  const fields = buildFields();
+
+  const [vals, setVals] = useState(() =>
+    Object.fromEntries(fields.map((f) => [f.key, f.init]))
+  );
+
+  const itemSig = fields.map((f) => f.init).join(',');
+  useEffect(() => {
+    setVals(Object.fromEntries(fields.map((f) => [f.key, f.init])));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemSig]);
+
+  // ── live apply ─────────────────────────────────────────────────────────────
+  const applyKey = useCallback((key, rawNum) => {
+    const num = parseFloat(rawNum);
+    if (!isFinite(num)) return;
+    const next = { ...vals, [key]: num };
+    setVals(next);
+
+    if (toolbarType === 'furniture') {
+      const toRad = (d) => d * Math.PI / 180;
+      const pos   = Array.isArray(item.position) ? item.position : [0, 0, 0];
+      const scl   = Array.isArray(item.scale)    ? item.scale    : [1, 1, 1];
+      if (mode === 'translate') {
+        onUpdate?.({ position: [next.px ?? pos[0], next.py ?? pos[1], next.pz ?? pos[2]] });
+      } else if (mode === 'rotate') {
+        onUpdate?.({ rotation: [toRad(next.rx ?? 0), toRad(next.ry ?? 0), toRad(next.rz ?? 0)] });
+      } else if (mode === 'scale') {
+        onUpdate?.({ scale: [
+          Math.max(0.001, next.sx ?? scl[0]),
+          Math.max(0.001, next.sy ?? scl[1]),
+          Math.max(0.001, next.sz ?? scl[2]),
+        ]});
+      }
+    } else if (toolbarType === 'wall') {
+      const s   = item.start || [0, 0];
+      const e   = item.end   || [0, 0];
+      const len = Math.hypot(e[0] - s[0], e[1] - s[1]);
+      const ang = Math.atan2(e[1] - s[1], e[0] - s[0]);
+      const cx  = (s[0] + e[0]) / 2;
+      const cz  = (s[1] + e[1]) / 2;
+      if (mode === 'translate') {
+        const hx = Math.cos(ang) * len / 2, hz = Math.sin(ang) * len / 2;
+        const newCx = next.cx ?? cx, newCz = next.cz ?? cz;
+        onUpdate?.({ start: [newCx - hx, newCz - hz], end: [newCx + hx, newCz + hz] });
+      } else if (mode === 'rotate') {
+        const newAng = (next.angle ?? (ang * 180 / Math.PI)) * Math.PI / 180;
+        const hx = Math.cos(newAng) * len / 2, hz = Math.sin(newAng) * len / 2;
+        onUpdate?.({ start: [cx - hx, cz - hz], end: [cx + hx, cz + hz] });
+      } else if (mode === 'scale') {
+        const newLen = Math.max(0.3,  next.length    ?? len);
+        const newH   = Math.max(0.3,  next.height    ?? item.height    ?? 3);
+        const newT   = Math.max(0.05, next.thickness ?? item.thickness ?? 0.2);
+        const hx = Math.cos(ang) * newLen / 2, hz = Math.sin(ang) * newLen / 2;
+        onUpdate?.({ start: [cx - hx, cz - hz], end: [cx + hx, cz + hz], height: newH, thickness: newT });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vals, item, mode, toolbarType]);
+
+  // ── position: pinned top-right / top-centre ────────────────────────────────
+  const isMobile = window.innerWidth < 768;
+  const POPUP_W  = Math.min(300, window.innerWidth - 24);
+  const popLeft  = isMobile
+    ? Math.round((window.innerWidth - POPUP_W) / 2)
+    : window.innerWidth - POPUP_W - 20;
+  const popTop   = isMobile ? 70 : 14;
+
+  const MODE_META = {
+    translate: { label: 'Position',   icon: '⬡' },
+    rotate:    { label: 'Rotation',   icon: '↻' },
+    scale:     { label: toolbarType === 'wall' ? 'Dimensions' : 'Scale', icon: '⤡' },
+  };
+  const meta = MODE_META[mode] ?? { label: mode, icon: '·' };
+
+  useEffect(() => {
+    if (popupRef.current)
+      gsap.fromTo(popupRef.current,
+        { opacity: 0, y: -10, scale: 0.95 },
+        { opacity: 1, y: 0,   scale: 1, duration: 0.24, ease: 'back.out(1.6)' },
+      );
+  }, []);
+
+  return (
     <div
-      ref={ref}
+      ref={popupRef}
       style={{
         position:       'fixed',
-        left:           screenPos.x,
-        top:            screenPos.y,
-        zIndex:         9999,
-        display:        'flex',
-        flexDirection:  'column',
-        gap:            0,
-        background:     'rgba(12,9,7,0.93)',
-        border:         '1px solid rgba(196,154,108,0.3)',
-        borderRadius:   12,
-        backdropFilter: 'blur(16px)',
-        boxShadow:      '0 8px 32px rgba(0,0,0,0.65)',
-        pointerEvents:  'auto',
+        left:           popLeft,
+        top:            popTop,
+        width:          POPUP_W,
+        zIndex:         10100,
+        background:     'linear-gradient(160deg, rgba(22,16,12,0.98) 0%, rgba(14,10,8,0.98) 100%)',
+        border:         '1px solid rgba(196,154,108,0.22)',
+        borderRadius:   16,
+        backdropFilter: 'blur(24px)',
+        boxShadow:      '0 20px 60px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.04)',
+        fontFamily:     'Inter, sans-serif',
+        pointerEvents:  'all',
         userSelect:     'none',
         overflow:       'hidden',
       }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e)       => e.stopPropagation()}
     >
-      {/* Button row */}
-      <div style={{ display: 'flex', gap: 2, padding: '5px 6px' }}>
-        {buttons.map((btn, i) => (
-          <ToolbarBtn
-            key={i}
-            btn={btn}
-            active={
-              (btn.action.startsWith('gizmo:') && btn.action.split(':')[1] === gizmoMode) ||
-              (btn.action === 'tint' && tintOpen) ||
-              (btn.action === 'ghost' && wallGhost)
-            }
-            onClick={() => handle(btn)}
+      {/* ── Coloured top accent bar ── */}
+      <div style={{
+        height: 2,
+        background: 'linear-gradient(90deg, #C49A6C 0%, rgba(196,154,108,0.1) 100%)',
+      }} />
+
+      {/* ── Header ── */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '14px 16px 10px',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 8,
+            background: 'rgba(196,154,108,0.12)',
+            border: '1px solid rgba(196,154,108,0.25)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 15, color: '#C49A6C',
+          }}>
+            {meta.icon}
+          </div>
+          <div>
+            <div style={{ color: '#E8E0D8', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em' }}>
+              {meta.label}
+            </div>
+            <div style={{ color: 'rgba(196,154,108,0.5)', fontSize: 10, marginTop: 1, letterSpacing: '0.04em' }}>
+              {toolbarType === 'wall' ? 'Wall' : 'Object'} · live update
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            width: 28, height: 28,
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 8, color: 'rgba(200,185,170,0.5)',
+            fontSize: 16, lineHeight: 1, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.15s',
+          }}
+          onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#E8E0D8'; }}
+          onMouseOut={(e)  => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'rgba(200,185,170,0.5)'; }}
+        >×</button>
+      </div>
+
+      {/* ── Fields — always single column, never clipped ── */}
+      <div style={{ padding: '12px 16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {fields.map((f) => (
+          <FieldRow
+            key={f.key}
+            field={f}
+            value={vals[f.key] ?? f.init}
+            onChange={(v) => applyKey(f.key, v)}
           />
         ))}
       </div>
 
-      {/* Tint panel — inline, expands below buttons */}
-      {tintOpen && type === 'furniture' && (
-        <div style={{
-          padding:     '12px 14px 14px',
-          borderTop:   '1px solid rgba(196,154,108,0.2)',
-          display:     'flex',
-          flexDirection: 'column',
-          gap:         10,
-          minWidth:    260,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: '#C49A6C', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              Colour Adjust
-            </span>
-            <button onClick={resetTint} style={{
-              background: 'transparent', border: '1px solid rgba(122,101,89,0.5)',
-              borderRadius: 5, color: 'rgba(122,101,89,0.9)', fontSize: 10,
-              padding: '2px 8px', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
-            }}>
-              Reset
-            </button>
-          </div>
-
-          <TintSlider label="Hue"        value={hue} min={-180} max={180} step={1}
-            unit="°"  color="#C49A6C" onChange={setHue} />
-          <TintSlider label="Saturation" value={sat} min={0}    max={2}   step={0.01}
-            unit="×"  color="#88BBDD" onChange={setSat} />
-          <TintSlider label="Brightness" value={bri} min={0.1}  max={2}   step={0.01}
-            unit="×"  color="#F2E5D5" onChange={setBri} />
-        </div>
-      )}
+      {/* ── Footer hint ── */}
+      <div style={{
+        padding: '0 16px 12px',
+        display: 'flex', alignItems: 'center', gap: 6,
+      }}>
+        <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.04)' }} />
+        <span style={{ color: 'rgba(200,185,170,0.22)', fontSize: 9, letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>
+          HOLD +/− TO REPEAT
+        </span>
+        <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.04)' }} />
+      </div>
     </div>
   );
 }
 
-// ── Tint slider — pure DOM, no antd ──────────────────────────────────────────
+// ── FieldRow ───────────────────────────────────────────────────────────────────
+// Each field stacks vertically. Axis label has a colour-coded left border.
+// +/− buttons are large enough for mobile (44px height).
+function FieldRow({ field, value, onChange }) {
+  const [localStr, setLocalStr] = useState(fmtVal(value, field.step));
+  const repeatRef               = useRef(null);
+  const color                   = axisColor(field.label);
+
+  useEffect(() => { setLocalStr(fmtVal(value, field.step)); }, [value]);
+
+  const commit = (raw) => {
+    const n = parseFloat(raw);
+    if (!isFinite(n)) { setLocalStr(fmtVal(value, field.step)); return; }
+    onChange(n);
+  };
+
+  const nudge = (dir) => {
+    const current = parseFloat(localStr) || 0;
+    const next    = parseFloat((current + field.step * dir).toFixed(6));
+    setLocalStr(fmtVal(next, field.step));
+    onChange(next);
+  };
+
+  const startRepeat = (dir) => {
+    nudge(dir);
+    repeatRef.current = setTimeout(() => {
+      repeatRef.current = setInterval(() => nudge(dir), 75);
+    }, 280);
+  };
+
+  const stopRepeat = () => {
+    clearTimeout(repeatRef.current);
+    clearInterval(repeatRef.current);
+  };
+
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.03)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      borderRadius: 10,
+      overflow: 'hidden',
+    }}>
+      {/* Axis label row */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '7px 12px 6px',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        borderLeft: `3px solid ${color}`,
+      }}>
+        <span style={{
+          color, fontSize: 11, fontWeight: 700,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+        }}>
+          {field.label}
+        </span>
+        <span style={{
+          color: 'rgba(200,185,170,0.45)', fontSize: 10,
+          fontFamily: 'monospace',
+        }}>
+          {fmtVal(value, field.step)}<span style={{ opacity: 0.6 }}> {field.unit}</span>
+        </span>
+      </div>
+
+      {/* Stepper row */}
+      <div style={{ display: 'flex', alignItems: 'stretch', height: 44 }}>
+        {/* Decrement */}
+        <StepBtn dir={-1} color={color} onStart={() => startRepeat(-1)} onStop={stopRepeat} />
+
+        {/* Divider */}
+        <div style={{ width: 1, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
+
+        {/* Number input */}
+        <input
+          type="number"
+          value={localStr}
+          step={field.step}
+          onChange={(e) => setLocalStr(e.target.value)}
+          onBlur={(e)   => commit(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { commit(e.target.value); e.target.blur(); } }}
+          style={{
+            flex:             1,
+            minWidth:         0,
+            background:       'transparent',
+            border:           'none',
+            color:            '#E8E0D8',
+            fontSize:         15,
+            fontWeight:       500,
+            fontFamily:       'Inter, sans-serif',
+            padding:          '0 8px',
+            textAlign:        'center',
+            outline:          'none',
+            MozAppearance:    'textfield',
+            WebkitAppearance: 'none',
+          }}
+        />
+
+        {/* Divider */}
+        <div style={{ width: 1, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
+
+        {/* Increment */}
+        <StepBtn dir={+1} color={color} onStart={() => startRepeat(+1)} onStop={stopRepeat} />
+      </div>
+    </div>
+  );
+}
+
+function fmtVal(v, step) {
+  if (!isFinite(v)) return '0';
+  const dec = step < 0.1 ? 3 : step < 1 ? 2 : 1;
+  return v.toFixed(dec);
+}
+
+function StepBtn({ dir, color, onStart, onStop }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      onPointerDown={(e) => { e.preventDefault(); setPressed(true); onStart(); }}
+      onPointerUp={()   => { setPressed(false); onStop(); }}
+      onPointerLeave={()=> { setPressed(false); onStop(); }}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{
+        width:          44,
+        flexShrink:     0,
+        background:     pressed ? `${color}22` : 'transparent',
+        border:         'none',
+        color:          pressed ? color : 'rgba(200,185,170,0.5)',
+        fontSize:       20,
+        fontWeight:     300,
+        cursor:         'pointer',
+        display:        'flex',
+        alignItems:     'center',
+        justifyContent: 'center',
+        userSelect:     'none',
+        touchAction:    'none',
+        lineHeight:     1,
+        transition:     'background 0.1s, color 0.1s',
+        fontFamily:     'Inter, sans-serif',
+      }}
+      onMouseOver={(e) => { if (!pressed) { e.currentTarget.style.background = `${color}14`; e.currentTarget.style.color = color; } }}
+      onMouseOut={(e)  => { if (!pressed) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(200,185,170,0.5)'; } }}
+    >
+      {dir === -1 ? '−' : '+'}
+    </button>
+  );
+}
+
+// ── TintSlider ─────────────────────────────────────────────────────────────────
 function TintSlider({ label, value, min, max, step, unit, color, onChange }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
@@ -241,39 +708,25 @@ function TintSlider({ label, value, min, max, step, unit, color, onChange }) {
         </span>
       </div>
       <div style={{ position: 'relative', height: 18, display: 'flex', alignItems: 'center' }}>
-        {/* Track */}
-        <div style={{
-          position: 'absolute', left: 0, right: 0, height: 3,
-          background: 'rgba(255,255,255,0.1)', borderRadius: 2,
-        }} />
-        {/* Fill */}
-        <div style={{
-          position: 'absolute', left: 0, width: `${pct}%`, height: 3,
-          background: color, borderRadius: 2, transition: 'width 0s',
-        }} />
+        <div style={{ position: 'absolute', left: 0, right: 0, height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 2 }} />
+        <div style={{ position: 'absolute', left: 0, width: `${pct}%`, height: 3, background: color, borderRadius: 2 }} />
         <input
           type="range" min={min} max={max} step={step} value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          style={{
-            position: 'absolute', left: 0, right: 0,
-            width: '100%', opacity: 0, cursor: 'pointer', height: 18, margin: 0,
-          }}
+          style={{ position: 'absolute', left: 0, right: 0, width: '100%', opacity: 0, cursor: 'pointer', height: 18, margin: 0 }}
         />
-        {/* Thumb */}
         <div style={{
           position: 'absolute', left: `calc(${pct}% - 6px)`,
           width: 12, height: 12, borderRadius: '50%',
           background: color, border: '2px solid rgba(12,9,7,0.9)',
-          boxShadow: `0 0 6px ${color}80`,
-          pointerEvents: 'none',
-          transition: 'left 0s',
+          boxShadow: `0 0 6px ${color}80`, pointerEvents: 'none',
         }} />
       </div>
     </div>
   );
 }
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
+// ── Icons ──────────────────────────────────────────────────────────────────────
 function Icon({ name }) {
   const paths = {
     drag:    'M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
@@ -293,28 +746,29 @@ function Icon({ name }) {
   );
 }
 
-function ToolbarBtn({ btn, active, onClick }) {
-  const ref = useRef(null);
+// ── ToolbarBtn ─────────────────────────────────────────────────────────────────
+function ToolbarBtn({ btn, active, precisionActive, onClick }) {
+  const btnRef = useRef(null);
   return (
     <button
-      ref={ref}
+      ref={btnRef}
       onClick={onClick}
-      title={btn.label}
-      onMouseEnter={() => gsap.to(ref.current, { scale: 1.1, duration: 0.1 })}
-      onMouseLeave={() => gsap.to(ref.current, { scale: 1,   duration: 0.1 })}
+      title={btn.precision ? `${btn.label}  (double-tap for precision)` : btn.label}
+      onMouseEnter={() => gsap.to(btnRef.current, { scale: 1.1, duration: 0.1 })}
+      onMouseLeave={() => gsap.to(btnRef.current, { scale: 1,   duration: 0.1 })}
       style={{
-        display:       'flex',
-        flexDirection: 'column',
-        alignItems:    'center',
-        gap:           3,
-        padding:       '6px 9px',
-        borderRadius:  8,
-        border:        active ? '1px solid rgba(196,154,108,0.5)' : '1px solid transparent',
-        background:    btn.danger ? 'rgba(220,53,69,0.15)' : active ? 'rgba(196,154,108,0.18)' : 'transparent',
-        color:         btn.danger ? '#ff6b6b' : active ? '#C49A6C' : '#E8E0D8',
-        cursor:        'pointer',
-        transition:    'background 0.12s',
-        minWidth:      34,
+        display:       'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+        padding:       '6px 9px', borderRadius: 8,
+        border:        active || precisionActive
+          ? `1px solid rgba(196,154,108,${precisionActive ? '0.75' : '0.5'})`
+          : '1px solid transparent',
+        background:    btn.danger ? 'rgba(220,53,69,0.15)'
+          : precisionActive ? 'rgba(196,154,108,0.26)'
+          : active       ? 'rgba(196,154,108,0.18)'
+          : 'transparent',
+        color:         btn.danger ? '#ff6b6b' : (active || precisionActive) ? '#C49A6C' : '#E8E0D8',
+        cursor:        'pointer', transition: 'background 0.12s',
+        minWidth:      34, minHeight: 44, position: 'relative',
       }}
       onMouseOver={(e) => { if (!btn.danger && !active) e.currentTarget.style.background = 'rgba(196,154,108,0.13)'; }}
       onMouseOut={(e)  => { if (!btn.danger && !active) e.currentTarget.style.background = 'transparent'; }}
@@ -323,6 +777,54 @@ function ToolbarBtn({ btn, active, onClick }) {
       <span style={{ fontSize: 8, fontFamily: 'Inter, sans-serif', opacity: 0.65, letterSpacing: '0.05em' }}>
         {btn.label}
       </span>
+      {precisionActive && (
+        <div style={{
+          position: 'absolute', top: 5, right: 5,
+          width: 5, height: 5, borderRadius: '50%',
+          background: '#C49A6C', boxShadow: '0 0 4px #C49A6C',
+        }} />
+      )}
     </button>
+  );
+}
+
+// ── SpeechBubble ───────────────────────────────────────────────────────────────
+function SpeechBubble({ text, x, y }) {
+  const ref                   = useRef(null);
+  const [visible, setVisible] = useState(false);
+  const [pos, setPos]         = useState({ left: x, top: y });
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      if (ref.current) {
+        const w = ref.current.offsetWidth;
+        const h = ref.current.offsetHeight;
+        setPos({
+          left: Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)),
+          top:  Math.max(8, y - h - 14),
+        });
+        setVisible(true);
+      }
+    });
+  }, [x, y]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'fixed', left: pos.left, top: pos.top, zIndex: 99999,
+        background: 'rgba(12,9,7,0.97)', border: '1px solid rgba(196,154,108,0.5)',
+        borderRadius: 10, padding: '8px 13px', color: '#E8D9C4',
+        fontSize: 12, fontFamily: 'Inter, sans-serif', fontWeight: 500,
+        whiteSpace: 'nowrap', boxShadow: '0 6px 24px rgba(0,0,0,0.6)',
+        pointerEvents: 'none',
+        opacity: visible ? 1 : 0, transform: visible ? 'translateY(0)' : 'translateY(4px)',
+        transition: 'opacity 0.18s ease, transform 0.18s ease',
+      }}
+    >
+      {text}
+      <div style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '6px solid rgba(196,154,108,0.5)' }} />
+      <div style={{ position: 'absolute', bottom: -5, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(12,9,7,0.97)' }} />
+    </div>
   );
 }
