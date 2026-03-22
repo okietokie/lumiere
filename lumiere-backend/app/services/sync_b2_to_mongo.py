@@ -1,6 +1,10 @@
 # app/services/sync_b2_to_mongo.py
-# Runs at startup — lists all .glb/.gltf in B2, registers missing ones in MongoDB.
-# Uses Cloudflare CDN URL so models load fast with no bandwidth caps.
+# Performance edition.
+#
+# Changes vs original:
+#   - Records file size_bytes from B2 metadata at sync time.
+#     No extra network request — B2 ls() already returns content_length.
+#   - Logs total bytes registered for visibility.
 
 import os
 import logging
@@ -8,12 +12,10 @@ from app.database import database
 
 logger = logging.getLogger(__name__)
 
-B2_KEY_ID      = os.getenv("B2_KEY_ID")
-B2_APP_KEY     = os.getenv("B2_APP_KEY")
-B2_BUCKET_NAME = os.getenv("B2_BUCKET_NAME")
-
-# Cloudflare CDN URL — no bandwidth caps, globally cached
-CDN_BASE = os.getenv("CDN_BASE")
+B2_KEY_ID       = os.getenv("B2_KEY_ID")
+B2_APP_KEY      = os.getenv("B2_APP_KEY")
+B2_BUCKET_NAME  = os.getenv("B2_BUCKET_NAME")
+CDN_BASE        = os.getenv("CDN_BASE", "")
 
 
 async def sync_b2_to_mongo():
@@ -32,14 +34,16 @@ async def sync_b2_to_mongo():
         logger.error(f"B2 sync: could not connect — {e}")
         return
 
-    # Fetch all existing MongoDB urls for fast lookup
-    existing_urls = set()
-    async for doc in database["models"].find({}, {"url": 1}):
+    # Fetch all existing MongoDB entries for fast lookup (url → size already stored)
+    existing: dict[str, int | None] = {}
+    async for doc in database["models"].find({}, {"url": 1, "size_bytes": 1}):
         if doc.get("url"):
-            existing_urls.add(doc["url"])
+            existing[doc["url"]] = doc.get("size_bytes")
 
-    inserted = 0
-    skipped  = 0
+    inserted  = 0
+    updated   = 0
+    skipped   = 0
+    total_bytes = 0
 
     try:
         for file_version, _ in bucket.ls(recursive=True, latest_only=True):
@@ -47,34 +51,61 @@ async def sync_b2_to_mongo():
             if not name.lower().endswith((".glb", ".gltf")):
                 continue
 
-            # Use Cloudflare CDN URL — not direct B2
-            cdn_url = f"{CDN_BASE.rstrip('/')}/{name}"
+            cdn_url    = f"{CDN_BASE.rstrip('/')}/{name}"
+            size_bytes = getattr(file_version, "content_length", None) or \
+                         getattr(file_version, "size", None)
+            if size_bytes:
+                total_bytes += size_bytes
 
-            if cdn_url in existing_urls:
-                skipped += 1
+            if cdn_url in existing:
+                # Update size_bytes if we now have it and didn't before
+                if size_bytes and existing[cdn_url] is None:
+                    await database["models"].update_one(
+                        {"url": cdn_url},
+                        {"$set": {"size_bytes": size_bytes}},
+                    )
+                    updated += 1
+                else:
+                    skipped += 1
                 continue
 
-            parts        = name.split("/")
-            category     = parts[0].lower() if len(parts) > 1 else "uncategorized"
+            parts         = name.split("/")
+            category      = parts[0].lower() if len(parts) > 1 else "uncategorized"
             filename_only = parts[-1]
-            display_name = filename_only.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").title()
+            display_name  = (
+                filename_only.rsplit(".", 1)[0]
+                .replace("_", " ")
+                .replace("-", " ")
+                .title()
+            )
+
+            fields = {
+                "name":        display_name,
+                "filename":    name,
+                "category":    category,
+                "url":         cdn_url,
+                "description": None,
+            }
+            if size_bytes:
+                fields["size_bytes"] = size_bytes
 
             await database["models"].update_one(
                 {"filename": name},
-                {"$set": {
-                    "name":        display_name,
-                    "filename":    name,
-                    "category":    category,
-                    "url":         cdn_url,
-                    "description": None,
-                }},
+                {"$set": fields},
                 upsert=True,
             )
             inserted += 1
-            logger.info(f"B2 sync: registered '{name}' → {cdn_url}")
+            logger.info(
+                f"B2 sync: registered '{name}' → {cdn_url}"
+                + (f" ({size_bytes // 1024}KB)" if size_bytes else "")
+            )
 
     except Exception as e:
         logger.error(f"B2 sync: error listing bucket — {e}")
         return
 
-    logger.info(f"B2 sync complete — {inserted} new, {skipped} already in MongoDB.")
+    total_mb = total_bytes / 1024 / 1024
+    logger.info(
+        f"B2 sync complete — {inserted} new, {updated} size-updated, "
+        f"{skipped} unchanged. Total bucket size: {total_mb:.1f}MB"
+    )
