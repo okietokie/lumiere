@@ -1,29 +1,55 @@
 // src/components/threeD/furniture/FurnitureItem.jsx
-//
-// TWO-GROUP ARCHITECTURE — solves both the scale-explosion bug and the
-// "gizmo handles are far from the object" bug:
-//
-//   <outerGroup  position rotation scale={userScale}>   ← TransformControls target
-//     <innerGroup scale={normScale}>                    ← normScale only, never touched by gizmo
-//       <centerGroup position={-centroid}>              ← shifts model so its bbox centre is at origin
-//         <primitive object={clonedScene} />
-//       </centerGroup>
-//     </innerGroup>
-//   </outerGroup>
-//
-// • TransformControls attaches to outerGroup.
-//   Its scale is userScale only — no normScale mixing.
-// • React sets outerGroup.scale = userScale every render: that's clean, no fighting.
-// • normScale lives in innerGroup which the gizmo never touches.
-// • centroid offset ensures the gizmo handles appear centred on the visible mesh.
-// • __normScale is still stored on outerGroup for the gizmo to read.
-
-import React, { useState, useEffect, useMemo, forwardRef, useImperativeHandle, useRef } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
 
 useGLTF.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+
+const API_BASE  = import.meta.env.VITE_API_URL  || 'http://127.0.0.1:8000';
+const CDN_BASE  = import.meta.env.VITE_CDN_BASE || '';   // e.g. https://models.lumiere-maison.site/file/lumiere-models
+
+// ── URL resolver ──────────────────────────────────────────────────────────────
+//
+// Priority order:
+//  1. Full https URL (CDN or B2) → use as-is. This is the normal production path.
+//  2. Missing url but filename present + CDN_BASE set → build CDN URL from filename.
+//  3. Missing url, no CDN_BASE → route through backend proxy so it still works.
+//  4. Relative path /sofa/sofa.glb → same proxy route (handles old saved projects).
+//
+// The "Unexpected token '<'" error was caused by case 4 reaching useGLTF without
+// going through this function — the browser fetched the relative path from the
+// FRONTEND host which returned its HTML 404 page.
+
+export function resolveGlbUrl(raw, filename) {
+  // Case 1: already a full URL — use directly
+  if (raw && (raw.startsWith('http://') || raw.startsWith('https://'))) {
+    return raw;
+  }
+
+  // Case 2: no url but we have filename + CDN_BASE configured in the build
+  if (!raw && filename && CDN_BASE) {
+    const clean = filename.startsWith('/') ? filename.slice(1) : filename;
+    return `${CDN_BASE.replace(/\/$/, '')}/${clean}`;
+  }
+
+  // Case 3: no url, no CDN_BASE → proxy through backend
+  if (!raw && filename) {
+    const clean = filename.startsWith('/') ? filename.slice(1) : filename;
+    return `${API_BASE}/api/proxy/models/${clean}`;
+  }
+
+  // Case 4: relative path like /sofa/sofa.glb or sofa/sofa.glb
+  if (raw) {
+    // Already a proxy path
+    if (raw.startsWith('/api/proxy/')) return `${API_BASE}${raw}`;
+    // Bare relative path → proxy
+    const clean = raw.startsWith('/') ? raw.slice(1) : raw;
+    return `${API_BASE}/api/proxy/models/${clean}`;
+  }
+
+  return null;
+}
 
 // ── Target sizes per category ─────────────────────────────────────────────────
 const CATEGORY_TARGETS = {
@@ -51,25 +77,16 @@ function computeNormAndCentroid(scene, category) {
   try {
     const box = new THREE.Box3().setFromObject(scene);
     if (box.isEmpty()) return { normScale: 1, centroid: [0, 0, 0] };
-
-    const size     = new THREE.Vector3();
-    const centre   = new THREE.Vector3();
+    const size   = new THREE.Vector3();
+    const centre = new THREE.Vector3();
     box.getSize(size);
     box.getCenter(centre);
-
     const target  = CATEGORY_TARGETS[category?.toLowerCase()] || DEFAULT_TARGET;
     const current = size[target.axis];
     const norm    = (!current || !isFinite(current) || current < 0.0001)
       ? 1
       : Math.max(0.01, Math.min(100, target.size / current));
-
-    // We shift the scene so that its bbox centre lands at the outer group's origin.
-    // After normScale is applied the centroid offset must also be scaled:
-    // innerGroup(normScale) -> centerGroup(-centroid) so we pass the pre-scaled offset.
-    return {
-      normScale: norm,
-      centroid:  [centre.x, centre.y, centre.z],
-    };
+    return { normScale: norm, centroid: [centre.x, centre.y, centre.z] };
   } catch {
     return { normScale: 1, centroid: [0, 0, 0] };
   }
@@ -77,15 +94,19 @@ function computeNormAndCentroid(scene, category) {
 
 // Guard wrapper
 const FurnitureItem = forwardRef((props, ref) => {
-  if (!props.item?.url) return null;
-  return <FurnitureInner ref={ref} {...props} />;
+  // Pass both url AND filename to the resolver so fallback works for old saved projects
+  const resolvedUrl = resolveGlbUrl(props.item?.url, props.item?.filename);
+  if (!resolvedUrl) return null;
+  return <FurnitureInner ref={ref} {...props} resolvedUrl={resolvedUrl} />;
 });
 
-const FurnitureInner = forwardRef(({ item, isSelected, onSelect, setOrbitEnabled }, ref) => {
-  const { scene }  = useGLTF(item.url);
+const FurnitureInner = forwardRef(({
+  item, resolvedUrl, isSelected, onSelect, setOrbitEnabled,
+}, ref) => {
+  const { scene }             = useGLTF(resolvedUrl);
   const [hovered, setHovered] = useState(false);
-  const outerRef   = useRef();   // ← this is what TransformControls attaches to
-  const innerRef   = useRef();   // normScale group — gizmo never touches this
+  const outerRef              = useRef();
+  const innerRef              = useRef();
 
   const { clonedScene, normScale, centroid } = useMemo(() => {
     const clone = SkeletonUtils.clone(scene);
@@ -96,7 +117,6 @@ const FurnitureInner = forwardRef(({ item, isSelected, onSelect, setOrbitEnabled
     return { clonedScene: clone, normScale: ns, centroid: c };
   }, [scene, item.category]);
 
-  // Expose outerRef to parent, tagged with __normScale so FurnitureGizmo can read it
   useImperativeHandle(ref, () => {
     if (outerRef.current) outerRef.current.__normScale = normScale;
     return outerRef.current;
@@ -106,13 +126,10 @@ const FurnitureInner = forwardRef(({ item, isSelected, onSelect, setOrbitEnabled
     if (outerRef.current) outerRef.current.__normScale = normScale;
   }, [normScale]);
 
-  // Keep innerGroup scale in sync with normScale imperatively
-  // (React sets it via JSX too, but this ensures it's always right)
   useEffect(() => {
     if (innerRef.current) innerRef.current.scale.setScalar(normScale);
   }, [normScale]);
 
-  // Emissive highlight
   useEffect(() => {
     clonedScene.traverse((child) => {
       if (!child.isMesh) return;
@@ -129,7 +146,6 @@ const FurnitureInner = forwardRef(({ item, isSelected, onSelect, setOrbitEnabled
   const rawScale = Array.isArray(item.scale) ? item.scale : [1, 1, 1];
 
   return (
-    // outerGroup — position / rotation / userScale — TransformControls target
     <group
       ref={outerRef}
       position={item.position}
@@ -139,9 +155,7 @@ const FurnitureInner = forwardRef(({ item, isSelected, onSelect, setOrbitEnabled
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'pointer'; }}
       onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto';    }}
     >
-      {/* innerGroup — normScale only — gizmo never touches this */}
       <group ref={innerRef} scale={[normScale, normScale, normScale]}>
-        {/* centerGroup — shifts bbox centre to origin so handles sit on the mesh */}
         <group position={[-centroid[0], -centroid[1], -centroid[2]]}>
           <primitive object={clonedScene} />
         </group>

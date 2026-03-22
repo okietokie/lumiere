@@ -27,6 +27,7 @@ import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { COLORS } from '../../../utils/colors';
 import FurnitureTint from './FurnitureTint';
+import { resolveGlbUrl } from './FurnitureItem';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -57,8 +58,8 @@ class CardErrorBoundary extends React.Component {
   }
 }
 
-function RotatingModel({ url }) {
-  const { scene } = useGLTF(url);
+function RotatingModel({ url, filename }) {
+  const { scene } = useGLTF(resolveGlbUrl(url, filename));
   const cloned = useMemo(() => {
     const clone = SkeletonUtils.clone(scene);
     clone.traverse((c) => {
@@ -76,7 +77,7 @@ function RotatingModel({ url }) {
 }
 
 // CardPreview — the actual Canvas, only rendered when visible
-function CardPreview({ url }) {
+function CardPreview({ url, filename }) {
   const [ready, setReady] = useState(false);
 
   return (
@@ -116,7 +117,7 @@ function CardPreview({ url }) {
 
         <CardErrorBoundary>
           <Suspense fallback={<SpinnerMesh />}>
-            <RotatingModel url={url} />
+            <RotatingModel url={url} filename={filename} />
           </Suspense>
         </CardErrorBoundary>
 
@@ -209,7 +210,7 @@ function ModelCard({ model, onPlace }) {
           </div>
         ) : visible ? (
           // In viewport — render live 3D canvas
-          <CardPreview url={model.url} />
+          <CardPreview url={model.url} filename={model.filename} />
         ) : (
           // Not yet in viewport — show shimmer skeleton
           <div style={{

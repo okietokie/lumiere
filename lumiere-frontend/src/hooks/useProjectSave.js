@@ -1,20 +1,23 @@
 // src/hooks/useProjectSave.js
-// Assembles all scene state into a saveable JSON, handles backend persistence,
-// canvas snapshots, autosave, and JSON export/import.
+// FIX: furniture items now save `url` and `category` fields.
+// Previously only `filename/name/position/rotation/scale` were saved,
+// so on restore `url` was undefined and useGLTF received a relative path
+// (/sofa/sofa-7.glb) which the frontend server returned as HTML → crash.
 import { useState, useCallback, useEffect, useRef } from 'react';
 
 const API_BASE     = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-const AUTOSAVE_MS  = 30_000; // 30 seconds
+const AUTOSAVE_MS  = 30_000;
 
 // ── Assemble scene JSON ───────────────────────────────────────────────────────
 export function buildSceneData({ walls, placedItems, floorMaterial, ceilingMaterial, lightingState }) {
   return {
-    version:   '1.0',
+    version:   '1.1',   // bumped — now includes url + category in furniture
     savedAt:   new Date().toISOString(),
     walls:     walls.map(({ id, start, end, height, thickness, color, roughness, metalness, textureId }) =>
       ({ id, start, end, height, thickness, color, roughness, metalness, textureId })),
-    furniture: placedItems.map(({ id, filename, name, position, rotation, scale }) =>
-      ({ id, filename, name, position, rotation, scale })),
+    furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale }) =>
+      // url and category are now persisted so restoring works on any domain
+      ({ id, filename, name, url: url || null, category: category || null, position, rotation, scale })),
     materials: {
       floor:   floorMaterial,
       ceiling: ceilingMaterial,
@@ -46,18 +49,13 @@ export function applySceneData(sceneData, { setWalls, setPlacedItems, setFloor, 
 }
 
 // ── Canvas snapshot ───────────────────────────────────────────────────────────
-// preserveDrawingBuffer must be true on the Canvas for this to work.
-// We find the canvas, force a fresh pixel read, and return the data URL.
 export function takeSnapshot(canvasWrapperEl) {
-  // Accept either the wrapper div or the canvas itself
   const canvas = canvasWrapperEl?.tagName === 'CANVAS'
     ? canvasWrapperEl
     : canvasWrapperEl?.querySelector('canvas');
   if (!canvas) return null;
   try {
-    // With preserveDrawingBuffer:true the last rendered frame is always available
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    // Guard against blank (all-zero) canvas
     if (dataUrl === 'data:,') return null;
     return dataUrl;
   } catch (e) {
@@ -73,32 +71,27 @@ export default function useProjectSave({
   floorMaterial, setFloorMaterial,
   ceilingMaterial, setCeilingMaterial,
   lightingState,
-  canvasRef,          // ref to the <Canvas> DOM element
+  canvasRef,
   currentProjectId,
   setCurrentProjectId,
 }) {
-  const [saveStatus,  setSaveStatus]  = useState('idle'); // 'idle'|'saving'|'saved'|'error'
+  const [saveStatus,  setSaveStatus]  = useState('idle');
   const [projectName, setProjectName] = useState('Untitled Room');
   const autosaveTimer = useRef(null);
 
-  // ── Collect current scene ─────────────────────────────────────────────────
   const getSceneData = useCallback(() => buildSceneData({
     walls, placedItems, floorMaterial, ceilingMaterial, lightingState,
   }), [walls, placedItems, floorMaterial, ceilingMaterial, lightingState]);
 
-  // ── Get canvas wrapper element ──────────────────────────────────────────
   const getCanvas = useCallback(() => {
     if (canvasRef?.current) return canvasRef.current;
-    // fallback: find the canvas directly
     return document.querySelector('canvas')?.parentElement ?? document.querySelector('canvas');
   }, [canvasRef]);
 
-  // ── Save to backend ───────────────────────────────────────────────────────
   const saveProject = useCallback(async (name = projectName, withThumbnail = true) => {
     setSaveStatus('saving');
     try {
       const scene     = getSceneData();
-      // Capture thumbnail — double rAF ensures the last frame is flushed
       const thumbnail = await new Promise((resolve) => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -109,14 +102,12 @@ export default function useProjectSave({
 
       let response;
       if (currentProjectId) {
-        // Update existing
         response = await fetch(`${API_BASE}/api/projects/${currentProjectId}`, {
           method:  'PUT',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ name, scene, thumbnail }),
         });
       } else {
-        // Create new
         response = await fetch(`${API_BASE}/api/projects/save`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -138,9 +129,7 @@ export default function useProjectSave({
     }
   }, [projectName, currentProjectId, getSceneData, getCanvas, setCurrentProjectId]);
 
-  // ── Snapshot only (no save) ───────────────────────────────────────────────
   const downloadSnapshot = useCallback((mode = 'current') => {
-    // Give the canvas one frame to settle before grabbing pixels
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const canvas = getCanvas();
@@ -154,7 +143,6 @@ export default function useProjectSave({
     });
   }, [getCanvas, projectName]);
 
-  // ── Export JSON ───────────────────────────────────────────────────────────
   const exportJSON = useCallback(() => {
     const scene = getSceneData();
     const blob  = new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' });
@@ -166,7 +154,6 @@ export default function useProjectSave({
     URL.revokeObjectURL(url);
   }, [getSceneData, projectName]);
 
-  // ── Import JSON ───────────────────────────────────────────────────────────
   const importJSON = useCallback(() => {
     const input   = document.createElement('input');
     input.type    = 'file';
@@ -185,7 +172,7 @@ export default function useProjectSave({
             lightingState,
           });
           setProjectName(file.name.replace(/\.(lumiere\.json|json)$/, ''));
-          setCurrentProjectId(null); // treat as new project
+          setCurrentProjectId(null);
         } catch {
           alert('Invalid project file.');
         }
@@ -195,7 +182,6 @@ export default function useProjectSave({
     input.click();
   }, [setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
-  // ── Load project from backend ─────────────────────────────────────────────
   const loadProject = useCallback(async (projectId) => {
     const res  = await fetch(`${API_BASE}/api/projects/${projectId}`);
     const data = await res.json();
@@ -212,7 +198,6 @@ export default function useProjectSave({
     return data;
   }, [setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
-  // ── Autosave ──────────────────────────────────────────────────────────────
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
 
   useEffect(() => {

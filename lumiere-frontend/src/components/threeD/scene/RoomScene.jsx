@@ -235,7 +235,16 @@ export default function RoomScene() {
 
   // ── Furniture helpers ─────────────────────────────────────────────────────
   const addItem = (modelMeta) => {
-    const item = { id: uuidv4(), filename: modelMeta.filename, name: modelMeta.name, url: modelMeta.url, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
+    const item = {
+      id:       uuidv4(),
+      filename: modelMeta.filename,
+      name:     modelMeta.name,
+      url:      modelMeta.url,
+      category: modelMeta.category || null,   // saved so restore works without re-fetching
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale:    [1, 1, 1],
+    };
     setPlacedItems((p) => [...p, item]);
     setSelectedFurnitureId(item.id);
     setActiveTab('furniture');
