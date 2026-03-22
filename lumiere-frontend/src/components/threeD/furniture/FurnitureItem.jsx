@@ -7,7 +7,7 @@ import { SkeletonUtils } from 'three-stdlib';
 useGLTF.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
 const API_BASE  = import.meta.env.VITE_API_URL  || 'http://127.0.0.1:8000';
-const CDN_BASE  = import.meta.env.VITE_CDN_BASE || '';   // e.g. https://models.lumiere-maison.site/file/lumiere-models
+const CDN_BASE  = import.meta.env.CDN_BASE || '';   // e.g. https://models.lumiere-maison.site/file/lumiere-models
 
 // ── URL resolver ──────────────────────────────────────────────────────────────
 //
