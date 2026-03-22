@@ -420,7 +420,7 @@ export default function RoomScene() {
                context toolbar (which floats near the selected object).
                On mobile the top-left is always clear of the bottom nav. */}
           {anythingSelected && cameraMode === 'orbit' && (
-            <GizmoHelper alignment="top-left" margin={[60, 60]}>
+            <GizmoHelper alignment="bottom-left" margin={[60, 60]}>
               <GizmoViewport
                 axisColors={['#E05252', '#52C052', '#5252E0']}
                 labelColor="#E8E0D8"

@@ -27,7 +27,7 @@ import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { COLORS } from '../../../utils/colors';
 import FurnitureTint from './FurnitureTint';
-import { resolveGlbUrl } from './FurnitureItem';
+import { resolveGlbUrl, learnCdnBase } from './FurnitureItem';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -289,6 +289,9 @@ export default function FurniturePicker({
       if (!res.ok) res = await fetch(`${API_BASE}/api/models/list`);
       if (!res.ok) throw new Error('Backend unreachable');
       const data = await res.json();
+      // Teach the URL resolver what CDN base to use for old saved projects
+      // that have filename but no url stored. This runs once per session.
+      learnCdnBase(data);
       setModels(data);
       // Auto-select first available category
       if (data.length > 0) {

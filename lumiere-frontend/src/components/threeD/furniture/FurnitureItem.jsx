@@ -6,44 +6,72 @@ import { SkeletonUtils } from 'three-stdlib';
 
 useGLTF.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
-const API_BASE  = import.meta.env.VITE_API_URL  || 'http://127.0.0.1:8000';
-const CDN_BASE  = import.meta.env.CDN_BASE || '';   // e.g. https://models.lumiere-maison.site/file/lumiere-models
+const API_BASE = import.meta.env.VITE_API_URL  || 'http://127.0.0.1:8000';
+
+// ── Runtime CDN base — learned from the model list, no env var needed ─────────
+//
+// When the app fetches /api/models/list (or /manifest), every model has a full
+// CDN URL like:
+//   https://models.lumiere-maison.site/file/lumiere-models/sofa/sofa-1.glb
+//
+// We extract the base (everything up to but not including the category/file path)
+// and store it here. Any item whose url is missing (old saved project) can then
+// reconstruct its URL from filename alone.
+//
+// This way VITE_CDN_BASE env var is never needed — the CDN base is discovered
+// at runtime from live API data.
+
+let _learnedCdnBase = import.meta.env.CDN_BASE || '';  // env var as initial value
+
+// Call this once after the model list is fetched.
+// Pass any model object that has a valid full url + filename.
+export function learnCdnBase(models) {
+  if (_learnedCdnBase) return;   // already set (env var or previous call)
+  for (const m of models) {
+    if (!m.url || !m.filename) continue;
+    if (!m.url.startsWith('http')) continue;
+    const clean = m.filename.startsWith('/') ? m.filename.slice(1) : m.filename;
+    const idx   = m.url.indexOf(clean);
+    if (idx > 0) {
+      _learnedCdnBase = m.url.slice(0, idx).replace(/\/$/, '');
+      break;
+    }
+  }
+}
 
 // ── URL resolver ──────────────────────────────────────────────────────────────
 //
-// Priority order:
-//  1. Full https URL (CDN or B2) → use as-is. This is the normal production path.
-//  2. Missing url but filename present + CDN_BASE set → build CDN URL from filename.
-//  3. Missing url, no CDN_BASE → route through backend proxy so it still works.
-//  4. Relative path /sofa/sofa.glb → same proxy route (handles old saved projects).
+// Resolution order:
+//  1. Full https URL already stored in the item → use directly (fast path, always works)
+//  2. No url, but filename + learned CDN base → build full CDN URL
+//  3. No url, no CDN base → fall back to proxy (still works, just slower)
+//  4. Bare relative path → proxy (handles edge cases / stale data)
 //
-// The "Unexpected token '<'" error was caused by case 4 reaching useGLTF without
-// going through this function — the browser fetched the relative path from the
-// FRONTEND host which returned its HTML 404 page.
+// The proxy fallback should now rarely trigger because:
+//  a) New saves include url (fixed in useProjectSave)
+//  b) learnCdnBase() fills the gap for old saves
 
 export function resolveGlbUrl(raw, filename) {
-  // Case 1: already a full URL — use directly
+  // 1. Already a full absolute URL — always use directly
   if (raw && (raw.startsWith('http://') || raw.startsWith('https://'))) {
     return raw;
   }
 
-  // Case 2: no url but we have filename + CDN_BASE configured in the build
-  if (!raw && filename && CDN_BASE) {
+  // 2. No url but we know the CDN base (from env var or learned at runtime)
+  if (!raw && filename && _learnedCdnBase) {
     const clean = filename.startsWith('/') ? filename.slice(1) : filename;
-    return `${CDN_BASE.replace(/\/$/, '')}/${clean}`;
+    return `${_learnedCdnBase}/${clean}`;
   }
 
-  // Case 3: no url, no CDN_BASE → proxy through backend
+  // 3. No url, no CDN base → proxy (works but has CORS dependency on the server)
   if (!raw && filename) {
     const clean = filename.startsWith('/') ? filename.slice(1) : filename;
     return `${API_BASE}/api/proxy/models/${clean}`;
   }
 
-  // Case 4: relative path like /sofa/sofa.glb or sofa/sofa.glb
+  // 4. Relative path — proxy it
   if (raw) {
-    // Already a proxy path
     if (raw.startsWith('/api/proxy/')) return `${API_BASE}${raw}`;
-    // Bare relative path → proxy
     const clean = raw.startsWith('/') ? raw.slice(1) : raw;
     return `${API_BASE}/api/proxy/models/${clean}`;
   }
@@ -94,7 +122,6 @@ function computeNormAndCentroid(scene, category) {
 
 // Guard wrapper
 const FurnitureItem = forwardRef((props, ref) => {
-  // Pass both url AND filename to the resolver so fallback works for old saved projects
   const resolvedUrl = resolveGlbUrl(props.item?.url, props.item?.filename);
   if (!resolvedUrl) return null;
   return <FurnitureInner ref={ref} {...props} resolvedUrl={resolvedUrl} />;
