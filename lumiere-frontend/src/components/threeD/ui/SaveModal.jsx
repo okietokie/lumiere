@@ -1,36 +1,35 @@
 // src/components/ui/SaveModal.jsx
 import { useState, useRef } from 'react';
-import { Modal, Input, Button, Switch, Segmented } from 'antd';
+import { Modal, Input, Switch, Segmented } from 'antd';
 import {
   SaveOutlined, CameraOutlined, ExportOutlined,
   ImportOutlined, ClockCircleOutlined, CheckCircleOutlined,
-  LoadingOutlined, WarningOutlined,
+  LoadingOutlined, WarningOutlined, VideoCameraOutlined,
 } from '@ant-design/icons';
 import { gsap } from 'gsap';
 import { COLORS } from '../../../utils/colors';
+import RecordingPanel from './RecordingPanel';
 
-// ── Derived colours for this modal ───────────────────────────────────────────
 const C = {
-  bg:        COLORS.surface,       // #3A302B — modal body
-  bgDeep:    COLORS.background,    // #2C2420 — inputs, segmented
-  border:    `${COLORS.secondary}60`, // #7A655940 — subtle borders
-  borderHov: COLORS.secondary,     // #7A6559 — hover border
-  text:      COLORS.text,          // #F2E5D5 — primary text
-  subtext:   COLORS.secondary,     // #7A6559 — labels, placeholders
-  action:    COLORS.action,        // #C49A6C — CTA
-  success:   '#7FB069',            // muted green — visible on dark bg
-  error:     '#C0504D',            // muted red
+  bg:      COLORS.surface,
+  bgDeep:  COLORS.background,
+  border:  `${COLORS.secondary}60`,
+  text:    COLORS.text,
+  subtext: COLORS.secondary,
+  action:  COLORS.action,
+  success: '#7FB069',
+  error:   '#C0504D',
 };
 
 const STATUS_ICON = {
   idle:   <SaveOutlined />,
-  saving: <LoadingOutlined />,
+  saving: <LoadingOutlined spin />,
   saved:  <CheckCircleOutlined />,
   error:  <WarningOutlined />,
 };
 const STATUS_LABEL = {
   idle:   'Save to Cloud',
-  saving: 'Saving...',
+  saving: 'Saving…',
   saved:  'Saved',
   error:  'Save Failed — Retry',
 };
@@ -47,12 +46,13 @@ export default function SaveModal({
   saveStatus, saveProject,
   downloadSnapshot, exportJSON, importJSON,
   autosaveEnabled, setAutosaveEnabled,
+  // Recording props — passed from RoomScene via useRecorder
+  recorderProps,
 }) {
   const [localName,    setLocalName]    = useState(projectName);
   const [snapshotMode, setSnapshotMode] = useState('current');
   const btnRef = useRef(null);
 
-  // Sync localName when projectName changes from outside
   const prevOpen = useRef(false);
   if (open && !prevOpen.current) { setLocalName(projectName); }
   prevOpen.current = open;
@@ -64,15 +64,17 @@ export default function SaveModal({
     setProjectName(localName.trim() || 'Untitled Room');
   };
 
+  const hasRecorder = !!recorderProps;
+
   return (
     <Modal
       open={open}
       onCancel={onClose}
       footer={null}
-      width={420}
+      width={hasRecorder ? 460 : 420}
       title={
         <span style={{ marginLeft: 12, color: C.text, fontFamily: 'Inter, sans-serif', fontSize: 15, fontWeight: 500 }}>
-          <SaveOutlined style={{ color: C.action, marginRight: 8, marginTop:12 }} />
+          <SaveOutlined style={{ color: C.action, marginRight: 8 }} />
           Save Project
         </span>
       }
@@ -84,9 +86,9 @@ export default function SaveModal({
           padding:      '20px 24px 24px',
         },
         header: {
-          background:   C.bg,
-          borderBottom: `1px solid ${C.border}`,
-          borderRadius: '16px 16px 0 0',
+          background:    C.bg,
+          borderBottom:  `1px solid ${C.border}`,
+          borderRadius:  '16px 16px 0 0',
           paddingBottom: 12,
           marginBottom:  0,
         },
@@ -94,12 +96,11 @@ export default function SaveModal({
         body: { padding: 0, paddingTop: 20 },
       }}
     >
-      {/* Scoped CSS overrides for Ant components inside this modal */}
       <style>{`
         .lumiere-save-modal .ant-input {
-          background: ${C.bgDeep} !important;
+          background:   ${C.bgDeep} !important;
           border-color: ${C.border} !important;
-          color: ${C.text} !important;
+          color:        ${C.text} !important;
           border-radius: 8px !important;
         }
         .lumiere-save-modal .ant-input::placeholder { color: ${C.subtext} !important; }
@@ -109,25 +110,25 @@ export default function SaveModal({
           box-shadow: 0 0 0 2px ${C.action}25 !important;
         }
         .lumiere-save-modal .ant-segmented {
-          background: ${C.bgDeep} !important;
+          background:    ${C.bgDeep} !important;
           border-radius: 8px !important;
-          padding: 3px !important;
+          padding:       3px !important;
         }
         .lumiere-save-modal .ant-segmented-item-label { color: ${C.subtext} !important; font-size: 12px; }
         .lumiere-save-modal .ant-segmented-item-selected .ant-segmented-item-label { color: ${C.text} !important; }
         .lumiere-save-modal .ant-segmented-item-selected {
-          background: ${C.bg} !important;
+          background:    ${C.bg} !important;
           border-radius: 6px !important;
         }
-        .lumiere-save-modal .ant-switch { background: ${COLORS.accent} !important; }
-        .lumiere-save-modal .ant-switch-checked { background: ${C.action} !important; }
-        .lumiere-save-modal .ant-modal-close { color: ${C.subtext} !important; }
+        .lumiere-save-modal .ant-switch       { background: ${COLORS.accent} !important; }
+        .lumiere-save-modal .ant-switch-checked{ background: ${C.action} !important; }
+        .lumiere-save-modal .ant-modal-close  { color: ${C.subtext} !important; }
         .lumiere-save-modal .ant-modal-close:hover { color: ${C.text} !important; }
       `}</style>
 
       <div className="lumiere-save-modal" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
-        {/* ── Project name ──────────────────────────────────────────────── */}
+        {/* ── Project name ──────────────────────────────────────── */}
         <div>
           <Label>Project Name</Label>
           <Input
@@ -139,7 +140,7 @@ export default function SaveModal({
           />
         </div>
 
-        {/* ── Save button ───────────────────────────────────────────────── */}
+        {/* ── Save button ───────────────────────────────────────── */}
         <button
           ref={btnRef}
           onClick={handleSave}
@@ -153,7 +154,7 @@ export default function SaveModal({
             height:         44,
             borderRadius:   10,
             border:         'none',
-            background:     STATUS_BG[saveStatus] || C.action,
+            background:     STATUS_BG[saveStatus] ?? C.action,
             color:          '#1A1008',
             fontSize:       14,
             fontWeight:     600,
@@ -161,6 +162,7 @@ export default function SaveModal({
             cursor:         saveStatus === 'saving' ? 'wait' : 'pointer',
             transition:     'background 0.2s',
             letterSpacing:  '0.02em',
+            boxShadow:      saveStatus === 'idle' ? `0 0 18px ${C.action}35` : 'none',
           }}
         >
           {STATUS_ICON[saveStatus]}
@@ -169,7 +171,7 @@ export default function SaveModal({
 
         <Divider />
 
-        {/* ── Snapshot ─────────────────────────────────────────────────── */}
+        {/* ── Snapshot ─────────────────────────────────────────── */}
         <div>
           <Label>Snapshot</Label>
           <Segmented
@@ -190,7 +192,21 @@ export default function SaveModal({
 
         <Divider />
 
-        {/* ── Export / Import ───────────────────────────────────────────── */}
+        {/* ── Recording ────────────────────────────────────────── */}
+        {hasRecorder && (
+          <>
+            <div>
+              <Label>
+                <VideoCameraOutlined style={{ marginRight: 5 }} />
+                Record Room
+              </Label>
+              <RecordingPanel {...recorderProps} />
+            </div>
+            <Divider />
+          </>
+        )}
+
+        {/* ── Export / Import ───────────────────────────────────── */}
         <div>
           <Label>Scene File</Label>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -201,7 +217,7 @@ export default function SaveModal({
 
         <Divider />
 
-        {/* ── Autosave ──────────────────────────────────────────────────── */}
+        {/* ── Autosave ──────────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ClockCircleOutlined style={{ color: C.subtext, fontSize: 14 }} />
@@ -209,10 +225,7 @@ export default function SaveModal({
               Autosave every 30s
             </span>
           </div>
-          <Switch
-            checked={autosaveEnabled}
-            onChange={setAutosaveEnabled}
-          />
+          <Switch checked={autosaveEnabled} onChange={setAutosaveEnabled} />
         </div>
 
       </div>
@@ -220,7 +233,7 @@ export default function SaveModal({
   );
 }
 
-// ── Small helpers ─────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function Label({ children }) {
   return (
@@ -232,6 +245,8 @@ function Label({ children }) {
       textTransform:  'uppercase',
       fontFamily:     'Inter, sans-serif',
       marginBottom:   8,
+      display:        'flex',
+      alignItems:     'center',
     }}>
       {children}
     </div>

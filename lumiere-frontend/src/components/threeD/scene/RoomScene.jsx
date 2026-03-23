@@ -62,7 +62,11 @@ import { useToast }        from "../../../ui/ToastNotification";
 import { SlidePanel, BottomNav, MobileTopBar } from "./MobileLayout";
 import useProjectSave      from "../../../hooks/useProjectSave";
 
+import useRecorder          from '../../../hooks/useRecorder';
+import RecordingIndicator   from '../ui/RecordingIndicator';
+
 // ─────────────────────────────────────────────────────────────────────────────
+
 
 const CAMERA_PRESETS = {
   perspective: { position: [7, 4, 9],    target: [0, 1.5, 0] },
@@ -150,6 +154,11 @@ export default function RoomScene() {
     lightingState,
     canvasRef: canvasWrapperRef,
     currentProjectId, setCurrentProjectId,
+  });
+  const recorder = useRecorder({
+    canvasWrapperRef,         
+    orbitControlsRef,         
+    projectId: currentProjectId,
   });
 
   // ── Spatial analysis ──────────────────────────────────────────────────────
@@ -365,6 +374,12 @@ export default function RoomScene() {
           onLock={() => { const c = canvasWrapperRef.current?.querySelector('canvas'); if (c) c.requestPointerLock(); }}
         />
       )}
+
+      {/* Recording indicator — floats over canvas while recording */}
+      <RecordingIndicator
+        recState={recorder.recState}
+        onStop={recorder.stopManualRecording}
+      />
 
       <div
         ref={canvasWrapperRef}
@@ -753,6 +768,7 @@ export default function RoomScene() {
         importJSON={projectSave.importJSON}
         autosaveEnabled={projectSave.autosaveEnabled}
         setAutosaveEnabled={projectSave.setAutosaveEnabled}
+        recorderProps={recorder}
       />
 
       <style>{`

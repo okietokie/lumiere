@@ -1,19 +1,24 @@
 # app/routes/project_routes.py
-from fastapi import APIRouter, HTTPException
+import os
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 from app.services.project_service import (
     create_project, update_project,
     list_projects, get_project, delete_project,
+    save_project_video,
 )
 
 router = APIRouter()
+
+B2_PUBLIC_URL = os.getenv("B2_PUBLIC_URL", "")
+VIDEOS_DIR    = os.getenv("VIDEOS_DIR", "/tmp/lumiere_videos")
 
 
 class SaveProjectRequest(BaseModel):
     name:      str
     scene:     dict
-    thumbnail: Optional[str] = None   # base64 PNG
+    thumbnail: Optional[str] = None
     user_id:   Optional[str] = None
 
 
@@ -62,3 +67,28 @@ async def delete_project_route(project_id: str):
     if not ok:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"deleted": True}
+
+
+# ── Video upload ──────────────────────────────────────────────────────────────
+@router.post("/{project_id}/video")
+async def upload_project_video(
+    project_id: str,
+    video: UploadFile = File(...),
+):
+    """
+    Receives a WebM video blob from the Auto Capture feature.
+    Saves it to disk (or B2 — see save_project_video) and stores
+    the URL in the project document under preview_video.
+    """
+    if not video.content_type or "video" not in video.content_type:
+        raise HTTPException(status_code=400, detail="File must be a video")
+
+    data = await video.read()
+    if len(data) > 100 * 1024 * 1024:   # 100 MB hard cap
+        raise HTTPException(status_code=413, detail="Video too large (max 100 MB)")
+
+    video_url = await save_project_video(project_id, data)
+    if not video_url:
+        raise HTTPException(status_code=500, detail="Failed to save video")
+
+    return {"video_url": video_url}
