@@ -3,8 +3,10 @@ import gsap from "gsap";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import LandingPage from "./components/Landingpage";
 import RoomScene from "./components/threeD/scene/RoomScene";
+import ModelPreviewStudio from "./components/admin/ModelPreviewStudio";
 import { COLORS } from "./utils/colors";
 import { ToastProvider } from "./ui/ToastNotification";
+import useModelPrefetch from "./hooks/useModelPrefetch";
 
 // Wrapper so each route can control its own scroll/overflow
 function RouteWrapper() {
@@ -22,12 +24,15 @@ function RouteWrapper() {
       <Routes>
         <Route path="/"          element={<LandingPage />} />
         <Route path="/user/room" element={<RoomScene />}   />
+        <Route path="/admin/model-previews" element={<ModelPreviewStudio />} />
       </Routes>
     </div>
   );
 }
 
 function App() {
+  useModelPrefetch({ autostart: true, delay: 1200 });
+
   useEffect(() => {
     gsap.from('body', { opacity: 0, duration: 0.8, ease: "power3.out" });
   }, []);

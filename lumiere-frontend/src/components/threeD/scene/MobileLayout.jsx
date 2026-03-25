@@ -54,8 +54,8 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
           onClick={onClose}
           style={{
             position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(0,0,0,0.45)',
-            backdropFilter: 'blur(2px)',
+            background: 'rgba(12, 9, 7, 0.56)',
+            backdropFilter: 'blur(8px)',
           }}
         />
       )}
@@ -70,10 +70,10 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
           right:           0,
           height,
           zIndex:          1001,
-          background:      `linear-gradient(160deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`,
-          borderRadius:    '20px 20px 0 0',
-          borderTop:       `1px solid ${COLORS.action}40`,
-          boxShadow:       '0 -8px 40px rgba(0,0,0,0.5)',
+          background:      `linear-gradient(180deg, ${COLORS.surface}F7 0%, ${COLORS.background}FC 100%)`,
+          borderRadius:    '24px 24px 0 0',
+          borderTop:       `1px solid ${COLORS.secondary}66`,
+          boxShadow:       '0 -14px 42px rgba(0,0,0,0.42)',
           transform:       'translateY(100%)',
           display:         'flex',
           flexDirection:   'column',
@@ -82,7 +82,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
       >
         {/* Drag handle */}
         <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px' }}>
-          <div style={{ width: 40, height: 4, borderRadius: 2, background: `${COLORS.secondary}60` }} />
+          <div style={{ width: 42, height: 5, borderRadius: 999, background: `linear-gradient(90deg, ${COLORS.action}CC, ${COLORS.accent}CC)` }} />
         </div>
 
         {/* Header */}
@@ -91,19 +91,19 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
           alignItems:     'center',
           justifyContent: 'space-between',
           padding:        '8px 20px 12px',
-          borderBottom:   `1px solid ${COLORS.secondary}30`,
+          borderBottom:   `1px solid ${COLORS.secondary}36`,
         }}>
-          <span style={{ color: COLORS.text, fontSize: 17, fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>
+          <span style={{ color: COLORS.text, fontSize: 17, fontWeight: 700, fontFamily: '"Plus Jakarta Sans", Inter, sans-serif', letterSpacing: '-0.02em' }}>
             {title}
           </span>
           <button
             onClick={onClose}
             style={{
-              background: `${COLORS.secondary}20`,
-              border: 'none', borderRadius: 20,
+              background: `${COLORS.background}CC`,
+              border: `1px solid ${COLORS.secondary}55`, borderRadius: 999,
               width: 32, height: 32,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: COLORS.secondary, cursor: 'pointer',
+              color: COLORS.text, cursor: 'pointer',
             }}
           >
             <Icon d={ICONS.close} size={18} />
@@ -111,7 +111,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
         </div>
 
         {/* Scrollable content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 24px', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 24px', WebkitOverflowScrolling: 'touch', background: 'linear-gradient(180deg, rgba(58,48,43,0.16) 0%, rgba(44,36,32,0) 100%)' }}>
           {children}
         </div>
       </div>
@@ -122,10 +122,10 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
 // ── Bottom navigation bar ─────────────────────────────────────────────────────
 export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, onUndo, onRedo }) {
   const tabs = [
-    { key: 'walls',     label: 'Walls',     icon: ICONS.walls     },
+    { key: 'walls',     label: 'Build',     icon: ICONS.walls     },
     { key: 'materials', label: 'Style',     icon: ICONS.materials },
-    { key: 'furniture', label: 'Furniture', icon: ICONS.furniture  },
-    { key: 'lighting',  label: 'Lighting',  icon: ICONS.lighting  },
+    { key: 'furniture', label: 'Furnish',   icon: ICONS.furniture  },
+    { key: 'lighting',  label: 'Light',     icon: ICONS.lighting  },
   ];
 
   return (
@@ -135,15 +135,15 @@ export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, on
       left:           0,
       right:          0,
       zIndex:         999,
-      background:     'rgba(12,9,7,0.97)',
-      borderTop:      `1px solid ${COLORS.action}40`,
+      background:     `${COLORS.background}F2`,
+      borderTop:      `1px solid ${COLORS.secondary}55`,
       backdropFilter: 'blur(20px)',
       display:        'flex',
       alignItems:     'center',
       justifyContent: 'space-around',
       padding:        '8px 4px',
       paddingBottom:  'env(safe-area-inset-bottom, 8px)',
-      boxShadow:      '0 -4px 20px rgba(0,0,0,0.4)',
+      boxShadow:      '0 -8px 28px rgba(0,0,0,0.35)',
     }}>
       {tabs.map((tab) => {
         const active = activeTab === tab.key;
@@ -159,7 +159,7 @@ export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, on
               padding:        '6px 12px',
               minWidth:       56,
               minHeight:      48,
-              background:     'transparent',
+              background:     active ? `${COLORS.surface}CC` : 'transparent',
               border:         'none',
               borderRadius:   12,
               color:          active ? COLORS.action : `${COLORS.secondary}90`,
@@ -183,7 +183,7 @@ export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, on
       })}
 
       {/* Divider */}
-      <div style={{ width: 1, height: 32, background: `${COLORS.secondary}30` }} />
+      <div style={{ width: 1, height: 32, background: `${COLORS.secondary}40` }} />
 
       {/* Undo */}
       <button onClick={onUndo} disabled={!canUndo} style={{
@@ -219,9 +219,9 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
       left:           0,
       right:          0,
       zIndex:         999,
-      background:     'rgba(12,9,7,0.92)',
+      background:     `${COLORS.background}EB`,
       backdropFilter: 'blur(16px)',
-      borderBottom:   `1px solid ${COLORS.action}25`,
+      borderBottom:   `1px solid ${COLORS.secondary}40`,
       display:        'flex',
       alignItems:     'center',
       justifyContent: 'space-between',
@@ -229,8 +229,8 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
       paddingTop:     'calc(10px + env(safe-area-inset-top, 0px))',
     }}>
       <div>
-        <div style={{ color: COLORS.action, fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', fontFamily: 'Inter, sans-serif' }}>Lumiere</div>
-        <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>
+        <div style={{ color: COLORS.action, fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', fontFamily: '"Plus Jakarta Sans", Inter, sans-serif' }}>Lumiere</div>
+        <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, fontFamily: '"Plus Jakarta Sans", Inter, sans-serif' }}>
           {projectName || 'My Room'}
         </div>
       </div>
@@ -243,19 +243,19 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
           alignItems:     'center',
           gap:            6,
           padding:        '8px 14px',
-          background:     cameraMode === 'firstPerson' ? `${COLORS.action}22` : `${COLORS.secondary}18`,
-          border:         `1px solid ${cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary}50`,
-          borderRadius:   20,
-          color:          cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary,
+          background:     cameraMode === 'firstPerson' ? `${COLORS.surface}` : `${COLORS.background}CC`,
+          border:         `1px solid ${cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary}66`,
+          borderRadius:   999,
+          color:          cameraMode === 'firstPerson' ? COLORS.action : COLORS.text,
           fontSize:       12,
-          fontFamily:     'Inter, sans-serif',
-          fontWeight:     500,
+          fontFamily:     '"Plus Jakarta Sans", Inter, sans-serif',
+          fontWeight:     600,
           cursor:         'pointer',
           minHeight:      40,
         }}
       >
-        <Icon d={ICONS.camera} size={16} color={cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary} />
-        {cameraMode === 'firstPerson' ? 'Walk' : 'Orbit'}
+        <Icon d={ICONS.camera} size={16} color={cameraMode === 'firstPerson' ? COLORS.action : COLORS.text} />
+        {cameraMode === 'firstPerson' ? 'Walkthrough' : 'Orbit'}
       </button>
     </div>
   );

@@ -1,14 +1,13 @@
 // src/components/threeD/scene/RoomScene.jsx
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport } from "@react-three/drei";
-import { useState, useEffect, useRef, Suspense } from "react";
-import { Splitter, Button, Tooltip, Space, Grid, Tabs } from "antd";
+import { useState, useEffect, useRef, Suspense, useCallback, useMemo } from "react";
+import { Splitter, Button, Tooltip, Space, Grid, Tabs, Slider } from "antd";
 import {
   EyeOutlined,
   VerticalLeftOutlined,
   VerticalRightOutlined,
   BorderOutlined,
-  CameraOutlined,
   UndoOutlined,
   RedoOutlined,
   SaveOutlined,
@@ -20,6 +19,15 @@ import {
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
 import { COLORS } from "../../../utils/colors";
+import {
+  createWallEntity,
+  createDoorEntity,
+  createWindowEntity,
+  getWallMetrics,
+  projectPointOntoWall,
+  validateDoorPlacement,
+  validateWindowPlacement,
+} from "../../../utils/sceneEntities";
 import * as THREE from "three";
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
@@ -82,9 +90,9 @@ export default function RoomScene() {
     state: walls, set: setWalls,
     undo, redo, canUndo, canRedo,
   } = useHistory([
-    { id: uuidv4(), start: [-3, -3], end: [3, -3],  height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] },
-    { id: uuidv4(), start: [-3, -3], end: [-3, 3],  height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] },
-    { id: uuidv4(), start: [3, -3],  end: [3, 3],   height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] },
+    createWallEntity({ start: [-3, -3], end: [3, -3] }),
+    createWallEntity({ start: [-3, -3], end: [-3, 3] }),
+    createWallEntity({ start: [3, -3], end: [3, 3] }),
   ]);
 
   // ── Materials ─────────────────────────────────────────────────────────────
@@ -109,14 +117,18 @@ export default function RoomScene() {
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [selectedWallId,      setSelectedWallId]      = useState(null);
+  const [selectedOpening,     setSelectedOpening]     = useState(null);
   const [cameraMode,          setCameraMode]          = useState('orbit');
   const [gizmoMode,           setGizmoMode]           = useState('translate');
+  const [activeTool,          setActiveTool]          = useState('select');
+  const [openingPreview,      setOpeningPreview]      = useState(null);
   const [isPointerLocked,     setIsPointerLocked]     = useState(false);
   const [orbitEnabled,        setOrbitEnabled]        = useState(true);
   const [teleportTarget,      setTeleportTarget]      = useState(null);
   const [activeTab,           setActiveTab]           = useState('walls');
+  const [desktopPanelOpen,    setDesktopPanelOpen]    = useState(false);
+  const [currentViewPreset,   setCurrentViewPreset]   = useState('perspective');
   const [saveModalOpen,       setSaveModalOpen]       = useState(false);
-  const [furnitureTint,       setFurnitureTint]       = useState(null);
   const [currentProjectId,    setCurrentProjectId]    = useState(null);
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
   const [furnitureToolbarPos, setFurnitureToolbarPos] = useState(null);
@@ -132,7 +144,7 @@ export default function RoomScene() {
   const toast = useToast();
 
   // Whether anything is selected (drives GizmoHelper visibility)
-  const anythingSelected = !!(selectedWallId || selectedFurnitureId || selectedLightId);
+  const anythingSelected = !!(selectedWallId || selectedFurnitureId || selectedLightId || selectedOpening);
 
   // ── Mobile detection ──────────────────────────────────────────────────────
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -145,6 +157,7 @@ export default function RoomScene() {
 
   const openMobilePanel = (tab) => { setActiveTab(tab); setMobilePanelOpen(true); };
   const sidebarRef = useRef(null);
+  const desktopPanelInitRef = useRef(false);
 
   const projectSave = useProjectSave({
     walls, setWalls,
@@ -164,10 +177,37 @@ export default function RoomScene() {
   // ── Spatial analysis ──────────────────────────────────────────────────────
   const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
 
-  useEffect(() => { setFurnitureTint(null); }, [selectedFurnitureId]);
-
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
+  const selectedWallDoorCount = selectedWall?.doors?.length ?? 0;
+  const selectedWallWindowCount = selectedWall?.windows?.length ?? 0;
+  const selectedOpeningEntity = useMemo(() => {
+    if (!selectedOpening || !selectedWall) return null;
+    const openings = selectedOpening.type === 'door'
+      ? (selectedWall.doors ?? [])
+      : (selectedWall.windows ?? []);
+    return openings.find((opening) => opening.id === selectedOpening.id) ?? null;
+  }, [selectedOpening, selectedWall]);
+
+  const softBorder = `1px solid ${COLORS.secondary}55`;
+  const softShadow = '0 24px 60px rgba(0, 0, 0, 0.28)';
+  const glassShadow = '0 16px 34px rgba(0, 0, 0, 0.24)';
+  const panelGradient = `linear-gradient(180deg, ${COLORS.surface}F2 0%, ${COLORS.background}F8 100%)`;
+  const pageGradient = `radial-gradient(circle at top left, ${COLORS.surface} 0%, ${COLORS.background} 58%, #211a17 100%)`;
+  const copperGlow = 'radial-gradient(circle at top left, rgba(196, 154, 108, 0.16), transparent 42%)';
+  const accentGlow = 'radial-gradient(circle at bottom right, rgba(139, 107, 77, 0.18), transparent 38%)';
+  const cameraCardBg = `linear-gradient(180deg, ${COLORS.background}E8 0%, ${COLORS.surface}F2 100%)`;
+  const desktopCanvasShell = `linear-gradient(180deg, ${COLORS.surface}D8 0%, ${COLORS.background}F4 100%)`;
+
+  useEffect(() => {
+    if (isMobile) return;
+    if (!desktopPanelInitRef.current) {
+      desktopPanelInitRef.current = true;
+      return;
+    }
+    setDesktopPanelOpen(true);
+  }, [activeTab, isMobile]);
+
 
   // ── Apply ghost opacity to wall meshes ────────────────────────────────────
   useEffect(() => {
@@ -185,19 +225,6 @@ export default function RoomScene() {
   }, [walls]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
-  useEffect(() => {
-    const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
-      if (e.key === 'Escape') { setSelectedWallId(null); setSelectedFurnitureId(null); }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFurnitureId) {
-        deleteItem(selectedFurnitureId);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, selectedFurnitureId]);
-
   // ── Mobile touch safety ───────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasWrapperRef.current?.querySelector('canvas');
@@ -219,15 +246,66 @@ export default function RoomScene() {
   const updateWall = (id, updates) =>
     setWalls((p) => p.map((w) => w.id === id ? { ...w, ...updates } : w));
 
+  const updateWallOpening = useCallback((wallId, openingType, openingId, updates) => {
+    setWalls((prev) => prev.map((wall) => {
+      if (wall.id !== wallId) return wall;
+      const key = openingType === 'door' ? 'doors' : 'windows';
+      const nextItems = (wall[key] ?? []).map((opening) => {
+        if (opening.id !== openingId) return opening;
+        const nextOpening = { ...opening, ...updates, updatedAt: Date.now() };
+        const validation = openingType === 'door'
+          ? validateDoorPlacement(wall, nextOpening)
+          : validateWindowPlacement(wall, nextOpening);
+        return validation.valid ? nextOpening : opening;
+      });
+      return { ...wall, [key]: nextItems, updatedAt: Date.now() };
+    }));
+  }, [setWalls]);
+
+  const removeWallOpening = useCallback((wallId, openingType, openingId) => {
+    setWalls((prev) => prev.map((wall) => {
+      if (wall.id !== wallId) return wall;
+      const key = openingType === 'door' ? 'doors' : 'windows';
+      return {
+        ...wall,
+        [key]: (wall[key] ?? []).filter((opening) => opening.id !== openingId),
+        updatedAt: Date.now(),
+      };
+    }));
+    setSelectedOpening((prev) => (prev?.id === openingId ? null : prev));
+  }, [setWalls]);
+
+  const buildOpeningPreview = useCallback((wall, openingType, point = null) => {
+    if (!wall) return null;
+    const base = openingType === 'door'
+      ? createDoorEntity({ wallId: wall.id })
+      : createWindowEntity({ wallId: wall.id });
+    const metrics = getWallMetrics(wall);
+    const projection = projectPointOntoWall(wall, point ?? metrics.center, 0.2);
+    const nextPreview = {
+      ...base,
+      id: 'preview',
+      wallId: wall.id,
+      offsetAlongWall: projection.offsetAlongWall,
+    };
+    const validation = openingType === 'door'
+      ? validateDoorPlacement(wall, nextPreview)
+      : validateWindowPlacement(wall, nextPreview);
+    return { ...nextPreview, valid: validation.valid, reason: validation.reason };
+  }, []);
+
   const deleteWall = (id) => {
     setWalls((p) => p.filter((w) => w.id !== id));
     if (selectedWallId === id) setSelectedWallId(null);
+    if (selectedOpening?.wallId === id) setSelectedOpening(null);
+    if (openingPreview?.wallId === id) setOpeningPreview(null);
   };
 
   const addWall = () => {
-    const w = { id: uuidv4(), start: [-1, 0], end: [1, 0], height: 3, thickness: 0.2, color: '#8A8070', roughness: 0.85, metalness: 0.0, textureUrl: null, doors: [], windows: [] };
+    const w = createWallEntity({ start: [-1, 0], end: [1, 0] });
     setWalls((p) => [...p, w]);
     setSelectedWallId(w.id);
+    setActiveTool('build');
   };
 
   const splitWall = () => {
@@ -236,11 +314,69 @@ export default function RoomScene() {
     const mid = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
     setWalls((p) => [
       ...p.filter((w) => w.id !== id),
-      { id: uuidv4(), start, end: mid, height, thickness, color, roughness, metalness, textureUrl, doors: [], windows: [] },
-      { id: uuidv4(), start: mid, end, height, thickness, color, roughness, metalness, textureUrl, doors: [], windows: [] },
+      createWallEntity({ start, end: mid, height, thickness, color, roughness, metalness, textureUrl }),
+      createWallEntity({ start: mid, end, height, thickness, color, roughness, metalness, textureUrl }),
     ]);
     setSelectedWallId(null);
   };
+
+  const startOpeningPlacement = useCallback((openingType) => {
+    if (!selectedWall) {
+      toast.info(`Select a wall first to place a ${openingType}.`);
+      return;
+    }
+    setActiveTool(openingType);
+    setSelectedOpening(null);
+    setOpeningPreview(buildOpeningPreview(selectedWall, openingType));
+    setActiveTab('walls');
+  }, [buildOpeningPreview, selectedWall, toast]);
+
+  const updateOpeningPreview = useCallback((wall, openingType, point) => {
+    if (!wall || activeTool !== openingType) return;
+    setOpeningPreview(buildOpeningPreview(wall, openingType, point));
+  }, [activeTool, buildOpeningPreview]);
+
+  const commitOpeningPreview = useCallback((wall) => {
+    if (!wall || !openingPreview || openingPreview.wallId !== wall.id || !openingPreview.valid) return false;
+    const openingType = openingPreview.type === 'window' ? 'window' : 'door';
+    const key = openingType === 'door' ? 'doors' : 'windows';
+    const openingToStore = { ...openingPreview, id: uuidv4() };
+    delete openingToStore.valid;
+    delete openingToStore.reason;
+
+    setWalls((prev) => prev.map((item) => (
+      item.id === wall.id
+        ? { ...item, [key]: [...(item[key] ?? []), openingToStore], updatedAt: Date.now() }
+        : item
+    )));
+    setSelectedOpening({ id: openingToStore.id, type: openingType, wallId: wall.id });
+    setOpeningPreview(null);
+    setActiveTool('select');
+    toast.success(`${openingType === 'door' ? 'Door' : 'Window'} added to wall.`);
+    return true;
+  }, [openingPreview, setWalls, toast]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
+      if (e.key === 'Escape') {
+        setSelectedWallId(null);
+        setSelectedFurnitureId(null);
+        setSelectedOpening(null);
+        setOpeningPreview(null);
+        setActiveTool('select');
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFurnitureId) {
+        deleteItem(selectedFurnitureId);
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedOpening) {
+        removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo, selectedFurnitureId, selectedOpening, removeWallOpening]);
 
   // ── Furniture helpers ─────────────────────────────────────────────────────
   const addItem = (modelMeta) => {
@@ -253,6 +389,7 @@ export default function RoomScene() {
       position: [0, 0, 0],
       rotation: [0, 0, 0],
       scale:    [1, 1, 1],
+      tint:     null,
     };
     setPlacedItems((p) => [...p, item]);
     setSelectedFurnitureId(item.id);
@@ -261,6 +398,25 @@ export default function RoomScene() {
 
   const updateItem = (id, updates) =>
     setPlacedItems((p) => p.map((i) => i.id === id ? { ...i, ...updates } : i));
+
+  const setSelectedFurnitureTint = useCallback((nextTint) => {
+    if (!selectedFurnitureId) return;
+    setPlacedItems((prev) => {
+      let changed = false;
+      const nextItems = prev.map((item) => {
+        if (item.id !== selectedFurnitureId) return item;
+        const tint = typeof nextTint === 'function' ? nextTint(item.tint ?? null) : nextTint;
+        const sameTint =
+          item.tint?.hue === tint?.hue &&
+          item.tint?.saturation === tint?.saturation &&
+          item.tint?.brightness === tint?.brightness;
+        if (sameTint) return item;
+        changed = true;
+        return { ...item, tint };
+      });
+      return changed ? nextItems : prev;
+    });
+  }, [selectedFurnitureId]);
 
   const deleteItem = (id) => {
     setPlacedItems((p) => p.filter((i) => i.id !== id));
@@ -274,6 +430,7 @@ export default function RoomScene() {
       position: [...selectedFurniture.position],
       rotation: [...selectedFurniture.rotation],
       scale:    [...selectedFurniture.scale],
+      tint:     selectedFurniture.tint ?? null,
     };
     setPlacedItems((p) => [...p.filter((i) => i.id !== selectedFurnitureId), newItem]);
     setSelectedFurnitureId(newItem.id);
@@ -281,6 +438,7 @@ export default function RoomScene() {
 
   // ── Camera helpers ────────────────────────────────────────────────────────
   const applyCameraPreset = (preset) => {
+    setCurrentViewPreset(preset);
     if (cameraMode === 'orbit' && orbitControlsRef.current) {
       const { position, target } = CAMERA_PRESETS[preset];
       gsap.to(orbitControlsRef.current.target, { x: target[0], y: target[1], z: target[2], duration: 1, ease: "power2.inOut" });
@@ -294,39 +452,240 @@ export default function RoomScene() {
     setSelectedWallId(null);
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
+    setSelectedOpening(null);
+    setOpeningPreview(null);
+    setActiveTool('select');
     setWallToolbarPos(null);
     setFurnitureToolbarPos(null);
     setLightToolbarPos(null);
   };
 
   // ── Tab definitions ───────────────────────────────────────────────────────
+  const toggleDesktopPanel = useCallback((tabKey) => {
+    if (activeTab === tabKey) {
+      setDesktopPanelOpen((open) => !open);
+      return;
+    }
+    setActiveTab(tabKey);
+    setDesktopPanelOpen(true);
+  }, [activeTab]);
+
+  const desktopNavItems = [
+    { key: 'walls', label: 'Build', icon: ColumnWidthOutlined },
+    { key: 'materials', label: 'Style', icon: FormatPainterOutlined },
+    { key: 'lighting', label: 'Light', icon: BulbOutlined },
+    { key: 'furniture', label: 'Furnish', icon: AppstoreOutlined },
+    { key: 'view', label: 'View', icon: EyeOutlined },
+  ];
+
+  const desktopPanelTitle =
+    activeTab === 'walls' ? 'Build' :
+    activeTab === 'materials' ? 'Style' :
+    activeTab === 'lighting' ? 'Light' :
+    activeTab === 'furniture' ? 'Furnish' :
+    'View';
+
+  const desktopPanelContent = activeTab === 'walls' ? (
+    <>
+      {selectedWall && (
+        <div className="room-floating-context-card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700 }}>Selected Wall</div>
+              <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>
+                {selectedWallDoorCount} door{selectedWallDoorCount === 1 ? '' : 's'} • {selectedWallWindowCount} window{selectedWallWindowCount === 1 ? '' : 's'}
+              </div>
+            </div>
+            <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
+              Live Context
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+            <button type="button" className={activeTool === 'door' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('door')}>Add Door</button>
+            <button type="button" className={activeTool === 'window' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('window')}>Add Window</button>
+            <button type="button" className="room-secondary-chip" onClick={splitWall}>Split</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+            <button type="button" className={activeTool === 'build' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('build')}>Build</button>
+            <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
+            <button type="button" className="room-secondary-chip is-danger" onClick={() => deleteWall(selectedWall.id)}>Delete</button>
+          </div>
+          {selectedOpeningEntity && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px', borderRadius: 16, background: `${COLORS.surface}CC`, border: `1px solid ${COLORS.secondary}45` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>
+                    {selectedOpening?.type} selected
+                  </div>
+                  <div style={{ color: `${COLORS.text}8C`, fontSize: 11 }}>
+                    Drag in scene to move. Resize with the side handles.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="room-secondary-chip is-danger"
+                  style={{ minWidth: 88 }}
+                  onClick={() => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id)}
+                >
+                  Remove
+                </button>
+              </div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
+                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
+                </div>
+                <Slider
+                  min={0.45}
+                  max={2.4}
+                  step={0.05}
+                  value={selectedOpeningEntity.width}
+                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { width: value })}
+                  tooltip={{ formatter: (value) => `${value} m` }}
+                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
+                />
+              </div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
+                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
+                </div>
+                <Slider
+                  min={selectedOpening?.type === 'door' ? 1.8 : 0.6}
+                  max={selectedOpening?.type === 'door' ? 2.6 : 1.8}
+                  step={0.05}
+                  value={selectedOpeningEntity.height}
+                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { height: value })}
+                  tooltip={{ formatter: (value) => `${value} m` }}
+                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
+                />
+              </div>
+              {selectedOpening?.type === 'door' && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                  <button
+                    type="button"
+                    className={selectedOpeningEntity.swingDirection === 'left' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'left' })}
+                  >
+                    Swing L
+                  </button>
+                  <button
+                    type="button"
+                    className={selectedOpeningEntity.swingDirection === 'right' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'right' })}
+                  >
+                    Swing R
+                  </button>
+                  <button
+                    type="button"
+                    className="room-secondary-chip"
+                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: selectedOpeningEntity.swingDirection === 'left' ? 'right' : 'left' })}
+                  >
+                    Flip
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <WallEditorPanel
+        selectedWall={selectedWall}
+        addWall={addWall}
+        splitWall={splitWall}
+        deleteWall={deleteWall}
+        updateWall={updateWall}
+        gizmoMode={gizmoMode}
+        setGizmoMode={setGizmoMode}
+        envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
+        setEnvColors={(updater) => {
+          const next = typeof updater === 'function'
+            ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
+            : updater;
+          if (next.floor !== floorMaterial.color) updateSurface('floor', { color: next.floor });
+          if (next.ceiling !== ceilingMaterial.color) updateSurface('ceiling', { color: next.ceiling });
+        }}
+      />
+    </>
+  ) : activeTab === 'materials' ? (
+    <MaterialPanel
+      selectedWall={selectedWall}
+      walls={walls}
+      floorMaterial={floorMaterial}
+      ceilingMaterial={ceilingMaterial}
+      applyTexture={applyTexture}
+      updateSurface={updateSurface}
+      applyTheme={applyTheme}
+      activeTheme={activeTheme}
+    />
+  ) : activeTab === 'lighting' ? (
+    <LightingPanel {...lightingState} />
+  ) : activeTab === 'furniture' ? (
+    <FurniturePicker
+      selectedItem={selectedFurniture}
+      placedItems={placedItems}
+      addItem={addItem}
+      deleteItem={deleteItem}
+      gizmoMode={gizmoMode}
+      setGizmoMode={setGizmoMode}
+      furnitureRefs={furnitureRefs}
+      tint={selectedFurniture?.tint ?? null}
+      setTint={setSelectedFurnitureTint}
+    />
+  ) : (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: cameraCardBg, borderRadius: 22, border: `1px solid ${COLORS.secondary}50`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 24px rgba(0,0,0,0.18)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div className="room-view-title">View</div>
+          <div className="room-segmented room-segmented-compact">
+            <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
+              Orbit
+            </button>
+            <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }}>
+              Walk
+            </button>
+          </div>
+        </div>
+        <div className="room-view-strip">
+          {Object.keys(CAMERA_PRESETS).map((k) => (
+            <Tooltip key={k} title={k[0].toUpperCase() + k.slice(1)}>
+              <button
+                type="button"
+                className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
+                onClick={() => applyCameraPreset(k)}
+              >
+                {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <BorderOutlined /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div className="room-stat-chip">
+          <span className="room-stat-dot" />
+          {walls.length} walls
+        </div>
+        <div className="room-stat-chip">
+          <span className="room-stat-dot room-stat-dot-blue" />
+          {placedItems.length} objects
+        </div>
+        <div className="room-stat-chip">
+          <span className="room-stat-dot" />
+          {placedLights.length} lights
+        </div>
+      </div>
+    </div>
+  );
+
   const tabItems = [
     {
       key: 'walls',
-      label: <span style={{ color: COLORS.text, display: 'flex', alignItems: 'center', gap: 6 }}><ColumnWidthOutlined /> Walls</span>,
-      children: (
-        <WallEditorPanel
-          selectedWall={selectedWall}
-          addWall={addWall}
-          splitWall={splitWall}
-          deleteWall={deleteWall}
-          updateWall={updateWall}
-          gizmoMode={gizmoMode}
-          setGizmoMode={setGizmoMode}
-          envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
-          setEnvColors={(updater) => {
-            const next = typeof updater === 'function'
-              ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
-              : updater;
-            if (next.floor   !== floorMaterial.color)   updateSurface('floor',   { color: next.floor });
-            if (next.ceiling !== ceilingMaterial.color) updateSurface('ceiling', { color: next.ceiling });
-          }}
-        />
-      ),
+      label: <span className="room-tab-label"><ColumnWidthOutlined /> Build</span>,
+      children: desktopPanelContent,
     },
     {
       key: 'materials',
-      label: <span style={{ color: COLORS.text, display: 'flex', alignItems: 'center', gap: 6 }}><FormatPainterOutlined /> Materials</span>,
+      label: <span className="room-tab-label"><FormatPainterOutlined /> Style</span>,
       children: (
         <MaterialPanel
           selectedWall={selectedWall}
@@ -342,12 +701,12 @@ export default function RoomScene() {
     },
     {
       key: 'lighting',
-      label: <span style={{ color: COLORS.text, display: 'flex', alignItems: 'center', gap: 6 }}><BulbOutlined /> Lighting</span>,
+      label: <span className="room-tab-label"><BulbOutlined /> Light</span>,
       children: <LightingPanel {...lightingState} />,
     },
     {
       key: 'furniture',
-      label: <span style={{ color: COLORS.text, display: 'flex', alignItems: 'center', gap: 6 }}><AppstoreOutlined /> Furniture</span>,
+      label: <span className="room-tab-label"><AppstoreOutlined /> Furnish</span>,
       children: (
         <FurniturePicker
           selectedItem={selectedFurniture}
@@ -357,8 +716,8 @@ export default function RoomScene() {
           gizmoMode={gizmoMode}
           setGizmoMode={setGizmoMode}
           furnitureRefs={furnitureRefs}
-          tint={furnitureTint}
-          setTint={setFurnitureTint}
+          tint={selectedFurniture?.tint ?? null}
+          setTint={setSelectedFurnitureTint}
         />
       ),
     },
@@ -380,6 +739,39 @@ export default function RoomScene() {
         recState={recorder.recState}
         onStop={recorder.stopManualRecording}
       />
+
+      {(activeTool !== 'select' || openingPreview) && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 18,
+            top: 18,
+            zIndex: 30,
+            padding: '10px 14px',
+            borderRadius: 16,
+            background: `${COLORS.background}E6`,
+            border: `1px solid ${COLORS.secondary}55`,
+            color: COLORS.text,
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 12px 24px rgba(0,0,0,0.22)',
+            maxWidth: 280,
+          }}
+        >
+          <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>
+            {activeTool === 'build' ? 'Build Mode' : activeTool === 'door' ? 'Add Door' : activeTool === 'window' ? 'Add Window' : 'Edit Mode'}
+          </div>
+          <div style={{ fontSize: 12, lineHeight: 1.5, color: `${COLORS.text}CC` }}>
+            {activeTool === 'build' && 'Tap Add Wall, then drag endpoints directly on the selected wall to refine it.'}
+            {activeTool === 'door' && 'Move across the wall to preview placement, then tap the wall to place a door.'}
+            {activeTool === 'window' && 'Move across the wall to preview placement, then tap the wall to place a window.'}
+          </div>
+          {openingPreview && !openingPreview.valid && (
+            <div style={{ marginTop: 6, color: '#ff9d8c', fontSize: 11 }}>
+              {openingPreview.reason}
+            </div>
+          )}
+        </div>
+      )}
 
       <div
         ref={canvasWrapperRef}
@@ -451,7 +843,26 @@ export default function RoomScene() {
               ref={(r) => { if (r) wallRefs.current[wall.id] = r; }}
               wall={wall}
               isSelected={wall.id === selectedWallId}
-              onSelect={() => { setSelectedWallId(wall.id); setSelectedFurnitureId(null); setSelectedLightId(null); setActiveTab('walls'); }}
+              selectedOpening={selectedOpening?.wallId === wall.id ? selectedOpening : null}
+              openingPreview={openingPreview?.wallId === wall.id ? openingPreview : null}
+              activeOpeningTool={activeTool === 'door' || activeTool === 'window' ? activeTool : null}
+              onSelect={() => {
+                setSelectedWallId(wall.id);
+                setSelectedFurnitureId(null);
+                setSelectedLightId(null);
+                setActiveTab('walls');
+                if (activeTool === 'build') setActiveTool('select');
+              }}
+              onOpeningPreviewMove={(type, point) => updateOpeningPreview(wall, type, point)}
+              onOpeningCommit={() => commitOpeningPreview(wall)}
+              onOpeningSelect={(opening) => {
+                setSelectedWallId(wall.id);
+                setSelectedOpening({ ...opening, wallId: wall.id });
+                setSelectedFurnitureId(null);
+                setSelectedLightId(null);
+                setActiveTab('walls');
+              }}
+              updateOpening={(type, openingId, updates) => updateWallOpening(wall.id, type, openingId, updates)}
               updateWall={updateWall}
               setOrbitEnabled={setOrbitEnabled}
               cameraMode={cameraMode}
@@ -573,7 +984,25 @@ export default function RoomScene() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ height: '100vh', width: '100vw', background: COLORS.background, overflow: 'hidden', fontFamily: 'Inter, sans-serif', position: 'fixed', top: 0, left: 0 }}>
+    <div
+      style={{
+        height: '100vh',
+        width: '100vw',
+        background: pageGradient,
+        overflow: 'hidden',
+        fontFamily: '"Plus Jakarta Sans", "Inter", sans-serif',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+      }}
+    >
+
+      {!isMobile && (
+        <>
+          <div style={{ position: 'absolute', inset: 0, background: copperGlow, pointerEvents: 'none', opacity: 1 }} />
+          <div style={{ position: 'absolute', inset: 0, background: accentGlow, pointerEvents: 'none', opacity: 1 }} />
+        </>
+      )}
 
       {isMobile ? (
         <>
@@ -595,6 +1024,93 @@ export default function RoomScene() {
             canUndo={canUndo} canRedo={canRedo}
             onUndo={undo} onRedo={redo}
           />
+          {selectedOpeningEntity && (
+            <div
+              style={{
+                position: 'fixed',
+                left: 12,
+                right: 12,
+                bottom: 86,
+                zIndex: 1000,
+                padding: '14px 14px 12px',
+                borderRadius: 22,
+                background: `${COLORS.background}F2`,
+                border: `1px solid ${COLORS.secondary}55`,
+                boxShadow: '0 16px 40px rgba(0,0,0,0.32)',
+                backdropFilter: 'blur(14px)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div>
+                  <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, textTransform: 'capitalize' }}>{selectedOpening?.type} edit</div>
+                  <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>Drag in scene to move. Use sliders to fine-tune.</div>
+                </div>
+                <button
+                  type="button"
+                  className="room-secondary-chip is-danger"
+                  style={{ minWidth: 86 }}
+                  onClick={() => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id)}
+                >
+                  Remove
+                </button>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
+                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
+                </div>
+                <Slider
+                  min={0.45}
+                  max={2.4}
+                  step={0.05}
+                  value={selectedOpeningEntity.width}
+                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { width: value })}
+                  tooltip={{ formatter: (value) => `${value} m` }}
+                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
+                />
+              </div>
+              <div style={{ marginBottom: selectedOpening?.type === 'door' ? 10 : 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
+                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
+                </div>
+                <Slider
+                  min={selectedOpening?.type === 'door' ? 1.8 : 0.6}
+                  max={selectedOpening?.type === 'door' ? 2.6 : 1.8}
+                  step={0.05}
+                  value={selectedOpeningEntity.height}
+                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { height: value })}
+                  tooltip={{ formatter: (value) => `${value} m` }}
+                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
+                />
+              </div>
+              {selectedOpening?.type === 'door' && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                  <button
+                    type="button"
+                    className={selectedOpeningEntity.swingDirection === 'left' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'left' })}
+                  >
+                    Left
+                  </button>
+                  <button
+                    type="button"
+                    className={selectedOpeningEntity.swingDirection === 'right' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'right' })}
+                  >
+                    Right
+                  </button>
+                  <button
+                    type="button"
+                    className="room-secondary-chip"
+                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: selectedOpeningEntity.swingDirection === 'left' ? 'right' : 'left' })}
+                  >
+                    Flip
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <SlidePanel
             open={mobilePanelOpen}
             onClose={() => setMobilePanelOpen(false)}
@@ -634,7 +1150,7 @@ export default function RoomScene() {
                 selectedItem={selectedFurniture} placedItems={placedItems}
                 addItem={(model) => { addItem(model); setMobilePanelOpen(false); }}
                 deleteItem={deleteItem} gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
-                furnitureRefs={furnitureRefs} tint={furnitureTint} setTint={setFurnitureTint}
+                furnitureRefs={furnitureRefs} tint={selectedFurniture?.tint ?? null} setTint={setSelectedFurnitureTint}
               />
             )}
           </SlidePanel>
@@ -642,71 +1158,247 @@ export default function RoomScene() {
       ) : (
         <>
           {/* Desktop undo / save bar */}
-          <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, background: `${COLORS.surface}CC`, padding: '8px', borderRadius: '12px', border: `1px solid ${COLORS.secondary}60`, backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+          <div style={{ position: 'absolute', top: 28, right: 28, zIndex: 1000, background: `${COLORS.background}D9`, padding: '10px 12px', borderRadius: '20px', border: softBorder, backdropFilter: 'blur(20px)', boxShadow: glassShadow }}>
             <Space>
               <Tooltip title="Undo (Ctrl+Z)">
-                <Button type="text" disabled={!canUndo} icon={<UndoOutlined />} onClick={undo} style={{ color: canUndo ? COLORS.text : `${COLORS.text}40` }} />
+                <Button type="text" disabled={!canUndo} icon={<UndoOutlined />} onClick={undo} className="room-action-button" />
               </Tooltip>
               <Tooltip title="Redo (Ctrl+Y)">
-                <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} style={{ color: canRedo ? COLORS.text : `${COLORS.text}40` }} />
+                <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} className="room-action-button" />
               </Tooltip>
-              <div style={{ width: 1, height: 20, background: `${COLORS.secondary}40`, margin: '0 4px' }} />
+              <div style={{ width: 1, height: 24, background: 'rgba(201, 171, 146, 0.45)', margin: '0 6px' }} />
               <Tooltip title="Save / Snapshot">
-                <Button type="text" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)} style={{ color: COLORS.action }} />
+                <Button type="text" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)} className="room-action-button room-action-button-accent" />
               </Tooltip>
               {projectSave.saveStatus === 'saved' && (
-                <span style={{ color: '#52c41a', fontSize: 11, fontFamily: 'Inter, sans-serif', marginLeft: 2 }}>Saved</span>
+                <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 600, marginLeft: 2, letterSpacing: '0.04em' }}>Saved</span>
               )}
             </Space>
           </div>
 
-          <Splitter style={{ height: '100%', width: '100%', background: COLORS.background }}>
-            <Splitter.Panel defaultSize="40%" min="20%" max="70%" style={{ background: COLORS.background }}>
-              <div ref={sidebarRef} style={{ height: '100%', width: '100%', padding: '40px 28px 28px', background: `linear-gradient(145deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`, borderRight: `2px solid ${COLORS.action}30`, boxShadow: '8px 0 30px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-                <div style={{ marginBottom: 36 }}>
-                  <div style={{ color: COLORS.action, fontSize: 13, letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: 12, fontWeight: 500 }}>Spatial Design</div>
-                  <div style={{ color: COLORS.text, fontSize: 32, fontWeight: 350, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Room<br />Composer</div>
-                  <div style={{ width: 70, height: 3, background: COLORS.action, marginTop: 20, borderRadius: 2 }} />
-                </div>
-                <div style={{ marginBottom: 32 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-                    <CameraOutlined style={{ marginRight: 10, color: COLORS.action, fontSize: 18 }} />
-                    <span style={{ color: COLORS.text, fontSize: 17, fontWeight: 500 }}>Camera & Navigation</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px', background: `${COLORS.background}CC`, borderRadius: 16, border: `1px solid ${COLORS.secondary}60` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ color: COLORS.text, fontSize: 14, fontWeight: 450 }}>Mode</span>
-                      <Space>
-                        <Button type={cameraMode === 'orbit' ? 'primary' : 'default'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }} style={{ background: cameraMode === 'orbit' ? COLORS.action : 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}>Orbit</Button>
-                        <Button type={cameraMode === 'firstPerson' ? 'primary' : 'default'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }} style={{ background: cameraMode === 'firstPerson' ? COLORS.action : 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}>Walk</Button>
-                      </Space>
-                    </div>
-                    <Space wrap style={{ gap: 8 }}>
-                      {Object.keys(CAMERA_PRESETS).map((k) => (
-                        <Tooltip key={k} title={k}>
-                          <Button
-                            icon={k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <BorderOutlined /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
-                            onClick={() => applyCameraPreset(k)}
-                            style={{ background: 'transparent', borderColor: COLORS.secondary, color: COLORS.text, borderRadius: 8 }}
-                          />
-                        </Tooltip>
-                      ))}
-                    </Space>
-                  </div>
-                </div>
-                <Tabs
-                  activeKey={activeTab}
-                  onChange={setActiveTab}
-                  items={tabItems}
-                  style={{ flex: 1 }}
-                  tabBarStyle={{ borderBottom: `1px solid ${COLORS.secondary}40`, marginBottom: 20 }}
-                />
+          <div style={{ position: 'relative', height: '100%', padding: 20 }}>
+            <div className="room-canvas-shell" style={{ height: '100%', width: '100%', background: desktopCanvasShell, border: softBorder, borderRadius: 34, boxShadow: softShadow, padding: 14, backdropFilter: 'blur(10px)', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '100%', borderRadius: 24, overflow: 'hidden', background: `linear-gradient(180deg, ${COLORS.surface}80 0%, ${COLORS.background}20 100%)`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
+                {canvasBlock}
               </div>
-            </Splitter.Panel>
-            <Splitter.Panel style={{ background: COLORS.background }}>
-              {canvasBlock}
-            </Splitter.Panel>
-          </Splitter>
+              <div style={{ position: 'absolute', top: 24, left: 24, bottom: 24, zIndex: 950, display: 'flex', alignItems: 'stretch', gap: 14, pointerEvents: 'none' }}>
+                <div className="room-floating-rail">
+                  <div className="room-floating-brand">
+                    <span className="room-floating-brand-dot" />
+                  </div>
+                  <div className="room-floating-rail-items">
+                    {desktopNavItems.map(({ key, label, icon: Icon }) => {
+                      const isActive = desktopPanelOpen && activeTab === key;
+                      return (
+                        <Tooltip key={key} title={label} placement="right">
+                          <button
+                            type="button"
+                            className={isActive ? 'room-floating-rail-button is-active' : 'room-floating-rail-button'}
+                            onClick={() => toggleDesktopPanel(key)}
+                            aria-label={label}
+                          >
+                            <Icon />
+                          </button>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className={desktopPanelOpen ? 'room-floating-panel is-open' : 'room-floating-panel'}>
+                  <div className={desktopPanelOpen ? 'room-floating-panel-inner is-open' : 'room-floating-panel-inner'}>
+                    <div className="room-floating-panel-header">
+                      <div>
+                        <div className="room-floating-kicker">Context</div>
+                        <div className="room-floating-title">{desktopPanelTitle}</div>
+                      </div>
+                      <button type="button" className="room-floating-close" onClick={() => setDesktopPanelOpen(false)}>
+                        Collapse
+                      </button>
+                    </div>
+                    <div className="room-floating-panel-scroll">
+                      {desktopPanelContent}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <Splitter className="room-splitter" style={{ height: '100%', width: '100%', background: 'transparent', display: 'none' }}>
+              <Splitter.Panel defaultSize="38%" min="24%" max="68%" style={{ background: 'transparent' }}>
+                <div ref={sidebarRef} className="room-sidebar-shell" style={{ height: '100%', width: '100%', padding: '26px 22px 22px', background: panelGradient, border: softBorder, borderRadius: 34, boxShadow: softShadow, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+                  <div style={{ position: 'absolute', inset: '0 auto auto 0', width: '100%', height: 160, background: 'linear-gradient(135deg, rgba(196,154,108,0.16) 0%, rgba(196,154,108,0) 72%)', pointerEvents: 'none' }} />
+                  <div style={{ marginBottom: 18, position: 'relative', zIndex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16 }}>
+                      <div>
+                        <div style={{ color: COLORS.action, fontSize: 10, letterSpacing: '0.24em', textTransform: 'uppercase', marginBottom: 8, fontWeight: 700 }}>Workspace</div>
+                        <div style={{ color: COLORS.text, fontSize: 26, fontWeight: 600, letterSpacing: '-0.03em', lineHeight: 1.05 }}>Room Composer</div>
+                      </div>
+                      <div style={{ color: `${COLORS.text}8C`, fontSize: 12, textAlign: 'right', lineHeight: 1.45 }}>
+                        Direct editing for
+                        <br />
+                        walls, light, and decor
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+                      <div className="room-stat-chip">
+                        <span className="room-stat-dot" />
+                        {walls.length} walls
+                      </div>
+                      <div className="room-stat-chip">
+                        <span className="room-stat-dot room-stat-dot-blue" />
+                        {placedItems.length} objects
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 16, position: 'relative', zIndex: 1 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: cameraCardBg, borderRadius: 22, border: `1px solid ${COLORS.secondary}50`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 24px rgba(0,0,0,0.18)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <div className="room-view-title">
+                          View
+                        </div>
+                        <div className="room-segmented room-segmented-compact">
+                          <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
+                            Orbit
+                          </button>
+                          <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }}>
+                            Walk
+                          </button>
+                        </div>
+                      </div>
+                      <div className="room-view-strip">
+                        {Object.keys(CAMERA_PRESETS).map((k) => (
+                          <Tooltip key={k} title={k[0].toUpperCase() + k.slice(1)}>
+                            <button
+                              type="button"
+                              className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
+                              onClick={() => applyCameraPreset(k)}
+                            >
+                              {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <BorderOutlined /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
+                            </button>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  {selectedWall && (
+                    <div style={{ marginBottom: 16, position: 'relative', zIndex: 1 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: `${COLORS.background}D9`, borderRadius: 22, border: `1px solid ${COLORS.secondary}50` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                          <div>
+                            <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700 }}>Selected Wall</div>
+                            <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>
+                              {selectedWallDoorCount} door{selectedWallDoorCount === 1 ? '' : 's'} • {selectedWallWindowCount} window{selectedWallWindowCount === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                          <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
+                            Live Context
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                          <button type="button" className={activeTool === 'door' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('door')}>Add Door</button>
+                          <button type="button" className={activeTool === 'window' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('window')}>Add Window</button>
+                          <button type="button" className="room-secondary-chip" onClick={splitWall}>Split</button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                          <button type="button" className={activeTool === 'build' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('build')}>Build</button>
+                          <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
+                          <button type="button" className="room-secondary-chip is-danger" onClick={() => deleteWall(selectedWall.id)}>Delete</button>
+                        </div>
+                        {selectedOpeningEntity && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px', borderRadius: 16, background: `${COLORS.surface}CC`, border: `1px solid ${COLORS.secondary}45` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                              <div>
+                                <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>
+                                  {selectedOpening?.type} selected
+                                </div>
+                                <div style={{ color: `${COLORS.text}8C`, fontSize: 11 }}>
+                                  Drag in scene to move. Resize with the side handles.
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                className="room-secondary-chip is-danger"
+                                style={{ minWidth: 88 }}
+                                onClick={() => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                            <div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                                <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
+                                <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
+                              </div>
+                              <Slider
+                                min={0.45}
+                                max={2.4}
+                                step={0.05}
+                                value={selectedOpeningEntity.width}
+                                onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { width: value })}
+                                tooltip={{ formatter: (value) => `${value} m` }}
+                                styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
+                              />
+                            </div>
+                            <div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                                <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
+                                <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
+                              </div>
+                              <Slider
+                                min={selectedOpening?.type === 'door' ? 1.8 : 0.6}
+                                max={selectedOpening?.type === 'door' ? 2.6 : 1.8}
+                                step={0.05}
+                                value={selectedOpeningEntity.height}
+                                onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { height: value })}
+                                tooltip={{ formatter: (value) => `${value} m` }}
+                                styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
+                              />
+                            </div>
+                            {selectedOpening?.type === 'door' && (
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                                <button
+                                  type="button"
+                                  className={selectedOpeningEntity.swingDirection === 'left' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+                                  onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'left' })}
+                                >
+                                  Swing L
+                                </button>
+                                <button
+                                  type="button"
+                                  className={selectedOpeningEntity.swingDirection === 'right' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+                                  onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'right' })}
+                                >
+                                  Swing R
+                                </button>
+                                <button
+                                  type="button"
+                                  className="room-secondary-chip"
+                                  onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: selectedOpeningEntity.swingDirection === 'left' ? 'right' : 'left' })}
+                                >
+                                  Flip
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minHeight: 0, borderRadius: 28, background: `linear-gradient(180deg, ${COLORS.surface}E8 0%, ${COLORS.background}EE 100%)`, border: `1px solid ${COLORS.secondary}50`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)', overflow: 'hidden', position: 'relative', zIndex: 1 }}>
+                    <Tabs className="room-tabs" activeKey={activeTab} onChange={setActiveTab} items={tabItems} style={{ height: '100%', padding: '10px 14px 16px' }} />
+                  </div>
+                </div>
+              </Splitter.Panel>
+              <Splitter.Panel style={{ background: 'transparent' }}>
+                <div className="room-canvas-shell" style={{ height: '100%', width: '100%', background: desktopCanvasShell, border: softBorder, borderRadius: 34, boxShadow: softShadow, padding: 14, backdropFilter: 'blur(10px)' }}>
+                  <div style={{ height: '100%', width: '100%', borderRadius: 24, overflow: 'hidden', background: `linear-gradient(180deg, ${COLORS.surface}80 0%, ${COLORS.background}20 100%)`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
+                    {canvasBlock}
+                  </div>
+                </div>
+              </Splitter.Panel>
+            </Splitter>
+          </div>
         </>
       )}
 
@@ -719,7 +1411,10 @@ export default function RoomScene() {
         onDelete={() => selectedWall && deleteWall(selectedWall.id)}
         onSplit={splitWall}
         onGhost={() => selectedWall && updateWall(selectedWall.id, { ghost: !selectedWall.ghost })}
+        onAddDoor={() => startOpeningPlacement('door')}
+        onAddWindow={() => startOpeningPlacement('window')}
         wallGhost={selectedWall?.ghost || false}
+        activeOpeningTool={activeTool === 'door' || activeTool === 'window' ? activeTool : null}
         navigateTo={navigateTo}
         selectedItem={selectedWall}
         onPrecisionUpdate={(updates) => selectedWall && updateWall(selectedWall.id, updates)}
@@ -731,8 +1426,8 @@ export default function RoomScene() {
         onGizmoChange={setGizmoMode}
         onDelete={() => selectedFurniture && deleteItem(selectedFurniture.id)}
         navigateTo={navigateTo}
-        selectedFurnitureRef={{ current: furnitureRefs.current[selectedFurnitureId] }}
-        onTintChange={(tint) => selectedFurniture && updateItem(selectedFurniture.id, { tint })}
+        selectedFurnitureMesh={furnitureRefs.current[selectedFurnitureId]}
+        onTintChange={setSelectedFurnitureTint}
         selectedItem={selectedFurniture}
         onPrecisionUpdate={(updates) => selectedFurniture && updateItem(selectedFurniture.id, updates)}
       />
@@ -777,12 +1472,399 @@ export default function RoomScene() {
         canvas { outline: none !important; border: none !important; display: block !important; }
         .ant-splitter { border: none !important; outline: none !important; }
         .ant-splitter-panel { border: none !important; outline: none !important; }
-        .ant-splitter-trigger { background: ${COLORS.action} !important; opacity: 0.8; width: 4px !important; }
-        .ant-tabs-tab { color: ${COLORS.secondary} !important; }
-        .ant-tabs-tab-active .ant-tabs-tab-btn { color: ${COLORS.action} !important; }
-        .ant-tabs-ink-bar { background: ${COLORS.action} !important; }
+        .room-splitter > .ant-splitter-bar {
+          margin: 22px 8px !important;
+          width: 22px !important;
+          background: transparent !important;
+        }
+        .room-splitter > .ant-splitter-bar .ant-splitter-handle {
+          width: 12px !important;
+          border-radius: 999px !important;
+          background: linear-gradient(180deg, ${COLORS.action}CC 0%, ${COLORS.accent}CC 100%) !important;
+          border: 1px solid ${COLORS.secondary}99 !important;
+          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22) !important;
+        }
+        .room-splitter > .ant-splitter-bar:hover .ant-splitter-handle {
+          background: linear-gradient(180deg, ${COLORS.action} 0%, ${COLORS.accent} 100%) !important;
+        }
+        .room-tab-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          color: ${COLORS.text};
+        }
+        .room-tabs .ant-tabs-nav {
+          margin: 0 0 14px !important;
+        }
+        .room-tabs .ant-tabs-nav::before {
+          display: none !important;
+        }
+        .room-tabs .ant-tabs-nav-list {
+          gap: 6px;
+          padding: 6px;
+          background: ${COLORS.background}B8;
+          border: 1px solid ${COLORS.secondary}40;
+          border-radius: 18px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 18px rgba(0,0,0,0.14);
+          flex-wrap: nowrap !important;
+          min-width: max-content;
+        }
+        .room-tabs .ant-tabs-nav-wrap {
+          overflow-x: auto !important;
+          scrollbar-width: none;
+        }
+        .room-tabs .ant-tabs-nav-wrap::-webkit-scrollbar {
+          display: none;
+        }
+        .room-tabs .ant-tabs-tab {
+          margin: 0 !important;
+          padding: 9px 14px !important;
+          border-radius: 14px !important;
+          transition: all 0.2s ease !important;
+        }
+        .room-tabs .ant-tabs-tab:hover {
+          background: ${COLORS.surface}D9;
+        }
+        .room-tabs .ant-tabs-tab-active {
+          background: linear-gradient(180deg, ${COLORS.action} 0%, ${COLORS.accent} 100%);
+          box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+          transform: translateY(-1px);
+        }
+        .room-tabs .ant-tabs-tab-active .room-tab-label {
+          color: ${COLORS.background} !important;
+        }
+        .room-tabs .ant-tabs-ink-bar {
+          display: none !important;
+        }
+        .room-tabs .ant-tabs-content-holder {
+          height: calc(100% - 58px);
+          overflow: auto;
+          padding: 6px 2px 2px;
+        }
+        .room-action-button.ant-btn {
+          width: 38px;
+          height: 38px;
+          border-radius: 14px;
+          color: ${COLORS.text};
+          background: ${COLORS.surface}D9;
+          border: 1px solid ${COLORS.secondary}55;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+        .room-action-button.ant-btn:hover {
+          color: ${COLORS.action} !important;
+          background: ${COLORS.surface} !important;
+          border-color: ${COLORS.action}99 !important;
+        }
+        .room-action-button.ant-btn[disabled] {
+          color: ${COLORS.secondary}66 !important;
+          background: ${COLORS.surface}88 !important;
+        }
+        .room-action-button-accent.ant-btn {
+          color: ${COLORS.background} !important;
+          background: linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%) !important;
+          border-color: ${COLORS.action} !important;
+        }
+        .room-floating-rail {
+          pointer-events: auto;
+          width: 74px;
+          padding: 14px 10px;
+          border-radius: 999px;
+          background: linear-gradient(180deg, rgba(58, 48, 43, 0.94) 0%, rgba(31, 24, 21, 0.98) 100%);
+          border: 1px solid rgba(196, 154, 108, 0.18);
+          box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255,255,255,0.08);
+          backdrop-filter: blur(24px);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 18px;
+        }
+        .room-floating-brand {
+          width: 46px;
+          height: 46px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: radial-gradient(circle at 30% 30%, rgba(242,229,213,0.9), rgba(196,154,108,0.34) 42%, rgba(58,48,43,0.96) 100%);
+          box-shadow: 0 0 24px rgba(196, 154, 108, 0.24), inset 0 1px 0 rgba(255,255,255,0.45);
+        }
+        .room-floating-brand-dot {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, ${COLORS.text} 0%, ${COLORS.action} 100%);
+          box-shadow: 0 0 18px rgba(196, 154, 108, 0.52);
+        }
+        .room-floating-rail-items {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          align-items: center;
+          width: 100%;
+        }
+        .room-floating-rail-button {
+          width: 48px;
+          height: 48px;
+          border-radius: 999px;
+          border: 1px solid rgba(225, 255, 247, 0.08);
+          background: rgba(255,255,255,0.06);
+          color: rgba(235, 255, 250, 0.78);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: transform 0.24s ease, background 0.24s ease, box-shadow 0.24s ease, color 0.24s ease, border-color 0.24s ease;
+          backdrop-filter: blur(14px);
+        }
+        .room-floating-rail-button:hover {
+          transform: translateY(-2px) scale(1.02);
+          color: #ffffff;
+          background: rgba(255,255,255,0.12);
+          border-color: rgba(225, 255, 247, 0.16);
+        }
+        .room-floating-rail-button.is-active {
+          color: ${COLORS.background};
+          background: linear-gradient(135deg, ${COLORS.text} 0%, #dbc0a2 100%);
+          border-color: rgba(255,255,255,0.55);
+          box-shadow: 0 0 0 6px rgba(196, 154, 108, 0.12), 0 0 24px rgba(196, 154, 108, 0.26), 0 12px 26px rgba(0,0,0,0.28);
+        }
+        .room-floating-panel {
+          pointer-events: none;
+          width: 0;
+          opacity: 0;
+          transform: translateX(-16px);
+          transition: width 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+          overflow: hidden;
+        }
+        .room-floating-panel.is-open {
+          pointer-events: auto;
+          width: min(430px, calc(100vw - 180px));
+          opacity: 1;
+          transform: translateX(0);
+        }
+        .room-floating-panel-inner {
+          height: 100%;
+          border-radius: 34px;
+          background: linear-gradient(180deg, rgba(58, 48, 43, 0.88) 0%, rgba(34, 27, 24, 0.96) 100%);
+          border: 1px solid rgba(196, 154, 108, 0.14);
+          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255,255,255,0.09);
+          backdrop-filter: blur(28px);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          opacity: 0;
+          transform: translateX(-22px);
+          transition: opacity 0.22s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .room-floating-panel-inner.is-open {
+          opacity: 1;
+          transform: translateX(0);
+        }
+        .room-floating-panel-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 18px 18px 14px;
+          border-bottom: 1px solid rgba(196, 154, 108, 0.1);
+        }
+        .room-floating-kicker {
+          color: rgba(196, 154, 108, 0.8);
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.24em;
+          text-transform: uppercase;
+          margin-bottom: 6px;
+        }
+        .room-floating-title {
+          color: ${COLORS.text};
+          font-size: 24px;
+          font-weight: 700;
+          letter-spacing: -0.03em;
+        }
+        .room-floating-close {
+          border: 1px solid rgba(196,154,108,0.16);
+          border-radius: 999px;
+          background: rgba(255,255,255,0.06);
+          color: ${COLORS.text};
+          min-height: 36px;
+          padding: 0 14px;
+          cursor: pointer;
+          transition: background 0.2s ease, transform 0.2s ease;
+        }
+        .room-floating-close:hover {
+          background: rgba(196,154,108,0.14);
+          transform: translateY(-1px);
+        }
+        .room-floating-panel-scroll {
+          flex: 1;
+          overflow-y: auto;
+          padding: 16px 18px 20px;
+        }
+        .room-floating-panel-scroll > * {
+          animation: roomFloatingContentIn 0.28s ease;
+        }
+        .room-floating-context-card {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          margin-bottom: 16px;
+          padding: 14px 16px;
+          border-radius: 22px;
+          background: rgba(44, 36, 32, 0.68);
+          border: 1px solid rgba(196, 154, 108, 0.1);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        @keyframes roomFloatingContentIn {
+          from {
+            opacity: 0;
+            transform: translateX(-12px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        .room-icon-orb {
+          width: 36px;
+          height: 36px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(145deg, ${COLORS.surface} 0%, ${COLORS.background} 100%);
+          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+        }
+        .room-stat-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 7px 11px;
+          border-radius: 999px;
+          background: ${COLORS.background}CC;
+          border: 1px solid ${COLORS.secondary}50;
+          color: ${COLORS.text};
+          font-size: 11px;
+          font-weight: 600;
+        }
+        .room-stat-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: ${COLORS.action};
+          box-shadow: 0 0 0 4px rgba(196, 154, 108, 0.18);
+        }
+        .room-stat-dot-blue {
+          background: ${COLORS.accent};
+          box-shadow: 0 0 0 4px rgba(139, 107, 77, 0.24);
+        }
+        .room-segmented {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px;
+          background: ${COLORS.background}A6;
+          border: 1px solid ${COLORS.secondary}55;
+          border-radius: 999px;
+        }
+        .room-segmented-compact {
+          gap: 4px;
+          padding: 3px;
+        }
+        .room-segment {
+          border: none;
+          background: transparent;
+          color: ${COLORS.secondary};
+          padding: 8px 12px;
+          border-radius: 999px;
+          font: inherit;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .room-segment.is-active {
+          background: linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%);
+          color: ${COLORS.background};
+          box-shadow: 0 8px 14px rgba(0, 0, 0, 0.24);
+        }
+        .room-view-title {
+          color: ${COLORS.action};
+          font-size: 14px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+        .room-view-strip {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+          padding: 8px;
+          background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+          border: 1px solid ${COLORS.secondary}55;
+          border-radius: 999px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 24px rgba(0,0,0,0.16);
+          overflow: hidden;
+        }
+        .room-view-option {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0;
+          width: 100%;
+          min-width: 0;
+          height: 44px;
+          min-height: 44px;
+          border: 1px solid transparent;
+          background: rgba(255,255,255,0.02);
+          color: ${COLORS.text};
+          font: inherit;
+          cursor: pointer;
+          border-radius: 999px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+          transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+        }
+        .room-view-option:hover {
+          background: rgba(255,255,255,0.1);
+          border-color: ${COLORS.secondary}66;
+          color: ${COLORS.action};
+          transform: translateY(-1px);
+        }
+        .room-view-option.is-active {
+          background: linear-gradient(135deg, rgba(196,154,108,0.34) 0%, rgba(139,107,77,0.3) 100%);
+          border-color: ${COLORS.action}88;
+          color: ${COLORS.action};
+          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.08);
+        }
+        .room-secondary-chip {
+          min-height: 38px;
+          border: 1px solid ${COLORS.secondary}55;
+          border-radius: 999px;
+          background: ${COLORS.surface};
+          color: ${COLORS.text};
+          font: inherit;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+        .room-secondary-chip:hover {
+          border-color: ${COLORS.action}88;
+          color: ${COLORS.action};
+        }
+        .room-secondary-chip.is-active {
+          background: linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%);
+          border-color: ${COLORS.action};
+          color: ${COLORS.background};
+        }
+        .room-secondary-chip.is-danger:hover {
+          border-color: rgba(255, 107, 107, 0.8);
+          color: #ff8d8d;
+        }
         ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: ${COLORS.secondary}; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: ${COLORS.secondary}; border-radius: 999px; }
         @media (max-width: 767px) {
           button { min-height: 44px; }
           .ant-btn { min-height: 44px !important; font-size: 15px !important; }

@@ -22,16 +22,21 @@ const _hit   = new THREE.Vector3();
 
 const InteractiveWall = React.forwardRef(({
   wall, isSelected, onSelect, updateWall, setOrbitEnabled, cameraMode,
+  selectedOpening, openingPreview, activeOpeningTool,
+  onOpeningPreviewMove, onOpeningCommit, onOpeningSelect, updateOpening,
 }, ref) => {
   const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
   const dragState = useRef(null);   // { type, origin, initStart, initEnd }
+  const openingDragState = useRef(null);
   const meshRef   = useRef();
 
   const {
     id, start, end, height, thickness,
     color, roughness = 0.85, metalness = 0.0, textureId = null,
     ghost = false,
+    doors = [],
+    windows = [],
   } = wall;
 
   const centerX = (start[0] + end[0]) / 2;
@@ -80,6 +85,19 @@ const InteractiveWall = React.forwardRef(({
     if (_ray.ray.intersectPlane(_plane, _hit)) return _hit.clone();
     return null;
   }, [camera, gl]);
+
+  const projectOffsetAlongWall = useCallback((pos) => {
+    const relX = pos.x - start[0];
+    const relZ = pos.z - start[1];
+    return (relX * Math.cos(angle)) + (relZ * Math.sin(angle));
+  }, [angle, start]);
+
+  const clampOpening = useCallback((offset, width) => {
+    const halfWidth = width / 2;
+    const minOffset = Math.max(0.2 + halfWidth, halfWidth);
+    const maxOffset = Math.max(length - 0.2 - halfWidth, minOffset);
+    return THREE.MathUtils.clamp(offset, minOffset, maxOffset);
+  }, [length]);
 
   // ── Drag ─────────────────────────────────────────────────────────────────
   const startDrag = useCallback((e, dragType) => {
@@ -158,9 +176,173 @@ const InteractiveWall = React.forwardRef(({
     window.addEventListener('pointerup', onUp);    // safety fallback
   }, [angle, end, getGroundPos, gl, id, setOrbitEnabled, start, updateWall]);
 
+  const startOpeningDrag = useCallback((e, openingType, opening, handle) => {
+    e.stopPropagation();
+    if (e.pointerId != null) {
+      try { gl.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+    setOrbitEnabled(false);
+
+    const origin = getGroundPos(e.clientX, e.clientY);
+    if (!origin) return;
+
+    openingDragState.current = {
+      openingType,
+      openingId: opening.id,
+      handle,
+      origin,
+      initOffset: opening.offsetAlongWall,
+      initWidth: opening.width,
+    };
+
+    const onMove = (ev) => {
+      const ds = openingDragState.current;
+      if (!ds) return;
+      const pos = getGroundPos(ev.clientX, ev.clientY);
+      if (!pos) return;
+      const rawOffset = projectOffsetAlongWall(pos);
+
+      if (ds.handle === 'move') {
+        updateOpening(ds.openingType, ds.openingId, {
+          offsetAlongWall: clampOpening(rawOffset, ds.initWidth),
+        });
+        return;
+      }
+
+      const initStart = ds.initOffset - (ds.initWidth / 2);
+      const initEnd = ds.initOffset + (ds.initWidth / 2);
+      let nextStart = initStart;
+      let nextEnd = initEnd;
+
+      if (ds.handle === 'start') nextStart = Math.min(rawOffset, initEnd - 0.45);
+      if (ds.handle === 'end') nextEnd = Math.max(rawOffset, initStart + 0.45);
+
+      nextStart = THREE.MathUtils.clamp(nextStart, 0.2, length - 0.2);
+      nextEnd = THREE.MathUtils.clamp(nextEnd, 0.2, length - 0.2);
+
+      const nextWidth = Math.max(0.45, nextEnd - nextStart);
+      const nextOffset = clampOpening((nextStart + nextEnd) / 2, nextWidth);
+
+      updateOpening(ds.openingType, ds.openingId, {
+        offsetAlongWall: nextOffset,
+        width: nextWidth,
+      });
+    };
+
+    const onUp = (ev) => {
+      openingDragState.current = null;
+      setOrbitEnabled(true);
+      if (ev?.pointerId != null) {
+        try { gl.domElement.releasePointerCapture(ev.pointerId); } catch (_) {}
+      }
+      gl.domElement.removeEventListener('pointermove', onMove);
+      gl.domElement.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    gl.domElement.addEventListener('pointermove', onMove, { passive: true });
+    gl.domElement.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerup', onUp);
+  }, [clampOpening, getGroundPos, gl, length, projectOffsetAlongWall, setOrbitEnabled, updateOpening]);
+
   const ghostProps = ghost
     ? { transparent: true, opacity: 0.15, depthWrite: false }
     : { transparent: false, opacity: 1,   depthWrite: true  };
+
+  const renderOpening = (openingType, opening, preview = false) => {
+    const offset = THREE.MathUtils.clamp(opening.offsetAlongWall ?? length / 2, 0, length);
+    const localX = offset - (length / 2);
+    const isWindow = openingType === 'window';
+    const openingWidth = Math.min(opening.width ?? (isWindow ? 1.2 : 0.9), Math.max(length - 0.2, 0.45));
+    const openingHeight = Math.min(opening.height ?? (isWindow ? 1.2 : 2.1), Math.max(height - 0.2, 0.6));
+    const bottomOffset = Math.min(opening.bottomOffset ?? (isWindow ? 0.9 : 0), Math.max(height - openingHeight - 0.1, 0));
+    const centerY = bottomOffset + (openingHeight / 2);
+    const selected = !preview && selectedOpening?.id === opening.id && selectedOpening?.type === openingType;
+    const tint = preview
+      ? (opening.valid ? COLORS.action : '#ff8b7c')
+      : selected ? COLORS.action : COLORS.accent;
+    const fillOpacity = preview ? (opening.valid ? 0.24 : 0.18) : selected ? 0.3 : 0.16;
+    const panelOpacity = preview ? (opening.valid ? 0.88 : 0.72) : selected ? 0.92 : 0.58;
+
+    return (
+      <group
+        key={`${openingType}-${opening.id}`}
+        position={[centerX, 0, centerZ]}
+        rotation={[0, -angle, 0]}
+      >
+        <mesh
+          position={[localX, centerY, 0]}
+          renderOrder={4}
+          onClick={(e) => {
+            if (preview) return;
+            e.stopPropagation();
+            onOpeningSelect?.({ id: opening.id, type: openingType });
+          }}
+        >
+          <boxGeometry args={[openingWidth, openingHeight, Math.max(thickness + 0.02, 0.06)]} />
+          <meshStandardMaterial
+            color={tint}
+            transparent
+            opacity={fillOpacity}
+            emissive={new THREE.Color(tint)}
+            emissiveIntensity={selected || preview ? 0.18 : 0.08}
+          />
+        </mesh>
+        <mesh
+          position={[localX, centerY, (thickness / 2) + 0.015]}
+          renderOrder={5}
+          onClick={(e) => {
+            if (preview) return;
+            e.stopPropagation();
+            onOpeningSelect?.({ id: opening.id, type: openingType });
+          }}
+        >
+          <planeGeometry args={[Math.max(openingWidth - 0.08, 0.18), Math.max(openingHeight - 0.08, 0.28)]} />
+          <meshBasicMaterial color={tint} transparent opacity={panelOpacity} />
+        </mesh>
+        {!preview && selected && (
+          <>
+            <mesh position={[localX, centerY, (thickness / 2) + 0.025]} renderOrder={6}>
+              <ringGeometry args={[Math.max(openingWidth / 2, 0.32), Math.max(openingWidth / 2, 0.32) + 0.02, 48]} />
+              <meshBasicMaterial color={COLORS.action} transparent opacity={0.65} side={THREE.DoubleSide} />
+            </mesh>
+            <mesh position={[0, centerY, (thickness / 2) + 0.018]} renderOrder={6}>
+              <planeGeometry args={[length, 0.015]} />
+              <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
+            </mesh>
+            <mesh
+              position={[localX, centerY, (thickness / 2) + 0.04]}
+              onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
+            >
+              <coneGeometry args={[0.08, 0.18, 18]} />
+              <meshBasicMaterial color={COLORS.action} depthTest={false} />
+            </mesh>
+            <mesh
+              position={[localX, centerY, (thickness / 2) + 0.13]}
+              rotation={[Math.PI / 2, 0, 0]}
+            >
+              <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
+              <meshBasicMaterial color={COLORS.action} depthTest={false} />
+            </mesh>
+            <mesh
+              position={[localX - (openingWidth / 2), centerY, (thickness / 2) + 0.04]}
+              onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'start')}
+            >
+              <boxGeometry args={[0.09, 0.09, 0.09]} />
+              <meshBasicMaterial color="#ffd86c" depthTest={false} />
+            </mesh>
+            <mesh
+              position={[localX + (openingWidth / 2), centerY, (thickness / 2) + 0.04]}
+              onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'end')}
+            >
+              <boxGeometry args={[0.09, 0.09, 0.09]} />
+              <meshBasicMaterial color="#ffd86c" depthTest={false} />
+            </mesh>
+          </>
+        )}
+      </group>
+    );
+  };
 
   return (
     <group>
@@ -174,9 +356,24 @@ const InteractiveWall = React.forwardRef(({
         rotation={[0, -angle, 0]}
         castShadow={!ghost}
         receiveShadow
-        onClick={(e)        => { e.stopPropagation(); onSelect(); }}
-        onPointerDown={(e)  => { if (isSelected) startDrag(e, 'body'); }}
-        onPointerOver={(e)  => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = isSelected ? 'grab' : 'pointer'; }}
+        onClick={(e)        => {
+          e.stopPropagation();
+          if (activeOpeningTool) {
+            onSelect();
+            onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
+            onOpeningCommit?.();
+            return;
+          }
+          onSelect();
+        }}
+        onPointerDown={(e)  => { if (isSelected && !activeOpeningTool) startDrag(e, 'body'); }}
+        onPointerMove={(e)  => {
+          if (!activeOpeningTool) return;
+          e.stopPropagation();
+          onSelect();
+          onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
+        }}
+        onPointerOver={(e)  => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = activeOpeningTool ? 'copy' : isSelected ? 'grab' : 'pointer'; }}
         onPointerOut={()    => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
       >
         <boxGeometry args={[length, height, thickness]} />
@@ -245,6 +442,10 @@ const InteractiveWall = React.forwardRef(({
           </Html>
         </>
       )}
+
+      {doors.map((door) => renderOpening('door', door))}
+      {windows.map((opening) => renderOpening('window', opening))}
+      {openingPreview && renderOpening(activeOpeningTool ?? openingPreview.type, openingPreview, true)}
     </group>
   );
 });

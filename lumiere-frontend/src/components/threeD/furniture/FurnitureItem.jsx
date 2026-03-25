@@ -3,6 +3,7 @@ import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef, us
 import * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
+import { applyTint, captureOriginals, normalizeTint, resetTint } from '../../../utils/tintStore';
 
 useGLTF.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
@@ -77,6 +78,24 @@ export function resolveGlbUrl(raw, filename) {
   }
 
   return null;
+}
+
+export function resolveModelPreviewUrls(raw, filename, explicitPreviewUrl = null) {
+  const resolved = resolveGlbUrl(raw, filename);
+  const urls = [];
+
+  if (explicitPreviewUrl) urls.push(explicitPreviewUrl);
+  if (!resolved) return urls;
+
+  const base = resolved.replace(/\.[^/.?#]+(?=([?#].*)?$)/, '');
+  const suffix = resolved.includes('?') ? resolved.slice(resolved.indexOf('?')) : '';
+  urls.push(
+    `${base}.webp${suffix}`,
+    `${base}.png${suffix}`,
+    `${base}.jpg${suffix}`,
+    `${base}.jpeg${suffix}`,
+  );
+  return [...new Set(urls.filter(Boolean))];
 }
 
 // ── Target sizes per category ─────────────────────────────────────────────────
@@ -169,6 +188,27 @@ const FurnitureInner = forwardRef(({
       });
     });
   }, [isSelected, hovered, clonedScene]);
+
+  useEffect(() => {
+    if (!outerRef.current || !item?.id) return;
+    captureOriginals(item.id, outerRef.current);
+  }, [item.id, clonedScene]);
+
+  useEffect(() => {
+    if (!outerRef.current || !item?.id) return;
+    const tint = normalizeTint(item.tint);
+    const hasTint = item.tint && (
+      tint.hue !== 0 ||
+      tint.saturation !== 1 ||
+      tint.brightness !== 1
+    );
+
+    if (hasTint) {
+      applyTint(item.id, outerRef.current, tint.hue, tint.saturation, tint.brightness);
+    } else {
+      resetTint(item.id, outerRef.current);
+    }
+  }, [item.id, item.tint]);
 
   const rawScale = Array.isArray(item.scale) ? item.scale : [1, 1, 1];
 

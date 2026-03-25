@@ -7,6 +7,7 @@ import { Modal, Spin, Empty } from 'antd';
 import { SwapOutlined, ReloadOutlined } from '@ant-design/icons';
 import { gsap } from 'gsap';
 import { COLORS } from '../../../utils/colors';
+import { resolveModelPreviewUrls } from '../furniture/FurnitureItem';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -143,6 +144,7 @@ function ModelChip({ model, isCurrent, onClick }) {
     cupboards: '🗄️', lamps: '💡', uncategorized: '📦',
   };
   const icon = categoryIcons[model.category] || categoryIcons.uncategorized;
+  const previewSrc = resolveModelPreviewUrls(model.url, model.filename, model.preview_url)[0];
 
   return (
     <button
@@ -166,7 +168,18 @@ function ModelChip({ model, isCurrent, onClick }) {
       onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.borderColor = COLORS.action; }}
       onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.borderColor = COLORS.secondary + '40'; }}
     >
-      <span style={{ fontSize: 22 }}>{icon}</span>
+      {previewSrc ? (
+        <img
+          src={previewSrc}
+          alt={model.name}
+          loading="lazy"
+          decoding="async"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          style={{ width: 42, height: 42, objectFit: 'cover', borderRadius: 8, display: 'block' }}
+        />
+      ) : (
+        <span style={{ fontSize: 22 }}>{icon}</span>
+      )}
       <span style={{ fontSize: 10, textAlign: 'center', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
         {model.name}
       </span>

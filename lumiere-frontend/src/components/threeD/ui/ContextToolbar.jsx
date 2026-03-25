@@ -15,8 +15,15 @@ import { useThree, useFrame } from '@react-three/fiber';
 import { gsap } from 'gsap';
 import * as THREE from 'three';
 import { COLORS } from '../../../utils/colors';
+import {
+  captureOriginals as storeCaptureOriginals,
+  applyTint        as storeApplyTint,
+  DEFAULT_TINT,
+  normalizeTint,
+  resetTint        as storeResetTint,
+} from '../../../utils/tintStore';
 
-const TOOLBAR_W = { wall: 300, furniture: 260, light: 160 };
+const TOOLBAR_W = { wall: 420, furniture: 260, light: 160 };
 const TOOLBAR_H = 64;
 const MARGIN    = 10;
 
@@ -25,6 +32,8 @@ const WALL_BUTTONS = [
   { iconName: 'drag',    label: 'Move',     action: 'gizmo:translate', tab: 'walls',     section: 'wall-gizmo',      precision: true  },
   { iconName: 'swap',    label: 'Rotate',   action: 'gizmo:rotate',    tab: 'walls',     section: 'wall-gizmo',      precision: true  },
   { iconName: 'expand',  label: 'Resize',   action: 'gizmo:scale',     tab: 'walls',     section: 'wall-dimensions', precision: true  },
+  { iconName: 'door',    label: 'Door',     action: 'add-door',        tab: null,        section: null,              precision: false },
+  { iconName: 'window',  label: 'Window',   action: 'add-window',      tab: null,        section: null,              precision: false },
   { iconName: 'paint',   label: 'Material', action: 'tab',             tab: 'materials', section: 'mat-walls',       precision: false },
   { iconName: 'ghost',   label: 'Ghost',    action: 'ghost',           tab: null,        section: null,              precision: false },
   { iconName: 'scissor', label: 'Split',    action: 'split',           tab: null,        section: null,              precision: false },
@@ -42,44 +51,6 @@ const LIGHT_BUTTONS = [
   { iconName: 'bulb',    label: 'Edit',     action: 'tab',             tab: 'lighting',  section: 'light-selected',  precision: false },
   { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,        section: null,              danger: true     },
 ];
-
-// ── Tint helpers ──────────────────────────────────────────────────────────────
-const _originals = new Map();
-
-function captureOriginals(meshGroup) {
-  if (!meshGroup) return;
-  meshGroup.traverse((child) => {
-    if (!child.isMesh) return;
-    const mats = Array.isArray(child.material) ? child.material : [child.material];
-    mats.forEach((mat) => {
-      if (!mat?.color) return;
-      const key = `${child.uuid}-${mat.uuid}`;
-      if (!_originals.has(key)) _originals.set(key, mat.color.clone());
-    });
-  });
-}
-
-function applyTint(meshGroup, hue, sat, bri) {
-  if (!meshGroup) return;
-  meshGroup.traverse((child) => {
-    if (!child.isMesh) return;
-    const mats = Array.isArray(child.material) ? child.material : [child.material];
-    mats.forEach((mat) => {
-      if (!mat?.color) return;
-      const key  = `${child.uuid}-${mat.uuid}`;
-      const orig = _originals.get(key);
-      if (!orig) return;
-      const hsl = { h: 0, s: 0, l: 0 };
-      orig.getHSL(hsl);
-      mat.color.setHSL(
-        (hsl.h + hue / 360 + 1) % 1,
-        Math.max(0, Math.min(1, hsl.s * sat)),
-        Math.max(0, Math.min(1, hsl.l * bri)),
-      );
-      mat.needsUpdate = true;
-    });
-  });
-}
 
 // ── WorldProjector (R3F component) ────────────────────────────────────────────
 export function WorldProjector({ worldPosition, type, onScreenPos }) {
@@ -108,12 +79,14 @@ export default function ContextToolbar({
   type, screenPos,
   gizmoMode, onGizmoChange,
   onDelete, onSplit, onGhost,
+  onAddDoor, onAddWindow,
   navigateTo,
-  selectedFurnitureRef,
+  selectedFurnitureMesh,
   onTintChange,
   selectedItem,
   onPrecisionUpdate,
   wallGhost,
+  activeOpeningTool,
 }) {
   const toolbarRef              = useRef(null);
   const [tintOpen, setTintOpen] = useState(false);
@@ -122,10 +95,6 @@ export default function ContextToolbar({
 
   const [precisionMode, setPrecisionMode] = useState(null);
   const lastTapMs                         = useRef({});
-
-  const [hue, setHue] = useState(0);
-  const [sat, setSat] = useState(1);
-  const [bri, setBri] = useState(1);
 
   useEffect(() => {
     if (toolbarRef.current && screenPos)
@@ -138,23 +107,32 @@ export default function ContextToolbar({
   useEffect(() => {
     if (!screenPos) {
       setTintOpen(false); setPrecisionMode(null);
-      setHue(0); setSat(1); setBri(1);
     }
   }, [screenPos]);
 
   useEffect(() => { setPrecisionMode(null); }, [selectedItem?.id]);
 
   useEffect(() => {
-    if (tintOpen) captureOriginals(selectedFurnitureRef?.current);
-  }, [tintOpen, selectedFurnitureRef]);
+    if (tintOpen && selectedFurnitureMesh) {
+      storeCaptureOriginals(selectedItem?.id, selectedFurnitureMesh);
+    }
+  }, [tintOpen, selectedItem?.id, selectedFurnitureMesh]);
 
   useEffect(() => {
-    if (!tintOpen) return;
-    applyTint(selectedFurnitureRef?.current, hue, sat, bri);
-    onTintChange?.({ hue, sat, bri });
-  }, [hue, sat, bri, tintOpen, selectedFurnitureRef]);
+    if (!tintOpen || !selectedFurnitureMesh || !selectedItem?.id) return;
+    const nextTint = normalizeTint(selectedItem?.tint);
+    storeApplyTint(
+      selectedItem.id,
+      selectedFurnitureMesh,
+      nextTint.hue,
+      nextTint.saturation,
+      nextTint.brightness,
+    );
+  }, [tintOpen, selectedFurnitureMesh, selectedItem?.id, selectedItem?.tint]);
 
   if (!screenPos) return null;
+
+  const currentTint = normalizeTint(selectedItem?.tint);
 
   const buttons = type === 'wall' ? WALL_BUTTONS
     : type === 'furniture' ? FURNITURE_BUTTONS
@@ -168,6 +146,8 @@ export default function ContextToolbar({
     'delete':          'Item removed',
     'split':           'Wall split in two',
     'ghost':           'Wall is now see-through — tap again to restore',
+    'add-door':        'Move across the wall and tap to place a door',
+    'add-window':      'Move across the wall and tap to place a window',
     'tab':             null,
   };
 
@@ -208,13 +188,14 @@ export default function ContextToolbar({
     if (btn.action === 'delete') { onDelete(); return; }
     if (btn.action === 'split')  { onSplit?.(); return; }
     if (btn.action === 'ghost')  { onGhost?.(); return; }
+    if (btn.action === 'add-door') { onAddDoor?.(); return; }
+    if (btn.action === 'add-window') { onAddWindow?.(); return; }
     if (btn.tab)                  { navigateTo(btn.tab, btn.section); }
   };
 
   const resetTint = () => {
-    setHue(0); setSat(1); setBri(1);
-    applyTint(selectedFurnitureRef?.current, 0, 1, 1);
-    onTintChange?.({ hue: 0, sat: 1, bri: 1 });
+    storeResetTint(selectedItem?.id, selectedFurnitureMesh);
+    onTintChange?.({ ...DEFAULT_TINT });
   };
 
   return (
@@ -245,7 +226,9 @@ export default function ContextToolbar({
             const gizmoKey   = btn.action.startsWith('gizmo:') ? btn.action.split(':')[1] : null;
             const isActive   = (gizmoKey && gizmoKey === gizmoMode)
                             || (btn.action === 'tint'  && tintOpen)
-                            || (btn.action === 'ghost' && wallGhost);
+                            || (btn.action === 'ghost' && wallGhost)
+                            || (btn.action === 'add-door' && activeOpeningTool === 'door')
+                            || (btn.action === 'add-window' && activeOpeningTool === 'window');
             const precActive = btn.precision && gizmoKey && precisionMode === gizmoKey;
             return (
               <ToolbarBtn
@@ -276,9 +259,36 @@ export default function ContextToolbar({
                 padding: '2px 8px', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
               }}>Reset</button>
             </div>
-            <TintSlider label="Hue"        value={hue} min={-180} max={180} step={1}    unit="°" color="#C49A6C" onChange={setHue} />
-            <TintSlider label="Saturation" value={sat} min={0}    max={2}   step={0.01} unit="×" color="#88BBDD" onChange={setSat} />
-            <TintSlider label="Brightness" value={bri} min={0.1}  max={2}   step={0.01} unit="×" color="#F2E5D5" onChange={setBri} />
+            <TintSlider
+              label="Hue"
+              value={currentTint.hue}
+              min={-180}
+              max={180}
+              step={1}
+              unit="°"
+              color="#C49A6C"
+              onChange={(value) => onTintChange?.({ ...currentTint, hue: value })}
+            />
+            <TintSlider
+              label="Saturation"
+              value={currentTint.saturation}
+              min={0}
+              max={2}
+              step={0.01}
+              unit="×"
+              color="#88BBDD"
+              onChange={(value) => onTintChange?.({ ...currentTint, saturation: value })}
+            />
+            <TintSlider
+              label="Brightness"
+              value={currentTint.brightness}
+              min={0.1}
+              max={2}
+              step={0.01}
+              unit="×"
+              color="#F2E5D5"
+              onChange={(value) => onTintChange?.({ ...currentTint, brightness: value })}
+            />
           </div>
         )}
       </div>
@@ -737,6 +747,8 @@ function Icon({ name }) {
     delete:  'M16 9v10H8V9h8m-1.5-6h-5l-1 1H5v2h14V4h-3.5l-1-1zM18 7H6v12c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7z',
     bulb:    'M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z',
     ghost:   'M12 2C8.13 2 5 5.13 5 9v9l3-3 3 3 3-3 3 3V9c0-3.87-3.13-7-7-7zm0 9c-.83 0-1.5-.67-1.5-1.5S11.17 8 12 8s1.5.67 1.5 1.5S12.83 11 12 11zm4 0c-.83 0-1.5-.67-1.5-1.5S15.17 8 16 8s1.5.67 1.5 1.5S16.83 11 16 11z',
+    door:    'M6 2h9a2 2 0 0 1 2 2v18H6V2zm2 2v16h7V4H8zm5 8.5a1 1 0 1 0 .001 2.001A1 1 0 0 0 13 12.5z',
+    window:  'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5zm2 0v6h5V4H6v1zm7-1v7h5V5h-5zm-7 9v6h5v-6H6zm7 0v6h5v-6h-5z',
     tint:    'M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z',
   };
   return (

@@ -7,3 +7,4 @@ class ModelMetadata(BaseModel):
     name: str
     filename: str
     description: Optional[str] = None
+    preview_url: Optional[str] = None

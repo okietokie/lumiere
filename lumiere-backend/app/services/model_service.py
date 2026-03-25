@@ -94,6 +94,38 @@ async def get_model_by_filename(filename: str) -> dict | None:
     return doc
 
 
+async def get_model_by_id(model_id: str) -> dict | None:
+    from bson import ObjectId
+
+    try:
+        oid = ObjectId(model_id)
+    except Exception:
+        return None
+
+    doc = await database["models"].find_one({"_id": oid})
+    if doc:
+        doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+async def set_model_preview_url(model_id: str, preview_url: str) -> bool:
+    from bson import ObjectId
+
+    global _list_cache
+    _list_cache = None
+
+    try:
+        oid = ObjectId(model_id)
+    except Exception:
+        return False
+
+    result = await database["models"].update_one(
+        {"_id": oid},
+        {"$set": {"preview_url": preview_url}},
+    )
+    return result.matched_count > 0
+
+
 async def upsert_model(
     name: str,
     filename: str,

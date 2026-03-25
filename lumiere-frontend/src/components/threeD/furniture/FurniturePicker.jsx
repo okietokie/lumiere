@@ -27,9 +27,9 @@ import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { COLORS } from '../../../utils/colors';
 import FurnitureTint from './FurnitureTint';
-import { resolveGlbUrl, learnCdnBase } from './FurnitureItem';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+import { resolveGlbUrl, learnCdnBase, resolveModelPreviewUrls } from './FurnitureItem';
+import FurnitureModelCard from './FurnitureModelCard';
+import useModelPrefetch, { fetchModelManifest } from '../../../hooks/useModelPrefetch';
 
 // ── 3D preview components ─────────────────────────────────────────────────────
 
@@ -130,6 +130,46 @@ function CardPreview({ url, filename }) {
   );
 }
 
+function ThumbnailPreview({ url, filename, alt, onFallback }) {
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const candidates = useMemo(() => resolveModelPreviewUrls(url, filename), [url, filename]);
+
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [url, filename]);
+
+  useEffect(() => {
+    if (!candidates.length) onFallback();
+  }, [candidates, onFallback]);
+
+  const activeSrc = candidates[candidateIndex];
+  if (!activeSrc) return null;
+
+  return (
+    <img
+      src={activeSrc}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      onError={() => {
+        if (candidateIndex < candidates.length - 1) {
+          setCandidateIndex((current) => current + 1);
+        } else {
+          onFallback();
+        }
+      }}
+      style={{
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+        display: 'block',
+        background: `linear-gradient(135deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`,
+      }}
+    />
+  );
+}
+
 // ── ModelCard — mounts Canvas only when in viewport ───────────────────────────
 //
 // State machine:
@@ -144,8 +184,13 @@ function CardPreview({ url, filename }) {
 function ModelCard({ model, onPlace }) {
   const [hovered,  setHovered]  = useState(false);
   const [visible,  setVisible]  = useState(false);   // IntersectionObserver
+  const [useCanvasPreview, setUseCanvasPreview] = useState(false);
   const cardRef                 = useRef(null);
   const unmountTimer            = useRef(null);
+
+  useEffect(() => {
+    setUseCanvasPreview(false);
+  }, [model.url, model.filename]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -210,6 +255,13 @@ function ModelCard({ model, onPlace }) {
           </div>
         ) : visible ? (
           // In viewport — render live 3D canvas
+          <ThumbnailPreview
+            url={model.url}
+            filename={model.filename}
+            alt={model.name}
+            onFallback={() => setUseCanvasPreview(true)}
+          />
+        ) : visible ? (
           <CardPreview url={model.url} filename={model.filename} />
         ) : (
           // Not yet in viewport — show shimmer skeleton
@@ -278,17 +330,18 @@ export default function FurniturePicker({
   const [loading,          setLoading]         = useState(false);
   const [error,            setError]           = useState(null);
   const [activeCategory,   setActiveCategory]  = useState('');
-  const [prefetchProgress, setPrefetchProgress] = useState(0);
-  const [prefetchDone,     setPrefetchDone]    = useState(false);
+  const { progress: prefetchProgress, done: prefetchDone } = useModelPrefetch({
+    autostart: true,
+    delay: 1200,
+  });
+  const setPrefetchProgress = () => {};
+  const setPrefetchDone = () => {};
 
   // ── Fetch model list — tries /manifest first (sorted), falls back to /list ──
-  const fetchModels = useCallback(async () => {
+  const fetchModels = useCallback(async (force = false) => {
     setLoading(true); setError(null);
     try {
-      let res = await fetch(`${API_BASE}/api/models/manifest`);
-      if (!res.ok) res = await fetch(`${API_BASE}/api/models/list`);
-      if (!res.ok) throw new Error('Backend unreachable');
-      const data = await res.json();
+      const data = await fetchModelManifest({ force });
       // Teach the URL resolver what CDN base to use for old saved projects
       // that have filename but no url stored. This runs once per session.
       learnCdnBase(data);
@@ -309,7 +362,7 @@ export default function FurniturePicker({
 
   // ── Background prefetch: prime browser HTTP cache in manifest order ─────────
   useEffect(() => {
-    if (!models.length || prefetchDone) return;
+    if (true) return;
     let cancelled = false;
     const BATCH   = 3;
     const urls    = models.map((m) => m.url).filter(Boolean);
@@ -397,7 +450,7 @@ export default function FurniturePicker({
 
           <Tooltip title="Refresh model list">
             <Button type="text" size="small" icon={<ReloadOutlined />}
-              onClick={fetchModels} style={{ color: COLORS.secondary }} />
+              onClick={() => fetchModels(true)} style={{ color: COLORS.secondary }} />
           </Tooltip>
         </div>
       </div>
@@ -443,7 +496,7 @@ export default function FurniturePicker({
         {!loading && !error && visibleModels.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             {visibleModels.map((model) => (
-              <ModelCard
+              <FurnitureModelCard
                 key={model.id || model.filename}
                 model={model}
                 onPlace={() => addItem(model)}

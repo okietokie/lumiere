@@ -61,9 +61,20 @@ export default function MaterialPanel({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <FormatPainterOutlined style={{ color: COLORS.action, fontSize: 18 }} />
-        <span style={{ color: COLORS.text, fontSize: 17, fontWeight: 500 }}>Materials</span>
+      <div style={{
+        padding: '18px 18px 16px',
+        borderRadius: 18,
+        background: 'linear-gradient(180deg, rgba(29,23,18,0.95) 0%, rgba(18,14,12,0.95) 100%)',
+        border: `1px solid ${COLORS.action}24`,
+        boxShadow: '0 16px 34px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <FormatPainterOutlined style={{ color: COLORS.action, fontSize: 18 }} />
+          <span style={{ color: COLORS.text, fontSize: 17, fontWeight: 600 }}>Materials Studio</span>
+        </div>
+        <div style={{ color: COLORS.secondary, fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+          Build a cleaner room palette with quick texture presets, direct surface colour edits, and whole-room themes.
+        </div>
       </div>
 
       {/* ── Surface selector ────────────────────────────────────────────── */}
@@ -72,7 +83,7 @@ export default function MaterialPanel({
         value={activeSurface}
         onChange={setActiveSurface}
         block
-        style={{ background: `${COLORS.background}CC` }}
+        style={{ background: `${COLORS.background}CC`, padding: 4, borderRadius: 14 }}
       />
 
       <div id="mat-walls" />
@@ -81,9 +92,9 @@ export default function MaterialPanel({
         <div style={{
           display: 'flex', gap: 6,
           padding: '8px 12px',
-          background: `${COLORS.background}CC`,
-          borderRadius: 10,
-          border: `1px solid ${COLORS.secondary}50`,
+          background: 'linear-gradient(180deg, rgba(23,18,15,0.92) 0%, rgba(16,13,11,0.92) 100%)',
+          borderRadius: 14,
+          border: `1px solid ${COLORS.action}20`,
         }}>
           <Button
             size="small" block
@@ -118,8 +129,9 @@ export default function MaterialPanel({
       {activeSurface === 'wall' && !selectedWall && !applyToAll && (
         <div style={{
           color: COLORS.secondary, fontSize: 12,
-          padding: '6px 10px', borderRadius: 8,
-          background: 'rgba(0,0,0,0.15)',
+          padding: '10px 12px', borderRadius: 12,
+          background: 'rgba(255,255,255,0.03)',
+          border: `1px dashed ${COLORS.secondary}45`,
         }}>
           Select a wall or choose "All Walls" to edit
         </div>
@@ -220,10 +232,11 @@ function Section({ label, children }) {
         {label}
       </div>
       <div style={{
-        padding: '14px',
-        background: `${COLORS.background}CC`,
-        borderRadius: 12,
-        border: `1px solid ${COLORS.secondary}50`,
+        padding: '16px',
+        background: 'linear-gradient(180deg, rgba(26,20,17,0.9) 0%, rgba(17,13,11,0.92) 100%)',
+        borderRadius: 16,
+        border: `1px solid ${COLORS.action}22`,
+        boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
       }}>
         {children}
       </div>
