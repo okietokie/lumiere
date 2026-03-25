@@ -23,19 +23,74 @@ const API_BASE = import.meta.env.VITE_API_URL  || 'http://127.0.0.1:8000';
 // at runtime from live API data.
 
 let _learnedCdnBase = import.meta.env.CDN_BASE || '';  // env var as initial value
+const _modelUrlByFilename = new Map();
+
+function normalizePath(value) {
+  return typeof value === 'string' ? value.replace(/^\/+/, '') : '';
+}
+
+function inferCdnBaseFromModel(model) {
+  if (!model?.filename) return '';
+
+  const cleanFilename = normalizePath(model.filename);
+  const source =
+    (typeof model.url === 'string' && model.url.startsWith('http') && model.url)
+    || model.preview_url
+    || model.thumbnail_url
+    || '';
+
+  if (!source || !source.startsWith('http')) return '';
+
+  const directIdx = source.indexOf(cleanFilename);
+  if (directIdx > 0) return source.slice(0, directIdx).replace(/\/$/, '');
+
+  const dir = cleanFilename.includes('/') ? cleanFilename.slice(0, cleanFilename.lastIndexOf('/')) : '';
+  const previewMarker = dir ? `/${dir}/previews/` : '/previews/';
+  const thumbMarker = dir ? `/${dir}/thumbnails/` : '/thumbnails/';
+  const marker = source.includes(previewMarker)
+    ? previewMarker
+    : source.includes(thumbMarker)
+      ? thumbMarker
+      : '';
+
+  if (!marker) return '';
+  const markerIdx = source.indexOf(marker);
+  return markerIdx > 0 ? source.slice(0, markerIdx).replace(/\/$/, '') : '';
+}
+
+function toUsableModelUrl(value, fallbackFilename = '') {
+  if (!value) return null;
+  if (value.startsWith('http://') || value.startsWith('https://')) return value;
+  if (value.startsWith('/api/proxy/')) return `${API_BASE}${value}`;
+  const clean = normalizePath(value || fallbackFilename);
+  if (!clean) return null;
+  if (_learnedCdnBase) return `${_learnedCdnBase}/${clean}`;
+  return `${API_BASE}/api/proxy/models/${clean}`;
+}
 
 // Call this once after the model list is fetched.
 // Pass any model object that has a valid full url + filename.
 export function learnCdnBase(models) {
-  if (_learnedCdnBase) return;   // already set (env var or previous call)
   for (const m of models) {
+    const inferredBase = inferCdnBaseFromModel(m);
+    if (!_learnedCdnBase && inferredBase) {
+      _learnedCdnBase = inferredBase;
+    }
+
+    if (m?.filename && m?.url) {
+      const cleanFilename = normalizePath(m.filename);
+      const safeUrl = m.url.startsWith('http')
+        ? m.url
+        : (_learnedCdnBase ? `${_learnedCdnBase}/${cleanFilename}` : toUsableModelUrl(m.url, m.filename));
+      if (safeUrl) _modelUrlByFilename.set(normalizePath(m.filename), safeUrl);
+    }
+    if (_learnedCdnBase) continue;   // already set (env var or previous call)
     if (!m.url || !m.filename) continue;
     if (!m.url.startsWith('http')) continue;
-    const clean = m.filename.startsWith('/') ? m.filename.slice(1) : m.filename;
+    const clean = normalizePath(m.filename);
     const idx   = m.url.indexOf(clean);
     if (idx > 0) {
       _learnedCdnBase = m.url.slice(0, idx).replace(/\/$/, '');
-      break;
     }
   }
 }
@@ -53,28 +108,36 @@ export function learnCdnBase(models) {
 //  b) learnCdnBase() fills the gap for old saves
 
 export function resolveGlbUrl(raw, filename) {
+  const cleanFilename = normalizePath(filename);
+  const usableRaw = toUsableModelUrl(raw, cleanFilename);
+
   // 1. Already a full absolute URL — always use directly
   if (raw && (raw.startsWith('http://') || raw.startsWith('https://'))) {
     return raw;
   }
 
-  // 2. No url but we know the CDN base (from env var or learned at runtime)
-  if (!raw && filename && _learnedCdnBase) {
-    const clean = filename.startsWith('/') ? filename.slice(1) : filename;
+  // 2. Exact filename match from the live catalog — safest for old/stale saves
+  if (cleanFilename && _modelUrlByFilename.has(cleanFilename)) {
+    return _modelUrlByFilename.get(cleanFilename);
+  }
+
+  // 3. No url but we know the CDN base (from env var or learned at runtime)
+  if (!raw && cleanFilename && _learnedCdnBase) {
+    const clean = cleanFilename;
     return `${_learnedCdnBase}/${clean}`;
   }
 
-  // 3. No url, no CDN base → proxy (works but has CORS dependency on the server)
-  if (!raw && filename) {
-    const clean = filename.startsWith('/') ? filename.slice(1) : filename;
+  // 4. No url, no CDN base → proxy (works but has CORS dependency on the server)
+  if (!raw && cleanFilename) {
+    const clean = cleanFilename;
     return `${API_BASE}/api/proxy/models/${clean}`;
   }
 
-  // 4. Relative path — proxy it
+  // 5. Relative path from stale data — try the catalog before proxying
   if (raw) {
-    if (raw.startsWith('/api/proxy/')) return `${API_BASE}${raw}`;
-    const clean = raw.startsWith('/') ? raw.slice(1) : raw;
-    return `${API_BASE}/api/proxy/models/${clean}`;
+    const clean = normalizePath(raw);
+    if (_modelUrlByFilename.has(clean)) return _modelUrlByFilename.get(clean);
+    return usableRaw;
   }
 
   return null;
@@ -143,8 +206,45 @@ function computeNormAndCentroid(scene, category) {
 const FurnitureItem = forwardRef((props, ref) => {
   const resolvedUrl = resolveGlbUrl(props.item?.url, props.item?.filename);
   if (!resolvedUrl) return null;
-  return <FurnitureInner ref={ref} {...props} resolvedUrl={resolvedUrl} />;
+  return (
+    <FurnitureErrorBoundary
+      itemId={props.item?.id}
+      resolvedUrl={resolvedUrl}
+      itemName={props.item?.name || props.item?.filename}
+    >
+      <FurnitureInner ref={ref} {...props} resolvedUrl={resolvedUrl} />
+    </FurnitureErrorBoundary>
+  );
 });
+
+class FurnitureErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error) {
+    console.warn(`Failed to load furniture model: ${this.props.itemName}`, error);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (
+      this.state.failed &&
+      (prevProps.resolvedUrl !== this.props.resolvedUrl || prevProps.itemId !== this.props.itemId)
+    ) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) return null;
+    return this.props.children;
+  }
+}
 
 const FurnitureInner = forwardRef(({
   item, resolvedUrl, isSelected, onSelect, setOrbitEnabled,

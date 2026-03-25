@@ -11,6 +11,8 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { COLORS } from '../../../utils/colors';
 import SurfaceMaterial from '../materials/SurfaceMaterial';
+import BasicDoor from '../scene/doors/BasicDoor';
+import BasicWindow from '../scene/windows/BasicWindow';
 
 const FADE_START = 1.8;
 const FADE_END   = 0.5;
@@ -49,6 +51,67 @@ const InteractiveWall = React.forwardRef(({
     const axisDir = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
     return { centre, axisDir, halfLen: length / 2 };
   }, [centerX, centerZ, angle, length]);
+
+  const wallShapeGeometry = useMemo(() => {
+    const wallShape = new THREE.Shape();
+    wallShape.moveTo(-length / 2, 0);
+    wallShape.lineTo(length / 2, 0);
+    wallShape.lineTo(length / 2, height);
+    wallShape.lineTo(-length / 2, height);
+    wallShape.lineTo(-length / 2, 0);
+
+    const carveOpening = (opening, defaults) => {
+      const openingWidth = Math.min(
+        opening.width ?? defaults.width,
+        Math.max(length - 0.2, 0.45)
+      );
+      const openingHeight = Math.min(
+        opening.height ?? defaults.height,
+        Math.max(height - 0.1, defaults.minHeight)
+      );
+      const bottomOffset = Math.min(
+        opening.bottomOffset ?? defaults.bottomOffset,
+        Math.max(height - openingHeight, 0)
+      );
+      const localX = THREE.MathUtils.clamp(
+        (opening.offsetAlongWall ?? (length / 2)) - (length / 2),
+        (-length / 2) + (openingWidth / 2),
+        (length / 2) - (openingWidth / 2)
+      );
+
+      const hole = new THREE.Path();
+      hole.moveTo(localX - (openingWidth / 2), bottomOffset);
+      hole.lineTo(localX - (openingWidth / 2), bottomOffset + openingHeight);
+      hole.lineTo(localX + (openingWidth / 2), bottomOffset + openingHeight);
+      hole.lineTo(localX + (openingWidth / 2), bottomOffset);
+      hole.lineTo(localX - (openingWidth / 2), bottomOffset);
+      wallShape.holes.push(hole);
+    };
+
+    doors.forEach((door) => carveOpening(door, {
+      width: 0.9,
+      height: 2.1,
+      bottomOffset: 0,
+      minHeight: 1.8,
+    }));
+
+    windows.forEach((opening) => carveOpening(opening, {
+      width: 1.2,
+      height: 1.2,
+      bottomOffset: 0.9,
+      minHeight: 0.6,
+    }));
+
+    const geometry = new THREE.ExtrudeGeometry(wallShape, {
+      depth: thickness,
+      bevelEnabled: false,
+      steps: 1,
+    });
+
+    geometry.translate(0, -height / 2, -thickness / 2);
+    geometry.computeVertexNormals();
+    return geometry;
+  }, [doors, height, length, thickness, windows]);
 
   // ── First-person proximity fade ──────────────────────────────────────────
   useFrame(() => {
@@ -263,43 +326,111 @@ const InteractiveWall = React.forwardRef(({
       : selected ? COLORS.action : COLORS.accent;
     const fillOpacity = preview ? (opening.valid ? 0.24 : 0.18) : selected ? 0.3 : 0.16;
     const panelOpacity = preview ? (opening.valid ? 0.88 : 0.72) : selected ? 0.92 : 0.58;
+    const frameDepth = Math.max(thickness + 0.02, 0.12);
+
+    if (openingType === 'door') {
+      return (
+        <group key={`${openingType}-${opening.id}`}>
+          <BasicDoor
+            position={[localX, bottomOffset, 0]}
+            width={openingWidth}
+            height={openingHeight}
+            depth={Math.max(thickness * 0.55, 0.05)}
+            frameDepth={frameDepth}
+            frameThickness={opening.frameThickness ?? 0.04}
+            hingeSide={opening.hingeSide ?? 'left'}
+            opensInward={opening.opensInward ?? true}
+            frameColor={preview ? tint : (selected ? '#8b6a4f' : '#7b5e47')}
+            doorColor={preview ? tint : '#d8c2a8'}
+            handleColor={preview ? '#2d2d2d' : '#1f1f1f'}
+            onDoorPointerDown={preview ? undefined : (e) => {
+              onOpeningSelect?.({ id: opening.id, type: openingType });
+              startOpeningDrag(e, openingType, opening, 'move');
+            }}
+            onClick={(e) => {
+              if (preview) return;
+              e.stopPropagation();
+              onOpeningSelect?.({ id: opening.id, type: openingType });
+            }}
+          />
+          {preview && (
+            <mesh position={[localX, centerY, (frameDepth / 2) + 0.04]} renderOrder={6}>
+              <planeGeometry args={[Math.max(openingWidth + 0.08, 0.24), Math.max(openingHeight + 0.08, 0.32)]} />
+              <meshBasicMaterial color={tint} transparent opacity={opening.valid ? 0.12 : 0.18} />
+            </mesh>
+          )}
+          {!preview && selected && (
+            <>
+              <mesh position={[localX, centerY, (frameDepth / 2) + 0.05]} renderOrder={6}>
+                <ringGeometry args={[Math.max(openingWidth / 2, 0.32), Math.max(openingWidth / 2, 0.32) + 0.02, 48]} />
+                <meshBasicMaterial color={COLORS.action} transparent opacity={0.65} side={THREE.DoubleSide} />
+              </mesh>
+              <mesh position={[0, centerY, (frameDepth / 2) + 0.025]} renderOrder={6}>
+                <planeGeometry args={[length, 0.015]} />
+                <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
+              </mesh>
+              <mesh
+                position={[localX, centerY, (frameDepth / 2) + 0.08]}
+                onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
+              >
+                <coneGeometry args={[0.08, 0.18, 18]} />
+                <meshBasicMaterial color={COLORS.action} depthTest={false} />
+              </mesh>
+              <mesh
+                position={[localX, centerY, (frameDepth / 2) + 0.17]}
+                rotation={[Math.PI / 2, 0, 0]}
+              >
+                <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
+                <meshBasicMaterial color={COLORS.action} depthTest={false} />
+              </mesh>
+              <mesh
+                position={[localX - (openingWidth / 2), centerY, (frameDepth / 2) + 0.08]}
+                onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'start')}
+              >
+                <boxGeometry args={[0.09, 0.09, 0.09]} />
+                <meshBasicMaterial color="#ffd86c" depthTest={false} />
+              </mesh>
+              <mesh
+                position={[localX + (openingWidth / 2), centerY, (frameDepth / 2) + 0.08]}
+                onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'end')}
+              >
+                <boxGeometry args={[0.09, 0.09, 0.09]} />
+                <meshBasicMaterial color="#ffd86c" depthTest={false} />
+              </mesh>
+            </>
+          )}
+        </group>
+      );
+    }
 
     return (
-      <group
-        key={`${openingType}-${opening.id}`}
-        position={[centerX, 0, centerZ]}
-        rotation={[0, -angle, 0]}
-      >
-        <mesh
-          position={[localX, centerY, 0]}
-          renderOrder={4}
+      <group key={`${openingType}-${opening.id}`}>
+        <BasicWindow
+          position={[localX, bottomOffset, 0]}
+          width={openingWidth}
+          height={openingHeight}
+          depth={Math.max(thickness * 0.5, 0.03)}
+          frameDepth={frameDepth}
+          frameThickness={opening.frameThickness ?? 0.04}
+          frameColor={preview ? tint : (selected ? '#8b6a4f' : '#7b5e47')}
+          glassColor={preview ? tint : '#9cc7da'}
+          windowStyle={opening.windowStyle ?? 'sliding'}
+          onWindowPointerDown={preview ? undefined : (e) => {
+            onOpeningSelect?.({ id: opening.id, type: openingType });
+            startOpeningDrag(e, openingType, opening, 'move');
+          }}
           onClick={(e) => {
             if (preview) return;
             e.stopPropagation();
             onOpeningSelect?.({ id: opening.id, type: openingType });
           }}
-        >
-          <boxGeometry args={[openingWidth, openingHeight, Math.max(thickness + 0.02, 0.06)]} />
-          <meshStandardMaterial
-            color={tint}
-            transparent
-            opacity={fillOpacity}
-            emissive={new THREE.Color(tint)}
-            emissiveIntensity={selected || preview ? 0.18 : 0.08}
-          />
-        </mesh>
-        <mesh
-          position={[localX, centerY, (thickness / 2) + 0.015]}
-          renderOrder={5}
-          onClick={(e) => {
-            if (preview) return;
-            e.stopPropagation();
-            onOpeningSelect?.({ id: opening.id, type: openingType });
-          }}
-        >
-          <planeGeometry args={[Math.max(openingWidth - 0.08, 0.18), Math.max(openingHeight - 0.08, 0.28)]} />
-          <meshBasicMaterial color={tint} transparent opacity={panelOpacity} />
-        </mesh>
+        />
+        {preview && (
+          <mesh position={[localX, centerY, (frameDepth / 2) + 0.03]} renderOrder={5}>
+            <planeGeometry args={[Math.max(openingWidth + 0.08, 0.24), Math.max(openingHeight + 0.08, 0.32)]} />
+            <meshBasicMaterial color={tint} transparent opacity={opening.valid ? 0.12 : 0.18} />
+          </mesh>
+        )}
         {!preview && selected && (
           <>
             <mesh position={[localX, centerY, (thickness / 2) + 0.025]} renderOrder={6}>
@@ -346,53 +477,58 @@ const InteractiveWall = React.forwardRef(({
 
   return (
     <group>
-      <mesh
-        ref={(r) => {
-          meshRef.current = r;
-          if (typeof ref === 'function') ref(r);
-          else if (ref) ref.current = r;
-        }}
-        position={[centerX, height / 2, centerZ]}
-        rotation={[0, -angle, 0]}
-        castShadow={!ghost}
-        receiveShadow
-        onClick={(e)        => {
-          e.stopPropagation();
-          if (activeOpeningTool) {
+      <group position={[centerX, 0, centerZ]} rotation={[0, -angle, 0]}>
+        <mesh
+          ref={(r) => {
+            meshRef.current = r;
+            if (typeof ref === 'function') ref(r);
+            else if (ref) ref.current = r;
+          }}
+          position={[0, height / 2, 0]}
+          castShadow={!ghost}
+          receiveShadow
+          onClick={(e)        => {
+            e.stopPropagation();
+            if (activeOpeningTool) {
+              onSelect();
+              onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
+              onOpeningCommit?.();
+              return;
+            }
+            onSelect();
+          }}
+          onPointerDown={(e)  => { if (isSelected && !activeOpeningTool) startDrag(e, 'body'); }}
+          onPointerMove={(e)  => {
+            if (!activeOpeningTool) return;
+            e.stopPropagation();
             onSelect();
             onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
-            onOpeningCommit?.();
-            return;
-          }
-          onSelect();
-        }}
-        onPointerDown={(e)  => { if (isSelected && !activeOpeningTool) startDrag(e, 'body'); }}
-        onPointerMove={(e)  => {
-          if (!activeOpeningTool) return;
-          e.stopPropagation();
-          onSelect();
-          onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
-        }}
-        onPointerOver={(e)  => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = activeOpeningTool ? 'copy' : isSelected ? 'grab' : 'pointer'; }}
-        onPointerOut={()    => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
-      >
-        <boxGeometry args={[length, height, thickness]} />
+          }}
+          onPointerOver={(e)  => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = activeOpeningTool ? 'copy' : isSelected ? 'grab' : 'pointer'; }}
+          onPointerOut={()    => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
+        >
+          <primitive object={wallShapeGeometry} attach="geometry" />
 
-        {isSelected || hovered ? (
-          <meshStandardMaterial
-            color={isSelected ? COLORS.action : COLORS.accent}
-            roughness={roughness}
-            metalness={metalness}
-            {...ghostProps}
-          />
-        ) : (
-          <SurfaceMaterial
-            mat={{ color, roughness, metalness, textureId }}
-            repeat={[2, 1]}
-            {...ghostProps}
-          />
-        )}
-      </mesh>
+          {isSelected || hovered ? (
+            <meshStandardMaterial
+              color={isSelected ? COLORS.action : COLORS.accent}
+              roughness={roughness}
+              metalness={metalness}
+              {...ghostProps}
+            />
+          ) : (
+            <SurfaceMaterial
+              mat={{ color, roughness, metalness, textureId }}
+              repeat={[2, 1]}
+              {...ghostProps}
+            />
+          )}
+        </mesh>
+
+        {doors.map((door) => renderOpening('door', door))}
+        {windows.map((opening) => renderOpening('window', opening))}
+        {openingPreview && renderOpening(activeOpeningTool ?? openingPreview.type, openingPreview, true)}
+      </group>
 
       {isSelected && (
         <>
@@ -442,10 +578,6 @@ const InteractiveWall = React.forwardRef(({
           </Html>
         </>
       )}
-
-      {doors.map((door) => renderOpening('door', door))}
-      {windows.map((opening) => renderOpening('window', opening))}
-      {openingPreview && renderOpening(activeOpeningTool ?? openingPreview.type, openingPreview, true)}
     </group>
   );
 });

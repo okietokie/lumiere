@@ -43,6 +43,8 @@ export default function ReplaceModal({ open, onClose, selectedItem, onReplace })
     onReplace({
       filename: model.filename,
       name:     model.name,
+      url:      model.url || null,
+      category: model.category || null,
       position: selectedItem.position,
       rotation: selectedItem.rotation,
       scale:    selectedItem.scale,

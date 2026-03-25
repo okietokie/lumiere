@@ -53,6 +53,7 @@ export function createWindowEntity(overrides = {}) {
     id: uuidv4(),
     wallId: null,
     type: 'window',
+    windowStyle: 'sliding',
     offsetAlongWall: 1.2,
     width: 1.2,
     height: 1.2,

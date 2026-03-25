@@ -6,8 +6,9 @@ import { SkeletonUtils } from 'three-stdlib';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { useGLTF, OrbitControls, Center, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
+import { resolveGlbUrl } from './FurnitureItem';
 
-function toDirectUrl(b2Url) { return b2Url || null; }
+function toDirectUrl(rawUrl, filename) { return resolveGlbUrl(rawUrl, filename); }
 
 // ── Module-level state shared between ModelPreview triggers and PreviewPortal ─
 let _setPreviewState = null;
@@ -88,7 +89,7 @@ export function PreviewPortal() {
 
           <PreviewErrorBoundary key={state.model.url}>
             <Suspense fallback={<LoadingSpinner />}>
-              <PreviewModel url={toDirectUrl(state.model.url)} />
+              <PreviewModel url={toDirectUrl(state.model.url, state.model.filename)} />
             </Suspense>
           </PreviewErrorBoundary>
 

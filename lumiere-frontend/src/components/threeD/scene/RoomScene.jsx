@@ -2,7 +2,7 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { useState, useEffect, useRef, Suspense, useCallback, useMemo } from "react";
-import { Splitter, Button, Tooltip, Space, Grid, Tabs, Slider } from "antd";
+import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber } from "antd";
 import {
   EyeOutlined,
   VerticalLeftOutlined,
@@ -15,6 +15,11 @@ import {
   ColumnWidthOutlined,
   BulbOutlined,
   FormatPainterOutlined,
+  DeleteOutlined,
+  LeftOutlined,
+  RightOutlined,
+  LoginOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
@@ -83,6 +88,8 @@ const CAMERA_PRESETS = {
   side:        { position: [10, 1.5, 0], target: [0, 1.5, 0] },
 };
 
+const OPENING_STEP = 0.05;
+
 export default function RoomScene() {
 
   // ── Walls (undo/redo history) ─────────────────────────────────────────────
@@ -138,6 +145,7 @@ export default function RoomScene() {
   const sceneRef         = useRef(null);
   const canvasWrapperRef = useRef(null);
   const wallRefs         = useRef({});
+  const desktopFloatingRef = useRef(null);
 
   const screens = Grid.useBreakpoint();
   const { navigateTo } = useContextNav(setActiveTab);
@@ -149,6 +157,7 @@ export default function RoomScene() {
   // ── Mobile detection ──────────────────────────────────────────────────────
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [mobileDoorEditorSection, setMobileDoorEditorSection] = useState(null);
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handler);
@@ -188,6 +197,9 @@ export default function RoomScene() {
       : (selectedWall.windows ?? []);
     return openings.find((opening) => opening.id === selectedOpening.id) ?? null;
   }, [selectedOpening, selectedWall]);
+  const mobileOpeningPlacementLocked = isMobile
+    && cameraMode === 'orbit'
+    && (activeTool === 'door' || activeTool === 'window');
 
   const softBorder = `1px solid ${COLORS.secondary}55`;
   const softShadow = '0 24px 60px rgba(0, 0, 0, 0.28)';
@@ -198,6 +210,65 @@ export default function RoomScene() {
   const accentGlow = 'radial-gradient(circle at bottom right, rgba(139, 107, 77, 0.18), transparent 38%)';
   const cameraCardBg = `linear-gradient(180deg, ${COLORS.background}E8 0%, ${COLORS.surface}F2 100%)`;
   const desktopCanvasShell = `linear-gradient(180deg, ${COLORS.surface}D8 0%, ${COLORS.background}F4 100%)`;
+  const openingChipStyle = {
+    minHeight: 30,
+    padding: '0 10px',
+    fontSize: 10,
+    letterSpacing: '0.04em',
+  };
+  const openingDangerChipStyle = {
+    ...openingChipStyle,
+    minWidth: 72,
+  };
+  const openingPanelTone = {
+    background: 'linear-gradient(180deg, rgba(68, 54, 47, 0.92) 0%, rgba(33, 25, 22, 0.96) 100%)',
+    border: `1px solid ${COLORS.action}33`,
+    boxShadow: '0 18px 42px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.05)',
+  };
+  const openingFieldCardStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    padding: '10px 12px',
+    borderRadius: 16,
+    background: 'rgba(255,255,255,0.04)',
+    border: `1px solid ${COLORS.secondary}33`,
+  };
+  const openingIconButtonStyle = {
+    minWidth: 36,
+    width: 36,
+    height: 36,
+    padding: 0,
+    fontSize: 14,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+  const mobileDoorEditButtonStyle = {
+    minWidth: 0,
+    height: 48,
+    borderRadius: 16,
+    border: `1px solid ${COLORS.secondary}40`,
+    background: 'rgba(255,255,255,0.05)',
+    color: COLORS.text,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    font: 'inherit',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    transition: 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease, width 0.28s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s ease, border-color 0.2s ease',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+  };
+
+  const getOpeningBounds = useCallback((openingType) => ({
+    width: { min: 0.45, max: 2.4 },
+    height: openingType === 'door'
+      ? { min: 1.8, max: 2.6 }
+      : { min: 0.6, max: 1.8 },
+  }), []);
 
   useEffect(() => {
     if (isMobile) return;
@@ -207,6 +278,28 @@ export default function RoomScene() {
     }
     setDesktopPanelOpen(true);
   }, [activeTab, isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileDoorEditorSection(null);
+      return;
+    }
+    if (!selectedOpeningEntity || selectedOpening?.type !== 'door') {
+      setMobileDoorEditorSection(null);
+    }
+  }, [isMobile, selectedOpening?.id, selectedOpening?.type, selectedOpeningEntity]);
+
+  useEffect(() => {
+    if (isMobile || !desktopPanelOpen) return undefined;
+
+    const onPointerDown = (event) => {
+      if (desktopFloatingRef.current?.contains(event.target)) return;
+      setDesktopPanelOpen(false);
+    };
+
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [desktopPanelOpen, isMobile]);
 
 
   // ── Apply ghost opacity to wall meshes ────────────────────────────────────
@@ -274,6 +367,319 @@ export default function RoomScene() {
     }));
     setSelectedOpening((prev) => (prev?.id === openingId ? null : prev));
   }, [setWalls]);
+
+  const updateOpeningNumericField = useCallback((field, rawValue) => {
+    if (!selectedOpening || !selectedOpeningEntity) return;
+
+    const bounds = getOpeningBounds(selectedOpening.type)[field];
+    const numericValue = Number(rawValue);
+
+    if (!Number.isFinite(numericValue)) {
+      toast.info(`Enter a valid ${field} value.`);
+      return;
+    }
+
+    const nextValue = Number(THREE.MathUtils.clamp(numericValue, bounds.min, bounds.max).toFixed(2));
+
+    if (numericValue !== nextValue) {
+      toast.info(`${field[0].toUpperCase() + field.slice(1)} must stay between ${bounds.min.toFixed(2)} m and ${bounds.max.toFixed(2)} m.`);
+    }
+
+    updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { [field]: nextValue });
+  }, [getOpeningBounds, selectedOpening, selectedOpeningEntity, toast, updateWallOpening]);
+
+  const renderOpeningModeButton = useCallback((tooltip, icon, active, onClick, danger = false) => (
+    <Tooltip title={tooltip}>
+      <button
+        type="button"
+        className={active ? 'room-secondary-chip is-active' : danger ? 'room-secondary-chip is-danger' : 'room-secondary-chip'}
+        style={{
+          ...openingIconButtonStyle,
+          borderColor: active ? `${COLORS.action}AA` : undefined,
+        }}
+        onClick={onClick}
+      >
+        {icon}
+      </button>
+    </Tooltip>
+  ), [openingIconButtonStyle]);
+
+  const renderOpeningDimensionInputs = useCallback(() => {
+    if (!selectedOpening || !selectedOpeningEntity) return null;
+
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+        <div style={openingFieldCardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ color: COLORS.text, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <ColumnWidthOutlined />
+              Width
+            </span>
+            <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
+          </div>
+          <InputNumber
+            min={getOpeningBounds(selectedOpening.type).width.min}
+            max={getOpeningBounds(selectedOpening.type).width.max}
+            step={OPENING_STEP}
+            precision={2}
+            controls
+            value={selectedOpeningEntity.width}
+            onChange={(value) => updateOpeningNumericField('width', value)}
+            style={{ width: '100%' }}
+            addonAfter="m"
+          />
+        </div>
+        <div style={openingFieldCardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ color: COLORS.text, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <BorderOutlined />
+              Height
+            </span>
+            <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
+          </div>
+          <InputNumber
+            min={getOpeningBounds(selectedOpening.type).height.min}
+            max={getOpeningBounds(selectedOpening.type).height.max}
+            step={OPENING_STEP}
+            precision={2}
+            controls
+            value={selectedOpeningEntity.height}
+            onChange={(value) => updateOpeningNumericField('height', value)}
+            style={{ width: '100%' }}
+            addonAfter="m"
+          />
+        </div>
+      </div>
+    );
+  }, [getOpeningBounds, openingFieldCardStyle, selectedOpening, selectedOpeningEntity, updateOpeningNumericField]);
+
+  const renderDoorBehaviorControls = useCallback(() => {
+    if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
+
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {renderOpeningModeButton(
+            'Hinge on the left side',
+            <LeftOutlined />,
+            selectedOpeningEntity.hingeSide === 'left',
+            () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { hingeSide: 'left' })
+          )}
+          {renderOpeningModeButton(
+            'Hinge on the right side',
+            <RightOutlined />,
+            selectedOpeningEntity.hingeSide === 'right',
+            () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { hingeSide: 'right' })
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {renderOpeningModeButton(
+            'Open inward',
+            <LoginOutlined />,
+            (selectedOpeningEntity.opensInward ?? true) === true,
+            () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: true })
+          )}
+          {renderOpeningModeButton(
+            'Open outward',
+            <LogoutOutlined />,
+            (selectedOpeningEntity.opensInward ?? true) === false,
+            () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: false })
+          )}
+        </div>
+      </div>
+    );
+  }, [renderOpeningModeButton, selectedOpening, selectedOpeningEntity, updateWallOpening]);
+
+  const renderWindowTypeControls = useCallback(() => {
+    if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
+
+    const options = [
+      { key: 'sliding', label: 'Sliding' },
+      { key: 'casement', label: 'Casement' },
+      { key: 'fixed', label: 'Fixed' },
+    ];
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+          Window Type
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+          {options.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              className={(selectedOpeningEntity.windowStyle ?? 'sliding') === option.key ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+              onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { windowStyle: option.key })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }, [selectedOpening, selectedOpeningEntity, updateWallOpening]);
+
+  const renderMobileDoorEditor = useCallback(() => {
+    if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
+
+    const sections = [
+      {
+        key: 'width',
+        label: 'Width',
+        icon: <ColumnWidthOutlined />,
+        content: (
+          <div style={{ ...openingFieldCardStyle, width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ color: COLORS.text, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <ColumnWidthOutlined />
+                Width
+              </span>
+              <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
+            </div>
+            <InputNumber
+              min={getOpeningBounds('door').width.min}
+              max={getOpeningBounds('door').width.max}
+              step={OPENING_STEP}
+              precision={2}
+              controls
+              value={selectedOpeningEntity.width}
+              onChange={(value) => updateOpeningNumericField('width', value)}
+              style={{ width: '100%' }}
+              addonAfter="m"
+            />
+          </div>
+        ),
+      },
+      {
+        key: 'height',
+        label: 'Height',
+        icon: <BorderOutlined />,
+        content: (
+          <div style={{ ...openingFieldCardStyle, width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ color: COLORS.text, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <BorderOutlined />
+                Height
+              </span>
+              <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
+            </div>
+            <InputNumber
+              min={getOpeningBounds('door').height.min}
+              max={getOpeningBounds('door').height.max}
+              step={OPENING_STEP}
+              precision={2}
+              controls
+              value={selectedOpeningEntity.height}
+              onChange={(value) => updateOpeningNumericField('height', value)}
+              style={{ width: '100%' }}
+              addonAfter="m"
+            />
+          </div>
+        ),
+      },
+      {
+        key: 'hinge',
+        label: 'Hinge',
+        icon: selectedOpeningEntity.hingeSide === 'left' ? <LeftOutlined /> : <RightOutlined />,
+        content: (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+            {renderOpeningModeButton(
+              'Hinge on the left side',
+              <LeftOutlined />,
+              selectedOpeningEntity.hingeSide === 'left',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { hingeSide: 'left' })
+            )}
+            {renderOpeningModeButton(
+              'Hinge on the right side',
+              <RightOutlined />,
+              selectedOpeningEntity.hingeSide === 'right',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { hingeSide: 'right' })
+            )}
+          </div>
+        ),
+      },
+      {
+        key: 'swing',
+        label: 'Opening',
+        icon: (selectedOpeningEntity.opensInward ?? true) ? <LoginOutlined /> : <LogoutOutlined />,
+        content: (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+            {renderOpeningModeButton(
+              'Open inward',
+              <LoginOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === true,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: true })
+            )}
+            {renderOpeningModeButton(
+              'Open outward',
+              <LogoutOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === false,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: false })
+            )}
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ position: 'relative', minHeight: 56, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', gap: 8, width: '100%', transform: mobileDoorEditorSection ? 'translateX(-20%)' : 'translateX(0)', opacity: mobileDoorEditorSection ? 0 : 1, transition: 'transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease', pointerEvents: mobileDoorEditorSection ? 'none' : 'auto' }}>
+            {sections.map((section) => (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => setMobileDoorEditorSection(section.key)}
+                style={{ ...mobileDoorEditButtonStyle, flex: '1 1 0' }}
+              >
+                {section.icon}
+              </button>
+            ))}
+          </div>
+          {sections.map((section) => {
+            const isOpen = mobileDoorEditorSection === section.key;
+            return (
+              <div
+                key={section.key}
+                style={{
+                  position: isOpen ? 'relative' : 'absolute',
+                  inset: isOpen ? 'auto' : 0,
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  gap: 10,
+                  width: '100%',
+                  transform: isOpen ? 'translateX(0)' : 'translateX(24px)',
+                  opacity: isOpen ? 1 : 0,
+                  pointerEvents: isOpen ? 'auto' : 'none',
+                  transition: 'transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setMobileDoorEditorSection((prev) => prev === section.key ? null : section.key)}
+                  style={{
+                    ...mobileDoorEditButtonStyle,
+                    width: 58,
+                    minWidth: 58,
+                    background: 'linear-gradient(135deg, rgba(196,154,108,0.24) 0%, rgba(139,107,77,0.26) 100%)',
+                    borderColor: `${COLORS.action}66`,
+                    color: COLORS.action,
+                    transform: isOpen ? 'translateX(0)' : 'translateX(8px)',
+                  }}
+                >
+                  {section.icon}
+                </button>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', animation: isOpen ? 'roomDoorPanelFade 0.28s ease' : 'none' }}>
+                  {section.content}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }, [COLORS.action, COLORS.text, getOpeningBounds, mobileDoorEditButtonStyle, mobileDoorEditorSection, openingFieldCardStyle, renderOpeningModeButton, selectedOpening, selectedOpeningEntity, updateOpeningNumericField, updateWallOpening]);
 
   const buildOpeningPreview = useCallback((wall, openingType, point = null) => {
     if (!wall) return null;
@@ -427,6 +833,7 @@ export default function RoomScene() {
     if (!selectedFurniture) return;
     const newItem = {
       id: uuidv4(), filename: newMeta.filename, name: newMeta.name, url: newMeta.url,
+      category: newMeta.category || null,
       position: [...selectedFurniture.position],
       rotation: [...selectedFurniture.rotation],
       scale:    [...selectedFurniture.scale],
@@ -511,80 +918,30 @@ export default function RoomScene() {
             <button type="button" className="room-secondary-chip is-danger" onClick={() => deleteWall(selectedWall.id)}>Delete</button>
           </div>
           {selectedOpeningEntity && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px', borderRadius: 16, background: `${COLORS.surface}CC`, border: `1px solid ${COLORS.secondary}45` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px', borderRadius: 18, ...openingPanelTone }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <div>
+                  <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4 }}>
+                    Precision Edit
+                  </div>
                   <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>
                     {selectedOpening?.type} selected
                   </div>
                   <div style={{ color: `${COLORS.text}8C`, fontSize: 11 }}>
-                    Drag in scene to move. Resize with the side handles.
+                    Drag on the wall, then fine-tune exact dimensions here.
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="room-secondary-chip is-danger"
-                  style={{ minWidth: 88 }}
-                  onClick={() => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id)}
-                >
-                  Remove
-                </button>
+                {renderOpeningModeButton(
+                  'Remove this opening',
+                  <DeleteOutlined />,
+                  false,
+                  () => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id),
+                  true
+                )}
               </div>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
-                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
-                </div>
-                <Slider
-                  min={0.45}
-                  max={2.4}
-                  step={0.05}
-                  value={selectedOpeningEntity.width}
-                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { width: value })}
-                  tooltip={{ formatter: (value) => `${value} m` }}
-                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
-                />
-              </div>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
-                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
-                </div>
-                <Slider
-                  min={selectedOpening?.type === 'door' ? 1.8 : 0.6}
-                  max={selectedOpening?.type === 'door' ? 2.6 : 1.8}
-                  step={0.05}
-                  value={selectedOpeningEntity.height}
-                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { height: value })}
-                  tooltip={{ formatter: (value) => `${value} m` }}
-                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
-                />
-              </div>
-              {selectedOpening?.type === 'door' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-                  <button
-                    type="button"
-                    className={selectedOpeningEntity.swingDirection === 'left' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
-                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'left' })}
-                  >
-                    Swing L
-                  </button>
-                  <button
-                    type="button"
-                    className={selectedOpeningEntity.swingDirection === 'right' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
-                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'right' })}
-                  >
-                    Swing R
-                  </button>
-                  <button
-                    type="button"
-                    className="room-secondary-chip"
-                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: selectedOpeningEntity.swingDirection === 'left' ? 'right' : 'left' })}
-                  >
-                    Flip
-                  </button>
-                </div>
-              )}
+              {renderOpeningDimensionInputs()}
+              {renderDoorBehaviorControls()}
+              {renderWindowTypeControls()}
             </div>
           )}
         </div>
@@ -809,8 +1166,10 @@ export default function RoomScene() {
               ref={orbitControlsRef}
               enableDamping dampingFactor={0.06}
               maxPolarAngle={Math.PI / 2.4}
-              enabled={orbitEnabled}
-              touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+              enabled={orbitEnabled && !mobileOpeningPlacementLocked}
+              touches={mobileOpeningPlacementLocked
+                ? { ONE: THREE.TOUCH.NONE, TWO: THREE.TOUCH.NONE }
+                : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
               onTouchStart={(e) => { if (e?.touches?.length < 2) return; }}
             />
           ) : (
@@ -827,7 +1186,7 @@ export default function RoomScene() {
                context toolbar (which floats near the selected object).
                On mobile the top-left is always clear of the bottom nav. */}
           {anythingSelected && cameraMode === 'orbit' && (
-            <GizmoHelper alignment="bottom-left" margin={[60, 60]}>
+            <GizmoHelper alignment="top-right" margin={[60, 120]}>
               <GizmoViewport
                 axisColors={['#E05252', '#52C052', '#5252E0']}
                 labelColor="#E8E0D8"
@@ -1028,85 +1387,43 @@ export default function RoomScene() {
             <div
               style={{
                 position: 'fixed',
-                left: 12,
-                right: 12,
-                bottom: 86,
+                left: 16,
+                right: 16,
+                bottom: 92,
                 zIndex: 1000,
-                padding: '14px 14px 12px',
-                borderRadius: 22,
-                background: `${COLORS.background}F2`,
-                border: `1px solid ${COLORS.secondary}55`,
-                boxShadow: '0 16px 40px rgba(0,0,0,0.32)',
+                padding: '12px',
+                borderRadius: 20,
+                maxWidth: 420,
+                maxHeight: selectedOpening?.type === 'door' ? 'auto' : '22vh',
+                margin: '0 auto',
+                ...openingPanelTone,
                 backdropFilter: 'blur(14px)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                 <div>
+                  <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4 }}>Door Studio</div>
                   <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, textTransform: 'capitalize' }}>{selectedOpening?.type} edit</div>
-                  <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>Drag in scene to move. Use sliders to fine-tune.</div>
+                  <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>Drag in scene to move. Fine-tune here with exact values.</div>
                 </div>
-                <button
-                  type="button"
-                  className="room-secondary-chip is-danger"
-                  style={{ minWidth: 86 }}
-                  onClick={() => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id)}
-                >
-                  Remove
-                </button>
+                {renderOpeningModeButton(
+                  'Remove this opening',
+                  <DeleteOutlined />,
+                  false,
+                  () => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id),
+                  true
+                )}
               </div>
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
-                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
-                </div>
-                <Slider
-                  min={0.45}
-                  max={2.4}
-                  step={0.05}
-                  value={selectedOpeningEntity.width}
-                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { width: value })}
-                  tooltip={{ formatter: (value) => `${value} m` }}
-                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
-                />
-              </div>
-              <div style={{ marginBottom: selectedOpening?.type === 'door' ? 10 : 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
-                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
-                </div>
-                <Slider
-                  min={selectedOpening?.type === 'door' ? 1.8 : 0.6}
-                  max={selectedOpening?.type === 'door' ? 2.6 : 1.8}
-                  step={0.05}
-                  value={selectedOpeningEntity.height}
-                  onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { height: value })}
-                  tooltip={{ formatter: (value) => `${value} m` }}
-                  styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
-                />
-              </div>
-              {selectedOpening?.type === 'door' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-                  <button
-                    type="button"
-                    className={selectedOpeningEntity.swingDirection === 'left' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
-                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'left' })}
-                  >
-                    Left
-                  </button>
-                  <button
-                    type="button"
-                    className={selectedOpeningEntity.swingDirection === 'right' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
-                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'right' })}
-                  >
-                    Right
-                  </button>
-                  <button
-                    type="button"
-                    className="room-secondary-chip"
-                    onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: selectedOpeningEntity.swingDirection === 'left' ? 'right' : 'left' })}
-                  >
-                    Flip
-                  </button>
+              {selectedOpening?.type === 'door' ? (
+                renderMobileDoorEditor()
+              ) : (
+                <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {renderOpeningDimensionInputs()}
+                  {renderWindowTypeControls()}
                 </div>
               )}
             </div>
@@ -1181,7 +1498,7 @@ export default function RoomScene() {
               <div style={{ height: '100%', width: '100%', borderRadius: 24, overflow: 'hidden', background: `linear-gradient(180deg, ${COLORS.surface}80 0%, ${COLORS.background}20 100%)`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
                 {canvasBlock}
               </div>
-              <div style={{ position: 'absolute', top: 24, left: 24, bottom: 24, zIndex: 950, display: 'flex', alignItems: 'stretch', gap: 14, pointerEvents: 'none' }}>
+              <div ref={desktopFloatingRef} style={{ position: 'absolute', top: 24, left: 24, zIndex: 950, display: 'flex', alignItems: 'flex-start', gap: 14, pointerEvents: 'none' }}>
                 <div className="room-floating-rail">
                   <div className="room-floating-brand">
                     <span className="room-floating-brand-dot" />
@@ -1305,83 +1622,33 @@ export default function RoomScene() {
                           <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
                           <button type="button" className="room-secondary-chip is-danger" onClick={() => deleteWall(selectedWall.id)}>Delete</button>
                         </div>
-                        {selectedOpeningEntity && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px', borderRadius: 16, background: `${COLORS.surface}CC`, border: `1px solid ${COLORS.secondary}45` }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                              <div>
-                                <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>
-                                  {selectedOpening?.type} selected
-                                </div>
-                                <div style={{ color: `${COLORS.text}8C`, fontSize: 11 }}>
-                                  Drag in scene to move. Resize with the side handles.
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                className="room-secondary-chip is-danger"
-                                style={{ minWidth: 88 }}
-                                onClick={() => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id)}
-                              >
-                                Remove
-                              </button>
-                            </div>
-                            <div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
-                                <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
-                              </div>
-                              <Slider
-                                min={0.45}
-                                max={2.4}
-                                step={0.05}
-                                value={selectedOpeningEntity.width}
-                                onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { width: value })}
-                                tooltip={{ formatter: (value) => `${value} m` }}
-                                styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
-                              />
-                            </div>
-                            <div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
-                                <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
-                              </div>
-                              <Slider
-                                min={selectedOpening?.type === 'door' ? 1.8 : 0.6}
-                                max={selectedOpening?.type === 'door' ? 2.6 : 1.8}
-                                step={0.05}
-                                value={selectedOpeningEntity.height}
-                                onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { height: value })}
-                                tooltip={{ formatter: (value) => `${value} m` }}
-                                styles={{ track: { background: COLORS.action }, handle: { borderColor: COLORS.action } }}
-                              />
-                            </div>
-                            {selectedOpening?.type === 'door' && (
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-                                <button
-                                  type="button"
-                                  className={selectedOpeningEntity.swingDirection === 'left' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
-                                  onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'left' })}
-                                >
-                                  Swing L
-                                </button>
-                                <button
-                                  type="button"
-                                  className={selectedOpeningEntity.swingDirection === 'right' ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
-                                  onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: 'right' })}
-                                >
-                                  Swing R
-                                </button>
-                                <button
-                                  type="button"
-                                  className="room-secondary-chip"
-                                  onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { swingDirection: selectedOpeningEntity.swingDirection === 'left' ? 'right' : 'left' })}
-                                >
-                                  Flip
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
+          {selectedOpeningEntity && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px', borderRadius: 18, ...openingPanelTone }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4 }}>
+                    Precision Edit
+                  </div>
+                  <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>
+                    {selectedOpening?.type} selected
+                  </div>
+                  <div style={{ color: `${COLORS.text}8C`, fontSize: 11 }}>
+                    Drag on the wall, then fine-tune exact dimensions here.
+                  </div>
+                </div>
+                {renderOpeningModeButton(
+                  'Remove this opening',
+                  <DeleteOutlined />,
+                  false,
+                  () => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id),
+                  true
+                )}
+              </div>
+              {renderOpeningDimensionInputs()}
+              {renderDoorBehaviorControls()}
+              {renderWindowTypeControls()}
+            </div>
+          )}
                       </div>
                     </div>
                   )}
@@ -1645,7 +1912,8 @@ export default function RoomScene() {
           transform: translateX(0);
         }
         .room-floating-panel-inner {
-          height: 100%;
+          height: auto;
+          max-height: min(78vh, calc(100vh - 120px));
           border-radius: 34px;
           background: linear-gradient(180deg, rgba(58, 48, 43, 0.88) 0%, rgba(34, 27, 24, 0.96) 100%);
           border: 1px solid rgba(196, 154, 108, 0.14);
@@ -1700,6 +1968,7 @@ export default function RoomScene() {
         }
         .room-floating-panel-scroll {
           flex: 1;
+          max-height: calc(78vh - 84px);
           overflow-y: auto;
           padding: 16px 18px 20px;
         }
@@ -1721,6 +1990,16 @@ export default function RoomScene() {
           from {
             opacity: 0;
             transform: translateX(-12px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        @keyframes roomDoorPanelFade {
+          from {
+            opacity: 0;
+            transform: translateX(10px);
           }
           to {
             opacity: 1;

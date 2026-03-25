@@ -92,9 +92,17 @@ export default function ContextToolbar({
   const [tintOpen, setTintOpen] = useState(false);
   const [bubble,   setBubble]   = useState(null);
   const bubbleTimer             = useRef(null);
+  const [isPinned, setIsPinned] = useState(false);
+  const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 560);
 
   const [precisionMode, setPrecisionMode] = useState(null);
   const lastTapMs                         = useRef({});
+
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 560);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     if (toolbarRef.current && screenPos)
@@ -111,6 +119,7 @@ export default function ContextToolbar({
   }, [screenPos]);
 
   useEffect(() => { setPrecisionMode(null); }, [selectedItem?.id]);
+  useEffect(() => { if (!screenPos) setIsPinned(false); }, [screenPos]);
 
   useEffect(() => {
     if (tintOpen && selectedFurnitureMesh) {
@@ -133,6 +142,15 @@ export default function ContextToolbar({
   if (!screenPos) return null;
 
   const currentTint = normalizeTint(selectedItem?.tint);
+  const toolbarWidth = isNarrow
+    ? Math.min(window.innerWidth - 20, buttonsMaxWidth(type, true))
+    : buttonsMaxWidth(type, false);
+  const computedPos = isPinned
+    ? {
+        x: Math.max(10, Math.round((window.innerWidth - toolbarWidth) / 2)),
+        y: isNarrow ? 78 : 16,
+      }
+    : screenPos;
 
   const buttons = type === 'wall' ? WALL_BUTTONS
     : type === 'furniture' ? FURNITURE_BUTTONS
@@ -156,8 +174,8 @@ export default function ContextToolbar({
     if (!text) return;
     const r = btnEl?.getBoundingClientRect();
     setBubble(r
-      ? { text, x: r.left + r.width / 2, y: r.top }
-      : { text, x: (screenPos.x ?? 0) + 100, y: screenPos.y ?? 0 },
+      ? { text, x: r.left + r.width / 2, y: isPinned ? r.bottom + 8 : r.top, placeBelow: isPinned || isNarrow }
+      : { text, x: (computedPos.x ?? 0) + 100, y: computedPos.y ?? 0, placeBelow: isPinned || isNarrow },
     );
     bubbleTimer.current = setTimeout(() => setBubble(null), 3000);
   };
@@ -205,8 +223,9 @@ export default function ContextToolbar({
         ref={toolbarRef}
         style={{
           position:       'fixed',
-          left:           screenPos.x,
-          top:            screenPos.y,
+          left:           computedPos.x,
+          top:            computedPos.y,
+          width:          toolbarWidth,
           zIndex:         9999,
           display:        'flex',
           flexDirection:  'column',
@@ -221,7 +240,34 @@ export default function ContextToolbar({
           overflow:       'hidden',
         }}
       >
-        <div style={{ display: 'flex', gap: 2, padding: '5px 6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isNarrow ? 4 : 2, padding: isNarrow ? '6px' : '5px 6px' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setIsPinned((prev) => {
+                const next = !prev;
+                showBubble(next ? 'Toolbar pinned to top' : 'Toolbar follows selection again', toolbarRef.current);
+                return next;
+              });
+            }}
+            title={isPinned ? 'Unpin toolbar' : 'Pin toolbar to top'}
+            style={{
+              width: isNarrow ? 34 : 36,
+              minWidth: isNarrow ? 34 : 36,
+              height: isNarrow ? 34 : 36,
+              borderRadius: 999,
+              border: isPinned ? '1px solid rgba(196,154,108,0.55)' : '1px solid rgba(255,255,255,0.08)',
+              background: isPinned ? 'rgba(196,154,108,0.18)' : 'rgba(255,255,255,0.04)',
+              color: isPinned ? '#C49A6C' : 'rgba(232,224,216,0.8)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <PinIcon pinned={isPinned} />
+          </button>
           {buttons.map((btn, i) => {
             const gizmoKey   = btn.action.startsWith('gizmo:') ? btn.action.split(':')[1] : null;
             const isActive   = (gizmoKey && gizmoKey === gizmoMode)
@@ -236,6 +282,7 @@ export default function ContextToolbar({
                 btn={btn}
                 active={isActive}
                 precisionActive={precActive}
+                compact={isNarrow}
                 onClick={(e) => handle(btn, e.currentTarget)}
               />
             );
@@ -305,7 +352,7 @@ export default function ContextToolbar({
       )}
 
       {/* ── Speech bubble ─────────────────────────────────────────── */}
-      {bubble && <SpeechBubble text={bubble.text} x={bubble.x} y={bubble.y} />}
+      {bubble && <SpeechBubble text={bubble.text} x={bubble.x} y={bubble.y} placeBelow={bubble.placeBelow} />}
     </>
   );
 }
@@ -737,7 +784,7 @@ function TintSlider({ label, value, min, max, step, unit, color, onChange }) {
 }
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
-function Icon({ name }) {
+function Icon({ name, size = 15 }) {
   const paths = {
     drag:    'M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
     swap:    'M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z',
@@ -752,14 +799,14 @@ function Icon({ name }) {
     tint:    'M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z',
   };
   return (
-    <svg viewBox="0 0 24 24" width={15} height={15} fill="currentColor">
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor">
       <path d={paths[name] || ''} />
     </svg>
   );
 }
 
 // ── ToolbarBtn ─────────────────────────────────────────────────────────────────
-function ToolbarBtn({ btn, active, precisionActive, onClick }) {
+function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
   const btnRef = useRef(null);
   return (
     <button
@@ -770,7 +817,7 @@ function ToolbarBtn({ btn, active, precisionActive, onClick }) {
       onMouseLeave={() => gsap.to(btnRef.current, { scale: 1,   duration: 0.1 })}
       style={{
         display:       'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding:       '6px 9px', borderRadius: 8,
+        padding:       compact ? '5px 6px' : '6px 9px', borderRadius: 8,
         border:        active || precisionActive
           ? `1px solid rgba(196,154,108,${precisionActive ? '0.75' : '0.5'})`
           : '1px solid transparent',
@@ -780,15 +827,18 @@ function ToolbarBtn({ btn, active, precisionActive, onClick }) {
           : 'transparent',
         color:         btn.danger ? '#ff6b6b' : (active || precisionActive) ? '#C49A6C' : '#E8E0D8',
         cursor:        'pointer', transition: 'background 0.12s',
-        minWidth:      34, minHeight: 44, position: 'relative',
+        minWidth:      compact ? 30 : 34, minHeight: compact ? 36 : 44, position: 'relative',
+        flex:          compact ? '1 1 0' : '0 0 auto',
       }}
       onMouseOver={(e) => { if (!btn.danger && !active) e.currentTarget.style.background = 'rgba(196,154,108,0.13)'; }}
       onMouseOut={(e)  => { if (!btn.danger && !active) e.currentTarget.style.background = 'transparent'; }}
     >
-      <Icon name={btn.iconName} />
-      <span style={{ fontSize: 8, fontFamily: 'Inter, sans-serif', opacity: 0.65, letterSpacing: '0.05em' }}>
-        {btn.label}
-      </span>
+      <Icon name={btn.iconName} size={compact ? 14 : 15} />
+      {!compact && (
+        <span style={{ fontSize: 8, fontFamily: 'Inter, sans-serif', opacity: 0.65, letterSpacing: '0.05em' }}>
+          {btn.label}
+        </span>
+      )}
       {precisionActive && (
         <div style={{
           position: 'absolute', top: 5, right: 5,
@@ -801,7 +851,7 @@ function ToolbarBtn({ btn, active, precisionActive, onClick }) {
 }
 
 // ── SpeechBubble ───────────────────────────────────────────────────────────────
-function SpeechBubble({ text, x, y }) {
+function SpeechBubble({ text, x, y, placeBelow = false }) {
   const ref                   = useRef(null);
   const [visible, setVisible] = useState(false);
   const [pos, setPos]         = useState({ left: x, top: y });
@@ -813,12 +863,14 @@ function SpeechBubble({ text, x, y }) {
         const h = ref.current.offsetHeight;
         setPos({
           left: Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)),
-          top:  Math.max(8, y - h - 14),
+          top:  placeBelow
+            ? Math.min(window.innerHeight - h - 8, y + 4)
+            : Math.max(8, y - h - 14),
         });
         setVisible(true);
       }
     });
-  }, [x, y]);
+  }, [placeBelow, x, y]);
 
   return (
     <div
@@ -835,8 +887,44 @@ function SpeechBubble({ text, x, y }) {
       }}
     >
       {text}
-      <div style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '6px solid rgba(196,154,108,0.5)' }} />
-      <div style={{ position: 'absolute', bottom: -5, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(12,9,7,0.97)' }} />
+      {placeBelow ? (
+        <>
+          <div style={{ position: 'absolute', top: -6, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderBottom: '6px solid rgba(196,154,108,0.5)' }} />
+          <div style={{ position: 'absolute', top: -5, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderBottom: '5px solid rgba(12,9,7,0.97)' }} />
+        </>
+      ) : (
+        <>
+          <div style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '6px solid rgba(196,154,108,0.5)' }} />
+          <div style={{ position: 'absolute', bottom: -5, left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(12,9,7,0.97)' }} />
+        </>
+      )}
     </div>
+  );
+}
+
+function buttonsMaxWidth(type, compact) {
+  if (compact) return type === 'wall' ? 420 : type === 'furniture' ? 280 : 200;
+  if (type === 'wall') return 470;
+  if (type === 'furniture') return 310;
+  return TOOLBAR_W[type] ?? 300;
+}
+
+function PinIcon({ pinned }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={15}
+      height={15}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ transform: pinned ? 'rotate(0deg)' : 'rotate(28deg)' }}
+    >
+      <path d="M9 3h6" />
+      <path d="M10 3v6l-3 3v1h10v-1l-3-3V3" />
+      <path d="M12 13v8" />
+    </svg>
   );
 }
