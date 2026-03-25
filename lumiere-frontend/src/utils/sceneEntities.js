@@ -54,6 +54,8 @@ export function createWindowEntity(overrides = {}) {
     wallId: null,
     type: 'window',
     windowStyle: 'sliding',
+    hingeSide: 'left',
+    opensInward: true,
     offsetAlongWall: 1.2,
     width: 1.2,
     height: 1.2,

@@ -495,6 +495,7 @@ export default function RoomScene() {
 
     const options = [
       { key: 'sliding', label: 'Sliding' },
+      { key: 'triple-sliding', label: '3-Panel Sliding' },
       { key: 'casement', label: 'Casement' },
       { key: 'fixed', label: 'Fixed' },
     ];
@@ -504,7 +505,7 @@ export default function RoomScene() {
         <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
           Window Type
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
           {options.map((option) => (
             <button
               key={option.key}
@@ -519,6 +520,49 @@ export default function RoomScene() {
       </div>
     );
   }, [selectedOpening, selectedOpeningEntity, updateWallOpening]);
+
+  const renderWindowBehaviorControls = useCallback(() => {
+    if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
+    if ((selectedOpeningEntity.windowStyle ?? 'sliding') !== 'casement') return null;
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+          Casement Controls
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {renderOpeningModeButton(
+              'Hinge on the left side',
+              <LeftOutlined />,
+              (selectedOpeningEntity.hingeSide ?? 'left') === 'left',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { hingeSide: 'left' })
+            )}
+            {renderOpeningModeButton(
+              'Hinge on the right side',
+              <RightOutlined />,
+              (selectedOpeningEntity.hingeSide ?? 'left') === 'right',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { hingeSide: 'right' })
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {renderOpeningModeButton(
+              'Open inward',
+              <LoginOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === true,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: true })
+            )}
+            {renderOpeningModeButton(
+              'Open outward',
+              <LogoutOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === false,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: false })
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }, [renderOpeningModeButton, selectedOpening, selectedOpeningEntity, updateWallOpening]);
 
   const renderMobileDoorEditor = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
@@ -942,6 +986,7 @@ export default function RoomScene() {
               {renderOpeningDimensionInputs()}
               {renderDoorBehaviorControls()}
               {renderWindowTypeControls()}
+              {renderWindowBehaviorControls()}
             </div>
           )}
         </div>
@@ -1424,6 +1469,7 @@ export default function RoomScene() {
                 <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {renderOpeningDimensionInputs()}
                   {renderWindowTypeControls()}
+                  {renderWindowBehaviorControls()}
                 </div>
               )}
             </div>
@@ -1647,6 +1693,7 @@ export default function RoomScene() {
               {renderOpeningDimensionInputs()}
               {renderDoorBehaviorControls()}
               {renderWindowTypeControls()}
+              {renderWindowBehaviorControls()}
             </div>
           )}
                       </div>

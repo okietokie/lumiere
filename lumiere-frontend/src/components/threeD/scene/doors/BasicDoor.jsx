@@ -36,7 +36,7 @@ const BasicDoor = forwardRef(function BasicDoor(
   const localPivotRef = useRef(null);
   const openAngle = Math.PI / 2;
   const closedAngle = 0;
-  const easing = 0.12;
+  const easing = 0.22;
   const toggleDoor = useCallback((e) => {
     e.stopPropagation();
     setIsOpen((prev) => !prev);
