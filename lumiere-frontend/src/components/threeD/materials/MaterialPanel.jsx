@@ -1,4 +1,3 @@
-// src/components/threeD/materials/MaterialPanel.jsx
 import React, { useState } from 'react';
 import { Slider, Button, Popover, Segmented } from 'antd';
 import {
@@ -9,8 +8,6 @@ import {
 } from '@ant-design/icons';
 import { COLORS } from '../../../utils/colors';
 import { TEXTURE_LIBRARY, DESIGN_THEMES } from '../../../hooks/useMaterials';
-
-// ── Surface tab keys ──────────────────────────────────────────────────────────
 const SURFACES = [
   { key: 'wall',    label: 'Wall',    icon: <LayoutOutlined /> },
   { key: 'floor',   label: 'Floor',   icon: <BgColorsOutlined /> },
@@ -29,8 +26,6 @@ export default function MaterialPanel({
 }) {
   const [activeSurface, setActiveSurface] = useState('wall');
   const [applyToAll, setApplyToAll]       = useState(false);
-
-  // The material currently being edited
   const currentMat = (() => {
     if (activeSurface === 'floor')   return floorMaterial;
     if (activeSurface === 'ceiling') return ceilingMaterial;
@@ -60,7 +55,7 @@ export default function MaterialPanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/*  Header */}
       <div style={{
         padding: '18px 18px 16px',
         borderRadius: 18,
@@ -77,7 +72,7 @@ export default function MaterialPanel({
         </div>
       </div>
 
-      {/* ── Surface selector ────────────────────────────────────────────── */}
+      {/*  Surface selector */}
       <Segmented
         options={SURFACES.map((s) => ({ label: s.label, value: s.key, icon: s.icon }))}
         value={activeSurface}
@@ -87,7 +82,7 @@ export default function MaterialPanel({
       />
 
       <div id="mat-walls" />
-      {/* ── Wall: apply scope ────────────────────────────────────────────── */}
+      {/*  Wall: apply scope */}
       {activeSurface === 'wall' && (
         <div style={{
           display: 'flex', gap: 6,
@@ -125,7 +120,7 @@ export default function MaterialPanel({
         </div>
       )}
 
-      {/* ── Status hint ─────────────────────────────────────────────────── */}
+      {/*  Status hint */}
       {activeSurface === 'wall' && !selectedWall && !applyToAll && (
         <div style={{
           color: COLORS.secondary, fontSize: 12,
@@ -137,7 +132,7 @@ export default function MaterialPanel({
         </div>
       )}
 
-      {/* ── Texture grid ────────────────────────────────────────────────── */}
+      {/*  Texture grid */}
       <Section label="Textures">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
           {textures.map((tex) => {
@@ -155,7 +150,7 @@ export default function MaterialPanel({
         </div>
       </Section>
 
-      {/* ── PBR sliders ─────────────────────────────────────────────────── */}
+      {/*  PBR sliders */}
       {currentMat && (
         <Section label="Material Properties">
 
@@ -201,7 +196,7 @@ export default function MaterialPanel({
         </Section>
       )}
 
-      {/* ── Design themes ────────────────────────────────────────────────── */}
+      {/*  Design themes */}
       <Section label="Room Themes">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {DESIGN_THEMES.map((theme) => (
@@ -218,8 +213,6 @@ export default function MaterialPanel({
     </div>
   );
 }
-
-// ── Sub-components ────────────────────────────────────────────────────────────
 
 function Section({ label, children }) {
   return (
@@ -328,3 +321,4 @@ function ThemeRow({ theme, isActive, onClick }) {
     </button>
   );
 }
+

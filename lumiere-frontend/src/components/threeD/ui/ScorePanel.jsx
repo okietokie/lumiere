@@ -1,6 +1,3 @@
-// src/components/ui/ScorePanel.jsx
-// Fixed overlay in the 3D scene showing live layout score + suggestions.
-// Lives outside the Canvas — pure DOM.
 import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { COLORS } from '../../../utils/colors';
@@ -62,7 +59,7 @@ export default function ScorePanel({ score, suggestions, visible }) {
         pointerEvents: 'auto',
       }}
     >
-      {/* ── Suggestions panel (expandable) ─────────────────────────── */}
+      {/*  Suggestions panel (expandable)  */}
       {open && suggestions.length > 0 && (
         <div style={{
           width:        280,
@@ -118,7 +115,7 @@ export default function ScorePanel({ score, suggestions, visible }) {
         </div>
       )}
 
-      {/* ── Score badge ────────────────────────────────────────────── */}
+      {/*  Score badge  */}
       <button
         ref={panelRef}
         onClick={() => setOpen((o) => !o)}
@@ -174,8 +171,6 @@ export default function ScorePanel({ score, suggestions, visible }) {
     </div>
   );
 }
-
-// ── SVG ring showing score as arc ─────────────────────────────────────────
 function ScoreRing({ score, color }) {
   const r   = 16;
   const circ = 2 * Math.PI * r;
@@ -199,3 +194,4 @@ function ScoreRing({ score, color }) {
     </svg>
   );
 }
+

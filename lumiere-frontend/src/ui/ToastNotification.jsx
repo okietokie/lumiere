@@ -1,8 +1,3 @@
-// src/components/ui/ToastNotification.jsx
-// Lightweight toast system — no external libs.
-// Usage: import { useToast } from './ToastNotification'
-//        const toast = useToast();
-//        toast.show('Title', 'Message', 'info'); // info | success | warning
 import { useState, useCallback, useRef, createContext, useContext } from 'react';
 
 const ToastContext = createContext(null);
@@ -36,8 +31,20 @@ export function ToastProvider({ children }) {
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 350);
   }, []);
 
+  const info = useCallback((message, title = 'Info') => {
+    show(title, message, 'info');
+  }, [show]);
+
+  const success = useCallback((message, title = 'Success') => {
+    show(title, message, 'success');
+  }, [show]);
+
+  const error = useCallback((message, title = 'Warning') => {
+    show(title, message, 'warning');
+  }, [show]);
+
   return (
-    <ToastContext.Provider value={{ show }}>
+    <ToastContext.Provider value={{ show, info, success, error }}>
       {children}
       {/* Toast container — fixed bottom-left, above score panel */}
       <div style={{

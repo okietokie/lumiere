@@ -1,11 +1,3 @@
-# app/routes/model_routes.py
-# Performance edition.
-#
-# New endpoints:
-#   GET /api/models/manifest  — full model list with size_bytes + priority score.
-#                               Frontend uses this to prefetch small/priority models first.
-#   GET /api/models/list      — unchanged, returns all models with B2/CDN URLs.
-#   POST /api/models/register — unchanged, called by upload script.
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -91,3 +83,4 @@ async def upload_model_preview(model_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Could not upload preview: {exc}")
 
     return {"preview_path": preview_path, "preview_url": preview_url}
+

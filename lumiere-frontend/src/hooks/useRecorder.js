@@ -1,28 +1,10 @@
-// src/hooks/useRecorder.js
-//
-// Dual-mode recorder for Lumiere Maison.
-//
-// AUTO mode  — animates a smooth 360° orbit then stops automatically.
-//              The resulting blob is uploaded to the backend and a URL
-//              is returned so it can be saved with the project.
-//
-// MANUAL mode — starts recording immediately; user controls the camera;
-//               user presses stop; the blob is downloaded to their device.
-//
-// Both modes work by calling canvas.captureStream(fps) — no external libs.
-// The canvas ref must come from the R3F <Canvas> element (preserveDrawingBuffer
-// does NOT need to be true for captureStream — it's a different API path).
 
 import { useState, useRef, useCallback } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-
-// Resolution caps
 const DESKTOP_W = 1280, DESKTOP_H = 720;
 const MOBILE_W  = 854,  MOBILE_H  = 480;
 const FPS       = 30;
-
-// Auto-capture: how long the full 360° orbit takes (ms)
 const AUTO_DURATION_MS = 6000;
 
 function isMobile() {
@@ -48,7 +30,6 @@ function buildRecorder(canvas) {
 
 export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projectId }) {
   const [recState,    setRecState]    = useState('idle');
-  // idle | auto-starting | auto-recording | manual-recording | processing | done | error
   const [progress,    setProgress]    = useState(0);   // 0-100, auto mode only
   const [lastVideoUrl, setLastVideoUrl] = useState(null); // object URL of last recording
 
@@ -57,8 +38,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
   const animFrameRef = useRef(null);
   const startTimeRef = useRef(0);
   const autoResolveRef = useRef(null);
-
-  // ── Cleanup ────────────────────────────────────────────────────────────────
   const cleanup = useCallback(() => {
     cancelAnimationFrame(animFrameRef.current);
     if (mediaRecRef.current && mediaRecRef.current.state !== 'inactive') {
@@ -66,8 +45,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
     }
     chunksRef.current = [];
   }, []);
-
-  // ── Upload blob to backend (auto mode) ────────────────────────────────────
   const uploadBlob = useCallback(async (blob) => {
     if (!projectId) return null;
     const fd = new FormData();
@@ -85,8 +62,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
       return null;
     }
   }, [projectId]);
-
-  // ── Download blob locally (manual mode) ──────────────────────────────────
   const downloadBlob = useCallback((blob, filename = 'lumiere_recording.webm') => {
     const url = URL.createObjectURL(blob);
     setLastVideoUrl(url);
@@ -96,8 +71,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
     a.click();
     // Don't revoke immediately — keep for the preview player
   }, []);
-
-  // ── Shared: collect chunks ────────────────────────────────────────────────
   function attachListeners(recorder, onStop) {
     chunksRef.current = [];
     recorder.ondataavailable = (e) => {
@@ -110,8 +83,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
       onStop(blob);
     };
   }
-
-  // ── AUTO CAPTURE ──────────────────────────────────────────────────────────
   const startAutoCapture = useCallback(async () => {
     const canvas = getCanvas(canvasWrapperRef);
     if (!canvas) { setRecState('error'); return; }
@@ -119,8 +90,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
     setRecState('auto-starting');
     setProgress(0);
     cancelAnimationFrame(animFrameRef.current);
-
-    // Snapshot the orbit controls' current state so we can restore it
     const ctrl   = orbitControlsRef?.current;
     const origAutoRotate = ctrl?.autoRotate ?? false;
     const origEnabled    = ctrl?.enabled    ?? true;
@@ -156,8 +125,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
         ctrl.autoRotate = true;
         ctrl.autoRotateSpeed = 360 / (AUTO_DURATION_MS / 1000); // full 360° in AUTO_DURATION_MS
       }
-
-      // Progress ticker + auto-stop
       const tick = () => {
         const elapsed = performance.now() - startTimeRef.current;
         const pct     = Math.min(100, (elapsed / AUTO_DURATION_MS) * 100);
@@ -173,8 +140,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
       animFrameRef.current = requestAnimationFrame(tick);
     });
   }, [canvasWrapperRef, orbitControlsRef, uploadBlob]);
-
-  // ── MANUAL RECORD ─────────────────────────────────────────────────────────
   const startManualRecording = useCallback(() => {
     const canvas = getCanvas(canvasWrapperRef);
     if (!canvas) { setRecState('error'); return; }
@@ -199,8 +164,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
       mediaRecRef.current.stop();
     }
   }, []);
-
-  // ── CANCEL ────────────────────────────────────────────────────────────────
   const cancelRecording = useCallback(() => {
     cleanup();
     setRecState('idle');
@@ -208,8 +171,6 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
     autoResolveRef.current?.(null);
     autoResolveRef.current = null;
   }, [cleanup]);
-
-  // ── RESET to idle (after done/error) ──────────────────────────────────────
   const resetRecorder = useCallback(() => {
     setRecState('idle');
     setProgress(0);

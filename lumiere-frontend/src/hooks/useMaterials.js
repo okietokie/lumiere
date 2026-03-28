@@ -1,4 +1,3 @@
-// src/hooks/useMaterials.js
 import { useState, useCallback } from 'react';
 
 export const TEXTURE_LIBRARY = {

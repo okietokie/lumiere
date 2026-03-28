@@ -1,4 +1,3 @@
-# main.py
 import os
 import logging
 import httpx
@@ -6,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 
@@ -16,12 +16,15 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-FRONTEND_URL  = os.getenv("FRONTEND_URL",  "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 B2_PUBLIC_URL = os.getenv("B2_PUBLIC_URL", "")
-CDN_BASE      = os.getenv("CDN_BASE",      "")
+CDN_BASE = os.getenv("CDN_BASE", "")
+VIDEOS_DIR = os.getenv("VIDEOS_DIR", "/tmp/lumiere_videos")
+PROJECT_ASSETS_DIR = os.getenv("PROJECT_ASSETS_DIR", "/tmp/lumiere_project_assets")
 
-# ── Shared httpx client (connection pooling, keeps connections alive) ──────────
+# Reuses a single HTTP client for proxy requests.
 _http_client: httpx.AsyncClient | None = None
+
 
 def get_http_client() -> httpx.AsyncClient:
     global _http_client
@@ -51,46 +54,43 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS ───────────────────────────────────────────────────────────────────────
-# IMPORTANT: allow_origins=["*"] and allow_credentials=True CANNOT be combined.
-# The CORS spec forbids it — browsers reject responses with both.
-# Since GLB fetches don't need cookies/credentials, we use wildcard + no credentials.
+# Allows model fetches from any origin without credentials.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # all origins allowed
-    allow_credentials=False,   # MUST be False when allow_origins=["*"]
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["Content-Length", "Cache-Control", "ETag"],
 )
 
-app.include_router(auth.router,           prefix="/api/auth",     tags=["Authentication"])
-app.include_router(model_routes.router,   prefix="/api/models",   tags=["Models"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(model_routes.router, prefix="/api/models", tags=["Models"])
 app.include_router(project_routes.router, prefix="/api/projects", tags=["Projects"])
+os.makedirs(VIDEOS_DIR, exist_ok=True)
+os.makedirs(PROJECT_ASSETS_DIR, exist_ok=True)
+app.mount("/api/videos", StaticFiles(directory=VIDEOS_DIR), name="videos")
+app.mount("/api/project-assets", StaticFiles(directory=PROJECT_ASSETS_DIR), name="project-assets")
 
 
-# ── Proxy endpoint ─────────────────────────────────────────────────────────────
-# Fallback only — used when a model URL is a raw B2 URL (not CDN).
-# If VITE_CDN_BASE is set in the frontend build, this endpoint is never called
-# because the browser fetches GLBs directly from the CDN.
+# Proxies direct B2 model requests when the CDN URL is unavailable.
 @app.get("/api/proxy/models/{file_path:path}")
 async def proxy_model(file_path: str, request: Request):
     b2_url = f"{B2_PUBLIC_URL.rstrip('/')}/{file_path}"
     logger.info(f"Proxy request: {file_path}")
 
-    # Handle browser preflight (OPTIONS) — middleware handles it but be explicit
+    # Handles explicit preflight requests.
     if request.method == "OPTIONS":
         return Response(
             status_code=200,
             headers={
-                "Access-Control-Allow-Origin":  "*",
+                "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods": "GET, OPTIONS",
                 "Access-Control-Allow-Headers": "*",
-                "Access-Control-Max-Age":       "86400",
+                "Access-Control-Max-Age": "86400",
             },
         )
 
-    # Check ETag for 304 Not Modified
     client_etag = request.headers.get("if-none-match", "")
 
     http = get_http_client()
@@ -105,11 +105,10 @@ async def proxy_model(file_path: str, request: Request):
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail="Storage error")
 
-    data  = resp.content
+    data = resp.content
     import hashlib
-    etag  = f'"{hashlib.md5(data).hexdigest()}"'
+    etag = f'"{hashlib.md5(data).hexdigest()}"'
 
-    # Return 304 if client already has this version
     if client_etag and client_etag == etag:
         return Response(
             status_code=304,
@@ -124,11 +123,10 @@ async def proxy_model(file_path: str, request: Request):
         content=data,
         media_type="model/gltf-binary",
         headers={
-            # These CORS headers are set explicitly on the response as a
-            # safety net — the middleware should add them, but explicit is safer.
-            "Access-Control-Allow-Origin":  "*",
-            "Cache-Control": "public, max-age=2592000, immutable",  # 30 days
-            "ETag":          etag,
+            # Mirrors CORS headers on the proxied response.
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=2592000, immutable",
+            "ETag": etag,
             "Content-Length": str(len(data)),
         },
     )
@@ -137,6 +135,7 @@ async def proxy_model(file_path: str, request: Request):
 @app.get("/")
 def root():
     return {"status": "Lumiere backend running", "frontend_url": FRONTEND_URL}
+
 
 @app.get("/api/ready")
 def ready():

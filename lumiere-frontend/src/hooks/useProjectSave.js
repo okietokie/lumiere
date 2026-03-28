@@ -1,54 +1,89 @@
-// src/hooks/useProjectSave.js
-// FIX: furniture items now save `url` and `category` fields.
-// Previously only `filename/name/position/rotation/scale` were saved,
-// so on restore `url` was undefined and useGLTF received a relative path
-// (/sofa/sofa-7.glb) which the frontend server returned as HTML → crash.
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { createRoomEntity } from '../utils/sceneEntities';
+import { generateLayoutWalls } from '../utils/roomLayout';
 
-const API_BASE     = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-const AUTOSAVE_MS  = 30_000;
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const AUTOSAVE_MS = 30_000;
 
-// ── Assemble scene JSON ───────────────────────────────────────────────────────
-export function buildSceneData({ walls, placedItems, floorMaterial, ceilingMaterial, lightingState }) {
+function buildRoomsFromWalls(walls = []) {
+  if (!walls.length) return [createRoomEntity()];
+
+  const points = walls.flatMap(({ start = [0, 0], end = [0, 0] }) => [start, end]);
+  const xs = points.map(([x]) => x);
+  const zs = points.map(([, z]) => z);
+  const heights = walls.map((wall) => wall.height).filter((value) => Number.isFinite(value));
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+
+  return [createRoomEntity({
+    name: 'Room 1',
+    type: 'room',
+    x: (minX + maxX) / 2,
+    z: (minZ + maxZ) / 2,
+    width: Math.max(maxX - minX, 1),
+    depth: Math.max(maxZ - minZ, 1),
+    height: heights.length ? Math.max(...heights) : 3,
+  })];
+}
+
+export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState }) {
   return {
-    version:   '1.1',   // bumped — now includes url + category in furniture
-    savedAt:   new Date().toISOString(),
-    walls:     walls.map(({ id, start, end, height, thickness, color, roughness, metalness, textureId }) =>
-      ({ id, start, end, height, thickness, color, roughness, metalness, textureId })),
-    furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale }) =>
-      // url and category are now persisted so restoring works on any domain
-      ({ id, filename, name, url: url || null, category: category || null, position, rotation, scale })),
+    version: '1.2',
+    savedAt: new Date().toISOString(),
+    rooms: rooms.map(({ id, name, type, x, z, width, depth, height }) => ({
+      id, name, type, x, z, width, depth, height,
+    })),
+    walls: walls.map(({ id, roomId, start, end, height, thickness, color, roughness, metalness, textureId }) => ({
+      id, roomId, start, end, height, thickness, color, roughness, metalness, textureId,
+    })),
+    furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale }) => ({
+      id,
+      filename,
+      name,
+      url: url || null,
+      category: category || null,
+      position,
+      rotation,
+      scale,
+    })),
     materials: {
-      floor:   floorMaterial,
+      floor: floorMaterial,
       ceiling: ceilingMaterial,
     },
     lighting: {
-      timeOfDay:        lightingState.timeOfDay,
-      activeMood:       lightingState.activeMood,
+      timeOfDay: lightingState.timeOfDay,
+      activeMood: lightingState.activeMood,
       globalBrightness: lightingState.globalBrightness,
-      placedLights:     lightingState.placedLights.map(({ id, type, position, intensity, color, distance, angle, enabled }) =>
-        ({ id, type, position, intensity, color, distance, angle, enabled })),
+      placedLights: lightingState.placedLights.map(({ id, type, position, intensity, color, distance, angle, enabled }) => ({
+        id, type, position, intensity, color, distance, angle, enabled,
+      })),
     },
   };
 }
 
-// ── Restore scene from JSON ───────────────────────────────────────────────────
-export function applySceneData(sceneData, { setWalls, setPlacedItems, setFloor, setCeiling, lightingState }) {
+export function applySceneData(sceneData, { setRooms, setWalls, setPlacedItems, setFloor, setCeiling, lightingState }) {
   if (!sceneData) return;
-  if (sceneData.walls)     setWalls(sceneData.walls);
+  const rooms = sceneData.rooms?.length ? sceneData.rooms : buildRoomsFromWalls(sceneData.walls);
+  setRooms(rooms);
+  if (rooms.length) {
+    setWalls(generateLayoutWalls(rooms, sceneData.walls ?? []));
+  } else if (sceneData.walls) {
+    setWalls(sceneData.walls);
+  }
   if (sceneData.furniture) setPlacedItems(sceneData.furniture);
-  if (sceneData.materials?.floor)   setFloor(sceneData.materials.floor);
+  if (sceneData.materials?.floor) setFloor(sceneData.materials.floor);
   if (sceneData.materials?.ceiling) setCeiling(sceneData.materials.ceiling);
   if (sceneData.lighting) {
-    const l = sceneData.lighting;
-    if (l.timeOfDay        !== undefined) lightingState.setTimeOfDay(l.timeOfDay);
-    if (l.activeMood)                     lightingState.applyMood(l.activeMood);
-    if (l.globalBrightness !== undefined) lightingState.setGlobalBrightness(l.globalBrightness);
-    if (l.placedLights)                   lightingState.setPlacedLights(l.placedLights);
+    const lighting = sceneData.lighting;
+    if (lighting.timeOfDay !== undefined) lightingState.setTimeOfDay(lighting.timeOfDay);
+    if (lighting.activeMood) lightingState.applyMood(lighting.activeMood);
+    if (lighting.globalBrightness !== undefined) lightingState.setGlobalBrightness(lighting.globalBrightness);
+    if (lighting.placedLights) lightingState.setPlacedLights(lighting.placedLights);
   }
 }
 
-// ── Canvas snapshot ───────────────────────────────────────────────────────────
 export function takeSnapshot(canvasWrapperEl) {
   const canvas = canvasWrapperEl?.tagName === 'CANVAS'
     ? canvasWrapperEl
@@ -64,8 +99,8 @@ export function takeSnapshot(canvasWrapperEl) {
   }
 }
 
-// ── Main hook ─────────────────────────────────────────────────────────────────
 export default function useProjectSave({
+  rooms, setRooms,
   walls, setWalls,
   placedItems, setPlacedItems,
   floorMaterial, setFloorMaterial,
@@ -75,13 +110,21 @@ export default function useProjectSave({
   currentProjectId,
   setCurrentProjectId,
 }) {
-  const [saveStatus,  setSaveStatus]  = useState('idle');
+  const [saveStatus, setSaveStatus] = useState('idle');
   const [projectName, setProjectName] = useState('Untitled Room');
+  const [shareUrl, setShareUrl] = useState('');
+  const [modelAssets, setModelAssets] = useState({
+    glb_url: null,
+    usdz_url: null,
+    glb_filename: null,
+    usdz_filename: null,
+  });
+  const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: 'idle', usdz: 'idle' });
   const autosaveTimer = useRef(null);
 
   const getSceneData = useCallback(() => buildSceneData({
-    walls, placedItems, floorMaterial, ceilingMaterial, lightingState,
-  }), [walls, placedItems, floorMaterial, ceilingMaterial, lightingState]);
+    rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState,
+  }), [rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState]);
 
   const getCanvas = useCallback(() => {
     if (canvasRef?.current) return canvasRef.current;
@@ -91,7 +134,7 @@ export default function useProjectSave({
   const saveProject = useCallback(async (name = projectName, withThumbnail = true) => {
     setSaveStatus('saving');
     try {
-      const scene     = getSceneData();
+      const scene = getSceneData();
       const thumbnail = await new Promise((resolve) => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -103,15 +146,15 @@ export default function useProjectSave({
       let response;
       if (currentProjectId) {
         response = await fetch(`${API_BASE}/api/projects/${currentProjectId}`, {
-          method:  'PUT',
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ name, scene, thumbnail }),
+          body: JSON.stringify({ name, scene, thumbnail }),
         });
       } else {
         response = await fetch(`${API_BASE}/api/projects/save`, {
-          method:  'POST',
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ name, scene, thumbnail }),
+          body: JSON.stringify({ name, scene, thumbnail }),
         });
       }
 
@@ -119,6 +162,13 @@ export default function useProjectSave({
       const data = await response.json();
       setCurrentProjectId(data.id);
       setProjectName(name);
+      setShareUrl(data.share_url || '');
+      setModelAssets(data.model_assets || {
+        glb_url: null,
+        usdz_url: null,
+        glb_filename: null,
+        usdz_filename: null,
+      });
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2500);
       return data;
@@ -129,35 +179,38 @@ export default function useProjectSave({
     }
   }, [projectName, currentProjectId, getSceneData, getCanvas, setCurrentProjectId]);
 
-  const downloadSnapshot = useCallback((mode = 'current') => {
+  const downloadSnapshot = useCallback(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const canvas = getCanvas();
-        const url    = takeSnapshot(canvas);
-        if (!url) { alert('Snapshot failed — make sure the 3D scene is visible.'); return; }
-        const a      = document.createElement('a');
-        a.href       = url;
-        a.download   = `${projectName.replace(/\s+/g, '_')}_snapshot.png`;
-        a.click();
+        const url = takeSnapshot(canvas);
+        if (!url) {
+          alert('Snapshot failed - make sure the 3D scene is visible.');
+          return;
+        }
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${projectName.replace(/\s+/g, '_')}_snapshot.png`;
+        link.click();
       });
     });
   }, [getCanvas, projectName]);
 
   const exportJSON = useCallback(() => {
     const scene = getSceneData();
-    const blob  = new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' });
-    const url   = URL.createObjectURL(blob);
-    const a     = document.createElement('a');
-    a.href      = url;
-    a.download  = `${projectName.replace(/\s+/g, '_')}.lumiere.json`;
-    a.click();
+    const blob = new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${projectName.replace(/\s+/g, '_')}.lumiere.json`;
+    link.click();
     URL.revokeObjectURL(url);
   }, [getSceneData, projectName]);
 
   const importJSON = useCallback(() => {
-    const input   = document.createElement('input');
-    input.type    = 'file';
-    input.accept  = '.json,.lumiere.json';
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.lumiere.json';
     input.onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -166,8 +219,10 @@ export default function useProjectSave({
         try {
           const data = JSON.parse(ev.target.result);
           applySceneData(data, {
-            setWalls, setPlacedItems,
-            setFloor:   setFloorMaterial,
+            setRooms,
+            setWalls,
+            setPlacedItems,
+            setFloor: setFloorMaterial,
             setCeiling: setCeilingMaterial,
             lightingState,
           });
@@ -180,23 +235,94 @@ export default function useProjectSave({
       reader.readAsText(file);
     };
     input.click();
-  }, [setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
+  }, [setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
   const loadProject = useCallback(async (projectId) => {
-    const res  = await fetch(`${API_BASE}/api/projects/${projectId}`);
+    const res = await fetch(`${API_BASE}/api/projects/${projectId}`);
     const data = await res.json();
     if (data.scene) {
       applySceneData(data.scene, {
-        setWalls, setPlacedItems,
-        setFloor:   setFloorMaterial,
+        setRooms,
+        setWalls,
+        setPlacedItems,
+        setFloor: setFloorMaterial,
         setCeiling: setCeilingMaterial,
         lightingState,
       });
       setProjectName(data.name);
       setCurrentProjectId(data.id);
+      setShareUrl(data.share_url || '');
+      setModelAssets(data.model_assets || {
+        glb_url: null,
+        usdz_url: null,
+        glb_filename: null,
+        usdz_filename: null,
+      });
     }
     return data;
-  }, [setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
+  }, [setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
+
+  const ensureProject = useCallback(async ({ persistLatest = false } = {}) => {
+    if (!currentProjectId) {
+      const project = await saveProject(projectName, true);
+      return project.id;
+    }
+
+    if (persistLatest) {
+      const project = await saveProject(projectName, true);
+      return project.id;
+    }
+
+    return currentProjectId;
+  }, [currentProjectId, projectName, saveProject]);
+
+  const uploadModelAsset = useCallback(async (kind, file) => {
+    if (!file) return null;
+    if (!['glb', 'usdz'].includes(kind)) {
+      throw new Error('Unsupported asset type.');
+    }
+
+    const projectId = await ensureProject({ persistLatest: true });
+    setAssetUploadStatus((prev) => ({ ...prev, [kind]: 'uploading' }));
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/assets/${kind}`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`Failed to upload ${kind.toUpperCase()}`);
+      const data = await res.json();
+      setModelAssets((prev) => ({
+        ...prev,
+        [`${kind}_url`]: data.url,
+        [`${kind}_filename`]: data.filename,
+      }));
+      setAssetUploadStatus((prev) => ({ ...prev, [kind]: 'done' }));
+      setTimeout(() => setAssetUploadStatus((prev) => ({ ...prev, [kind]: 'idle' })), 2000);
+      return data;
+    } catch (error) {
+      setAssetUploadStatus((prev) => ({ ...prev, [kind]: 'error' }));
+      setTimeout(() => setAssetUploadStatus((prev) => ({ ...prev, [kind]: 'idle' })), 2500);
+      throw error;
+    }
+  }, [ensureProject]);
+
+  const copyShareLink = useCallback(async () => {
+    const projectId = await ensureProject({ persistLatest: true });
+    const url = shareUrl || `${window.location.origin}/view/${projectId}`;
+    await navigator.clipboard.writeText(url);
+    setShareUrl(url);
+    return url;
+  }, [ensureProject, shareUrl]);
+
+  const openSharePage = useCallback(async () => {
+    const projectId = await ensureProject({ persistLatest: true });
+    const url = shareUrl || `${window.location.origin}/view/${projectId}`;
+    setShareUrl(url);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return url;
+  }, [ensureProject, shareUrl]);
 
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
 
@@ -216,6 +342,12 @@ export default function useProjectSave({
     exportJSON,
     importJSON,
     loadProject,
+    shareUrl,
+    modelAssets,
+    assetUploadStatus,
+    uploadModelAsset,
+    copyShareLink,
+    openSharePage,
     autosaveEnabled, setAutosaveEnabled,
   };
 }

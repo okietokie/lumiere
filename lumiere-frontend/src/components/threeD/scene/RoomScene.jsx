@@ -1,13 +1,15 @@
-// src/components/threeD/scene/RoomScene.jsx
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport } from "@react-three/drei";
+import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport, Html, Text } from "@react-three/drei";
 import { useState, useEffect, useRef, Suspense, useCallback, useMemo } from "react";
-import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber } from "antd";
+import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Input, Select, Slider } from "antd";
 import {
   EyeOutlined,
   VerticalLeftOutlined,
   VerticalRightOutlined,
   BorderOutlined,
+  ApartmentOutlined,
+  PlusOutlined,
+  SwapOutlined,
   UndoOutlined,
   RedoOutlined,
   SaveOutlined,
@@ -25,6 +27,14 @@ import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
 import { COLORS } from "../../../utils/colors";
 import {
+  addRoomAdjacent as positionAdjacentRoom,
+  generateLayoutWalls,
+  getLayoutBounds,
+  hasRoomOverlap,
+  ROOM_DIRECTION_ORDER,
+} from "../../../utils/roomLayout";
+import {
+  createRoomEntity,
   createWallEntity,
   createDoorEntity,
   createWindowEntity,
@@ -34,36 +44,22 @@ import {
   validateWindowPlacement,
 } from "../../../utils/sceneEntities";
 import * as THREE from "three";
-
-// ── Hooks ────────────────────────────────────────────────────────────────────
 import useHistory   from "../../../hooks/useHistory";
 import useMaterials from "../../../hooks/useMaterials";
 import useLighting  from "../../../hooks/useLighting";
-
-// ── Camera ────────────────────────────────────────────────────────────────────
 import FirstPersonControls from "../camera/FirstPersonControls";
 import WalkHUD             from "../camera/WalkHUD";
-
-// ── Walls ─────────────────────────────────────────────────────────────────────
 import InteractiveWall from "../walls/InteractiveWall";
 import WallGizmo       from "../walls/WallGizmo";
 import WallEditorPanel from "../walls/WallEditor";
-
-// ── Furniture ─────────────────────────────────────────────────────────────────
 import FurnitureItem   from "../furniture/FurnitureItem";
 import FurnitureGizmo  from "../furniture/FurnitureGizmo";
 import FurniturePicker from "../furniture/FurniturePicker";
 import { PreviewPortal } from "../furniture/ModelPreview";
-
-// ── Lighting ──────────────────────────────────────────────────────────────────
 import SceneLighting from "../lighting/SceneLighting";
 import LightingPanel from "../lighting/LightingPanel";
 import PlacedLight   from "../lighting/PlacedLight";
-
-// ── Materials ─────────────────────────────────────────────────────────────────
 import MaterialPanel from "../materials/MaterialPanel";
-
-// ── UI / UX ───────────────────────────────────────────────────────────────────
 import ContextToolbar, { WorldProjector } from "../ui/ContextToolbar";
 import useContextNav       from "../../../hooks/useContextNav";
 import SurfaceMaterial     from "../materials/SurfaceMaterial";
@@ -78,8 +74,6 @@ import useProjectSave      from "../../../hooks/useProjectSave";
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 
 const CAMERA_PRESETS = {
   perspective: { position: [7, 4, 9],    target: [0, 1.5, 0] },
@@ -89,27 +83,37 @@ const CAMERA_PRESETS = {
 };
 
 const OPENING_STEP = 0.05;
+const DOOR_STYLE_OPTIONS = [
+  { key: 'hinged', label: 'Single Hinged Door' },
+  { key: 'sliding', label: 'Single Sliding Door' },
+  { key: 'double', label: 'Double Hinged Door' },
+];
 
 export default function RoomScene() {
-
-  // ── Walls (undo/redo history) ─────────────────────────────────────────────
+  const [rooms, setRooms] = useState(() => [
+    createRoomEntity({
+      name: 'Room 1',
+      type: 'room',
+      x: 0,
+      z: 0,
+      width: 6,
+      depth: 6,
+      height: 3,
+    }),
+  ]);
+  const [selectedRoomId, setSelectedRoomId] = useState(null);
+  const initialWalls = useMemo(() => generateLayoutWalls(rooms), [rooms]);
   const {
     state: walls, set: setWalls,
     undo, redo, canUndo, canRedo,
-  } = useHistory([
-    createWallEntity({ start: [-3, -3], end: [3, -3] }),
-    createWallEntity({ start: [-3, -3], end: [-3, 3] }),
-    createWallEntity({ start: [3, -3], end: [3, 3] }),
-  ]);
-
-  // ── Materials ─────────────────────────────────────────────────────────────
+  } = useHistory(initialWalls);
   const {
     floorMaterial, ceilingMaterial,
     setFloorMaterial, setCeilingMaterial,
     applyTexture, updateSurface, applyTheme, activeTheme,
   } = useMaterials(walls, setWalls);
 
-  // ── Lighting ──────────────────────────────────────────────────────────────
+  // Lighting 
   const lightingState = useLighting();
   const {
     lighting, placedLights,
@@ -117,14 +121,16 @@ export default function RoomScene() {
     previewMode,
   } = lightingState;
 
-  // ── Furniture ─────────────────────────────────────────────────────────────
+  // Furniture 
   const [placedItems,         setPlacedItems]         = useState([]);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState(null);
   const furnitureRefs = useRef({});
 
-  // ── UI state ──────────────────────────────────────────────────────────────
+  // UI state 
   const [selectedWallId,      setSelectedWallId]      = useState(null);
   const [selectedOpening,     setSelectedOpening]     = useState(null);
+  const [pendingRoomCreation, setPendingRoomCreation] = useState(null);
+  const [roomWallPlacementSide, setRoomWallPlacementSide] = useState('right');
   const [cameraMode,          setCameraMode]          = useState('orbit');
   const [gizmoMode,           setGizmoMode]           = useState('translate');
   const [activeTool,          setActiveTool]          = useState('select');
@@ -154,7 +160,7 @@ export default function RoomScene() {
   // Whether anything is selected (drives GizmoHelper visibility)
   const anythingSelected = !!(selectedWallId || selectedFurnitureId || selectedLightId || selectedOpening);
 
-  // ── Mobile detection ──────────────────────────────────────────────────────
+  // Mobile detection 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [mobileDoorEditorSection, setMobileDoorEditorSection] = useState(null);
@@ -169,6 +175,7 @@ export default function RoomScene() {
   const desktopPanelInitRef = useRef(false);
 
   const projectSave = useProjectSave({
+    rooms, setRooms,
     walls, setWalls,
     placedItems, setPlacedItems,
     floorMaterial, setFloorMaterial,
@@ -183,8 +190,85 @@ export default function RoomScene() {
     projectId: currentProjectId,
   });
 
-  // ── Spatial analysis ──────────────────────────────────────────────────────
+  // Spatial analysis 
   const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
+  const selectedRoom = useMemo(
+    () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null,
+    [rooms, selectedRoomId]
+  );
+  const boardFootprint = useMemo(() => {
+    const layoutBounds = getLayoutBounds(rooms);
+    const wallPoints = walls.flatMap((wall) => wall ? [wall.start, wall.end] : []).filter(Boolean);
+    const wallBounds = wallPoints.length ? {
+      left: Math.min(...wallPoints.map(([x]) => x)),
+      right: Math.max(...wallPoints.map(([x]) => x)),
+      top: Math.min(...wallPoints.map(([, z]) => z)),
+      bottom: Math.max(...wallPoints.map(([, z]) => z)),
+    } : null;
+    const left = wallBounds ? Math.min(layoutBounds.left, wallBounds.left) : layoutBounds.left;
+    const right = wallBounds ? Math.max(layoutBounds.right, wallBounds.right) : layoutBounds.right;
+    const top = wallBounds ? Math.min(layoutBounds.top, wallBounds.top) : layoutBounds.top;
+    const bottom = wallBounds ? Math.max(layoutBounds.bottom, wallBounds.bottom) : layoutBounds.bottom;
+    return {
+      centerX: (left + right) / 2,
+      centerZ: (top + bottom) / 2,
+      width: Math.max((right - left) + 14, 20),
+      depth: Math.max((bottom - top) + 14, 20),
+    };
+  }, [rooms, walls]);
+  const roomWalls = useMemo(() => {
+    const firstRoomId = rooms[0]?.id ?? null;
+    return rooms.map((room, index) => {
+      const scopedWalls = walls.filter((wall) => {
+        const hasValidPoints = Array.isArray(wall?.start)
+          && Array.isArray(wall?.end)
+          && Number.isFinite(wall.start[0])
+          && Number.isFinite(wall.start[1])
+          && Number.isFinite(wall.end[0])
+          && Number.isFinite(wall.end[1]);
+        if (!hasValidPoints) return false;
+        if (wall.roomId) return wall.roomId === room.id;
+        return index === 0 && room.id === firstRoomId;
+      });
+      return { room, walls: scopedWalls };
+    });
+  }, [rooms, walls]);
+  const roomSurfaceBounds = useMemo(() => {
+    return roomWalls.map(({ room, walls: scopedWalls }) => {
+      const roomLeft = room.x - room.width / 2;
+      const roomRight = room.x + room.width / 2;
+      const roomTop = room.z - room.depth / 2;
+      const roomBottom = room.z + room.depth / 2;
+      const points = scopedWalls.flatMap((wall) => [wall.start, wall.end]).filter(Boolean);
+
+      if (!points.length) {
+        return {
+          roomId: room.id,
+          centerX: room.x,
+          centerZ: room.z,
+          width: room.width,
+          depth: room.depth,
+        };
+      }
+
+      const left = Math.min(roomLeft, ...points.map(([x]) => x));
+      const right = Math.max(roomRight, ...points.map(([x]) => x));
+      const top = Math.min(roomTop, ...points.map(([, z]) => z));
+      const bottom = Math.max(roomBottom, ...points.map(([, z]) => z));
+
+      return {
+        roomId: room.id,
+        centerX: (left + right) / 2,
+        centerZ: (top + bottom) / 2,
+        width: Math.max(right - left, room.width),
+        depth: Math.max(bottom - top, room.depth),
+      };
+    });
+  }, [roomWalls]);
+  const selectedRoomSurfaceBounds = useMemo(
+    () => roomSurfaceBounds.find((entry) => entry.roomId === selectedRoom?.id) ?? null,
+    [roomSurfaceBounds, selectedRoom]
+  );
 
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
@@ -271,6 +355,18 @@ export default function RoomScene() {
   }), []);
 
   useEffect(() => {
+    if (!selectedRoomId && rooms[0]?.id) {
+      setSelectedRoomId(rooms[0].id);
+    }
+  }, [rooms, selectedRoomId]);
+
+  useEffect(() => {
+    if (!selectedRoom && activeTab === 'room') {
+      setActiveTab('walls');
+    }
+  }, [activeTab, selectedRoom]);
+
+  useEffect(() => {
     if (isMobile) return;
     if (!desktopPanelInitRef.current) {
       desktopPanelInitRef.current = true;
@@ -302,7 +398,7 @@ export default function RoomScene() {
   }, [desktopPanelOpen, isMobile]);
 
 
-  // ── Apply ghost opacity to wall meshes ────────────────────────────────────
+  // Apply ghost opacity to wall meshes
   useEffect(() => {
     walls.forEach((wall) => {
       const mesh = wallRefs.current[wall.id];
@@ -317,8 +413,8 @@ export default function RoomScene() {
     });
   }, [walls]);
 
-  // ── Keyboard shortcuts ────────────────────────────────────────────────────
-  // ── Mobile touch safety ───────────────────────────────────────────────────
+  // Keyboard shortcuts 
+  // Mobile touch safety
   useEffect(() => {
     const canvas = canvasWrapperRef.current?.querySelector('canvas');
     if (!canvas) return;
@@ -335,7 +431,7 @@ export default function RoomScene() {
       gsap.from(sceneRef.current, { opacity: 0, scale: 0.98, duration: 1, delay: 0.3, ease: "expo.out" });
   }, []);
 
-  // ── Wall helpers ──────────────────────────────────────────────────────────
+  // Wall helpers
   const updateWall = (id, updates) =>
     setWalls((p) => p.map((w) => w.id === id ? { ...w, ...updates } : w));
 
@@ -456,6 +552,56 @@ export default function RoomScene() {
   const renderDoorBehaviorControls = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
 
+    const selectedDoorStyle = selectedOpeningEntity.doorStyle ?? 'hinged';
+
+    if (selectedDoorStyle === 'sliding') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Sliding Direction
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {renderOpeningModeButton(
+              'Slide panel to the left',
+              <LeftOutlined />,
+              (selectedOpeningEntity.slideDirection ?? 'right') === 'left',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { slideDirection: 'left' })
+            )}
+            {renderOpeningModeButton(
+              'Slide panel to the right',
+              <RightOutlined />,
+              (selectedOpeningEntity.slideDirection ?? 'right') === 'right',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { slideDirection: 'right' })
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (selectedDoorStyle === 'double') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Swing Mode
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {renderOpeningModeButton(
+              'Open inward',
+              <LoginOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === true,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: true })
+            )}
+            {renderOpeningModeButton(
+              'Open outward',
+              <LogoutOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === false,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: false })
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -490,6 +636,109 @@ export default function RoomScene() {
     );
   }, [renderOpeningModeButton, selectedOpening, selectedOpeningEntity, updateWallOpening]);
 
+  const renderDoorOpenControls = useCallback(() => {
+    if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
+    if ((selectedOpeningEntity.doorStyle ?? 'hinged') === 'hinged') return null;
+
+    const openAmount = Number.isFinite(selectedOpeningEntity.openAmount) ? selectedOpeningEntity.openAmount : 0;
+    const doorStyleLabel = DOOR_STYLE_OPTIONS.find((option) => option.key === (selectedOpeningEntity.doorStyle ?? 'hinged'))?.label ?? 'Door';
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Open Amount
+          </div>
+          <div style={{ color: `${COLORS.text}9A`, fontSize: 11 }}>
+            {doorStyleLabel}
+          </div>
+        </div>
+        <div style={{ ...openingFieldCardStyle, gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ color: COLORS.text, fontSize: 11 }}>Panel Motion</span>
+            <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Math.round(openAmount * 100)}%</span>
+          </div>
+          <Slider
+            min={0}
+            max={1}
+            step={0.05}
+            value={openAmount}
+            onChange={(value) => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { openAmount: value })}
+            tooltip={{ formatter: (value) => `${Math.round((value ?? 0) * 100)}%` }}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+            <button
+              type="button"
+              className={openAmount <= 0.01 ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+              style={{ minHeight: 40, borderRadius: 14 }}
+              onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { openAmount: 0 })}
+            >
+              Closed
+            </button>
+            <button
+              type="button"
+              className={openAmount >= 0.99 ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+              style={{ minHeight: 40, borderRadius: 14 }}
+              onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { openAmount: 1 })}
+            >
+              Open
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }, [openingFieldCardStyle, selectedOpening, selectedOpeningEntity, updateWallOpening]);
+
+  const renderDoorTypeControls = useCallback((compact = false) => {
+    if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
+
+    const selectedDoorStyle = selectedOpeningEntity.doorStyle ?? 'hinged';
+    const getDoorStyleUpdates = (nextStyle) => {
+      if (nextStyle === 'sliding') {
+        return { doorStyle: nextStyle, panelCount: 1, slideDirection: selectedOpeningEntity.slideDirection ?? 'right' };
+      }
+      if (nextStyle === 'double') {
+        return { doorStyle: nextStyle, panelCount: 2 };
+      }
+      return { doorStyle: nextStyle, panelCount: 1, hingeSide: selectedOpeningEntity.hingeSide ?? 'left' };
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+        <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+          Door Style
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: compact ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fit, minmax(132px, 1fr))',
+            gap: 8,
+            width: '100%',
+          }}
+        >
+          {DOOR_STYLE_OPTIONS.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              className={selectedDoorStyle === option.key ? 'room-secondary-chip is-active' : 'room-secondary-chip'}
+              style={{
+                minHeight: compact ? 54 : 48,
+                padding: compact ? '10px 12px' : '9px 14px',
+                borderRadius: 16,
+                textAlign: 'center',
+                lineHeight: 1.2,
+                whiteSpace: 'normal',
+              }}
+              onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, getDoorStyleUpdates(option.key))}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }, [selectedOpening, selectedOpeningEntity, updateWallOpening]);
+
   const renderWindowTypeControls = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
 
@@ -520,6 +769,309 @@ export default function RoomScene() {
       </div>
     );
   }, [selectedOpening, selectedOpeningEntity, updateWallOpening]);
+
+  const selectRoom = useCallback((roomId, nextTab = null) => {
+    setSelectedRoomId(roomId);
+    setSelectedWallId(null);
+    setSelectedOpening(null);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+    setPendingRoomCreation(null);
+    if (nextTab) setActiveTab(nextTab);
+    if (activeTool === 'build') setActiveTool('select');
+  }, [activeTool]);
+
+  const rebuildResolvedWalls = useCallback((nextRooms, wallSource = walls) => {
+    const manualWalls = wallSource.filter((wall) => wall?.source === 'manual');
+    const layoutWalls = generateLayoutWalls(nextRooms, wallSource.filter((wall) => wall?.source !== 'manual'));
+    return [...layoutWalls, ...manualWalls];
+  }, [walls]);
+
+  const cycleRoomWallPlacementSide = useCallback(() => {
+    setRoomWallPlacementSide((prev) => {
+      const index = ROOM_DIRECTION_ORDER.indexOf(prev);
+      return ROOM_DIRECTION_ORDER[(index + 1) % ROOM_DIRECTION_ORDER.length];
+    });
+  }, []);
+
+  const addWallOnSelectedRoomEdge = useCallback(() => {
+    if (!selectedRoom) {
+      toast.info('Select a room first.');
+      return;
+    }
+
+    const bounds = selectedRoomSurfaceBounds ?? {
+      centerX: selectedRoom.x,
+      centerZ: selectedRoom.z,
+      width: selectedRoom.width,
+      depth: selectedRoom.depth,
+    };
+    const left = bounds.centerX - bounds.width / 2;
+    const right = bounds.centerX + bounds.width / 2;
+    const top = bounds.centerZ - bounds.depth / 2;
+    const bottom = bounds.centerZ + bounds.depth / 2;
+
+    let start;
+    let end;
+
+    if (roomWallPlacementSide === 'left') {
+      start = [left, top];
+      end = [left, bottom];
+    } else if (roomWallPlacementSide === 'right') {
+      start = [right, top];
+      end = [right, bottom];
+    } else if (roomWallPlacementSide === 'top') {
+      start = [left, top];
+      end = [right, top];
+    } else {
+      start = [left, bottom];
+      end = [right, bottom];
+    }
+
+    const existingWall = walls.find((wall) =>
+      wall?.roomId === selectedRoom.id
+      && Array.isArray(wall?.start)
+      && Array.isArray(wall?.end)
+      && wall?.start?.[0] === start[0]
+      && wall?.start?.[1] === start[1]
+      && wall?.end?.[0] === end[0]
+      && wall?.end?.[1] === end[1]
+    );
+
+    if (existingWall) {
+      setSelectedWallId(existingWall.id);
+      setActiveTab('walls');
+      toast.info(`A wall already exists on the ${roomWallPlacementSide} edge.`);
+      return;
+    }
+
+    if (![start[0], start[1], end[0], end[1]].every(Number.isFinite)) {
+      toast.error('Wall creation failed because the edge coordinates were invalid.');
+      return;
+    }
+
+    const newWall = createWallEntity({
+      roomId: selectedRoom.id,
+      start,
+      end,
+      height: selectedRoom.height ?? 3,
+      source: 'manual',
+      boundarySide: roomWallPlacementSide,
+    });
+
+    setWalls((prev) => [...prev, newWall]);
+    setSelectedWallId(newWall.id);
+    setSelectedOpening(null);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+    setActiveTab('walls');
+    toast.success(`Wall added on the ${roomWallPlacementSide} edge.`);
+  }, [roomWallPlacementSide, selectedRoom, selectedRoomSurfaceBounds, setWalls, toast, walls]);
+
+  const queueRoomAdd = useCallback((direction) => {
+    if (!selectedRoom) {
+      toast.info('Select a room first.');
+      return;
+    }
+    setPendingRoomCreation({
+      sourceRoomId: selectedRoom.id,
+      direction,
+      name: `${selectedRoom.name} ${direction[0].toUpperCase()}${direction.slice(1)}`,
+      type: 'room',
+      width: 3,
+      depth: 4,
+      height: selectedRoom.height ?? 3,
+    });
+  }, [selectedRoom, toast]);
+
+  const updatePendingRoomCreation = useCallback((field, value) => {
+    setPendingRoomCreation((prev) => (prev ? { ...prev, [field]: value } : prev));
+  }, []);
+
+  const cancelPendingRoomCreation = useCallback(() => {
+    setPendingRoomCreation(null);
+  }, []);
+
+  const addRoomAdjacent = useCallback((sourceRoomId, direction, width, depth, options = {}) => {
+    const sourceRoom = rooms.find((room) => room.id === sourceRoomId);
+    if (!sourceRoom) {
+      toast.error('The selected source room is no longer available.');
+      return { ok: false, reason: 'missing-source-room' };
+    }
+
+    const numericWidth = Number(width);
+    const numericDepth = Number(depth);
+    const numericHeight = Number(options.height ?? sourceRoom.height ?? 3);
+
+    if (!Number.isFinite(numericWidth) || numericWidth <= 0 || !Number.isFinite(numericDepth) || numericDepth <= 0 || !Number.isFinite(numericHeight) || numericHeight <= 0) {
+      toast.info('Width, depth, and height must be greater than 0.');
+      return { ok: false, reason: 'invalid-dimensions' };
+    }
+
+    const name = options.name?.trim();
+    const type = options.type?.trim();
+    if (!name) {
+      toast.info('Enter a room name.');
+      return { ok: false, reason: 'missing-name' };
+    }
+    if (!type) {
+      toast.info('Enter a room type.');
+      return { ok: false, reason: 'missing-type' };
+    }
+
+    const roomToCreate = createRoomEntity({
+      name,
+      type,
+      width: numericWidth,
+      depth: numericDepth,
+      height: numericHeight,
+    });
+    const positionedRoom = positionAdjacentRoom(sourceRoom, direction, roomToCreate);
+
+    if (hasRoomOverlap(positionedRoom, rooms)) {
+      toast.error('Room creation cancelled because the new room would overlap an existing room and its walls.');
+      return { ok: false, reason: 'overlap' };
+    }
+
+    const nextRooms = [...rooms, positionedRoom];
+    const nextWalls = rebuildResolvedWalls(nextRooms, walls);
+
+    setRooms(nextRooms);
+    setWalls(nextWalls);
+    setSelectedRoomId(positionedRoom.id);
+    setSelectedWallId(null);
+    setSelectedOpening(null);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+
+    return { ok: true, room: positionedRoom };
+  }, [rebuildResolvedWalls, rooms, setWalls, toast, walls]);
+
+  const submitPendingRoomCreation = useCallback(() => {
+    if (!pendingRoomCreation) return;
+
+    const result = addRoomAdjacent(
+      pendingRoomCreation.sourceRoomId,
+      pendingRoomCreation.direction,
+      pendingRoomCreation.width,
+      pendingRoomCreation.depth,
+      {
+        name: pendingRoomCreation.name,
+        type: pendingRoomCreation.type,
+        height: pendingRoomCreation.height,
+      }
+    );
+
+    if (!result?.ok) {
+      if (result?.reason === 'missing-source-room') {
+        setPendingRoomCreation(null);
+      }
+      return;
+    }
+
+    setPendingRoomCreation(null);
+    toast.success(`${result.room.name} added to the ${pendingRoomCreation.direction}.`);
+  }, [addRoomAdjacent, pendingRoomCreation, toast]);
+
+  const renderRoomActionPanel = useCallback((variant = 'panel') => {
+    if (!selectedRoom) return null;
+
+    const containerStyle = variant === 'sidebar'
+      ? {
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          padding: '14px 16px',
+          background: `${COLORS.background}D9`,
+          borderRadius: 22,
+          border: `1px solid ${COLORS.secondary}50`,
+        }
+      : undefined;
+
+    return (
+      <div className={variant === 'panel' ? 'room-floating-context-card' : undefined} style={containerStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700 }}>Selected Room</div>
+            <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>
+              {selectedRoom.name} • {Number(selectedRoom.width).toFixed(1)}m × {Number(selectedRoom.depth).toFixed(1)}m
+            </div>
+          </div>
+          <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
+            Room Actions
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('left')}>Add Left</button>
+          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('right')}>Add Right</button>
+          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('top')}>Add Top</button>
+          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('bottom')}>Add Bottom</button>
+        </div>
+        {pendingRoomCreation?.sourceRoomId === selectedRoom.id && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px', borderRadius: 18, ...openingPanelTone }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4 }}>
+                  Add {pendingRoomCreation.direction}
+                </div>
+                <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
+                  Create a room next to {selectedRoom.name}
+                </div>
+              </div>
+              <button type="button" className="room-secondary-chip" style={{ minHeight: 32, padding: '0 12px' }} onClick={cancelPendingRoomCreation}>
+                Cancel
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              <div style={openingFieldCardStyle}>
+                <span style={{ color: COLORS.text, fontSize: 11 }}>Name</span>
+                <Input value={pendingRoomCreation.name} onChange={(event) => updatePendingRoomCreation('name', event.target.value)} placeholder="Room name" />
+              </div>
+              <div style={openingFieldCardStyle}>
+                <span style={{ color: COLORS.text, fontSize: 11 }}>Type</span>
+                <Select
+                  value={pendingRoomCreation.type}
+                  onChange={(value) => updatePendingRoomCreation('type', value)}
+                  options={[
+                    { value: 'room', label: 'Room' },
+                    { value: 'bedroom', label: 'Bedroom' },
+                    { value: 'living-room', label: 'Living Room' },
+                    { value: 'kitchen', label: 'Kitchen' },
+                    { value: 'bathroom', label: 'Bathroom' },
+                  ]}
+                />
+              </div>
+              <div style={openingFieldCardStyle}>
+                <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
+                <InputNumber min={0.5} step={0.1} value={pendingRoomCreation.width} onChange={(value) => updatePendingRoomCreation('width', value)} style={{ width: '100%' }} addonAfter="m" />
+              </div>
+              <div style={openingFieldCardStyle}>
+                <span style={{ color: COLORS.text, fontSize: 11 }}>Depth</span>
+                <InputNumber min={0.5} step={0.1} value={pendingRoomCreation.depth} onChange={(value) => updatePendingRoomCreation('depth', value)} style={{ width: '100%' }} addonAfter="m" />
+              </div>
+              <div style={openingFieldCardStyle}>
+                <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
+                <InputNumber min={2} step={0.1} value={pendingRoomCreation.height} onChange={(value) => updatePendingRoomCreation('height', value)} style={{ width: '100%' }} addonAfter="m" />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="room-secondary-chip" onClick={cancelPendingRoomCreation}>Cancel</button>
+              <button type="button" className="room-secondary-chip is-active" onClick={submitPendingRoomCreation}>Create Room</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }, [
+    cancelPendingRoomCreation,
+    openingFieldCardStyle,
+    openingPanelTone,
+    pendingRoomCreation,
+    queueRoomAdd,
+    selectedRoom,
+    submitPendingRoomCreation,
+    updatePendingRoomCreation,
+  ]);
 
   const renderWindowBehaviorControls = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
@@ -567,7 +1119,15 @@ export default function RoomScene() {
   const renderMobileDoorEditor = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
 
+    const selectedDoorStyle = selectedOpeningEntity.doorStyle ?? 'hinged';
+
     const sections = [
+      {
+        key: 'style',
+        label: 'Style',
+        icon: <AppstoreOutlined />,
+        content: renderDoorTypeControls(true),
+      },
       {
         key: 'width',
         label: 'Width',
@@ -623,10 +1183,50 @@ export default function RoomScene() {
         ),
       },
       {
-        key: 'hinge',
-        label: 'Hinge',
-        icon: selectedOpeningEntity.hingeSide === 'left' ? <LeftOutlined /> : <RightOutlined />,
-        content: (
+        key: 'open',
+        label: 'Open',
+        icon: <SwapOutlined />,
+        content: renderDoorOpenControls(),
+      },
+      {
+        key: selectedDoorStyle === 'sliding' ? 'direction' : selectedDoorStyle === 'double' ? 'swing' : 'hinge',
+        label: selectedDoorStyle === 'sliding' ? 'Direction' : selectedDoorStyle === 'double' ? 'Swing' : 'Hinge',
+        icon: selectedDoorStyle === 'sliding'
+          ? ((selectedOpeningEntity.slideDirection ?? 'right') === 'left' ? <LeftOutlined /> : <RightOutlined />)
+          : selectedDoorStyle === 'double'
+            ? ((selectedOpeningEntity.opensInward ?? true) ? <LoginOutlined /> : <LogoutOutlined />)
+            : (selectedOpeningEntity.hingeSide === 'left' ? <LeftOutlined /> : <RightOutlined />),
+        content: selectedDoorStyle === 'sliding' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+            {renderOpeningModeButton(
+              'Slide panel to the left',
+              <LeftOutlined />,
+              (selectedOpeningEntity.slideDirection ?? 'right') === 'left',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { slideDirection: 'left' })
+            )}
+            {renderOpeningModeButton(
+              'Slide panel to the right',
+              <RightOutlined />,
+              (selectedOpeningEntity.slideDirection ?? 'right') === 'right',
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { slideDirection: 'right' })
+            )}
+          </div>
+        ) : selectedDoorStyle === 'double' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+            {renderOpeningModeButton(
+              'Open inward',
+              <LoginOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === true,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: true })
+            )}
+            {renderOpeningModeButton(
+              'Open outward',
+              <LogoutOutlined />,
+              (selectedOpeningEntity.opensInward ?? true) === false,
+              () => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, { opensInward: false })
+            )}
+          </div>
+        ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }}>
             {renderOpeningModeButton(
               'Hinge on the left side',
@@ -643,9 +1243,9 @@ export default function RoomScene() {
           </div>
         ),
       },
-      {
+      ...(selectedDoorStyle === 'hinged' ? [{
         key: 'swing',
-        label: 'Opening',
+        label: 'Swing',
         icon: (selectedOpeningEntity.opensInward ?? true) ? <LoginOutlined /> : <LogoutOutlined />,
         content: (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }}>
@@ -663,7 +1263,7 @@ export default function RoomScene() {
             )}
           </div>
         ),
-      },
+      }] : []),
     ];
 
     return (
@@ -723,7 +1323,7 @@ export default function RoomScene() {
         </div>
       </div>
     );
-  }, [COLORS.action, COLORS.text, getOpeningBounds, mobileDoorEditButtonStyle, mobileDoorEditorSection, openingFieldCardStyle, renderOpeningModeButton, selectedOpening, selectedOpeningEntity, updateOpeningNumericField, updateWallOpening]);
+  }, [COLORS.action, COLORS.text, getOpeningBounds, mobileDoorEditButtonStyle, mobileDoorEditorSection, openingFieldCardStyle, renderDoorOpenControls, renderDoorTypeControls, renderOpeningModeButton, selectedOpening, selectedOpeningEntity, updateOpeningNumericField, updateWallOpening]);
 
   const buildOpeningPreview = useCallback((wall, openingType, point = null) => {
     if (!wall) return null;
@@ -752,7 +1352,12 @@ export default function RoomScene() {
   };
 
   const addWall = () => {
-    const w = createWallEntity({ start: [-1, 0], end: [1, 0] });
+    const room = selectedRoom ?? rooms[0] ?? null;
+    const w = createWallEntity({
+      roomId: room?.id ?? null,
+      start: [-1, 0],
+      end: [1, 0],
+    });
     setWalls((p) => [...p, w]);
     setSelectedWallId(w.id);
     setActiveTool('build');
@@ -760,12 +1365,12 @@ export default function RoomScene() {
 
   const splitWall = () => {
     if (!selectedWall) return;
-    const { id, start, end, height, thickness, color, roughness, metalness, textureUrl } = selectedWall;
+    const { id, roomId, start, end, height, thickness, color, roughness, metalness, textureUrl } = selectedWall;
     const mid = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
     setWalls((p) => [
       ...p.filter((w) => w.id !== id),
-      createWallEntity({ start, end: mid, height, thickness, color, roughness, metalness, textureUrl }),
-      createWallEntity({ start: mid, end, height, thickness, color, roughness, metalness, textureUrl }),
+      createWallEntity({ roomId, start, end: mid, height, thickness, color, roughness, metalness, textureUrl }),
+      createWallEntity({ roomId, start: mid, end, height, thickness, color, roughness, metalness, textureUrl }),
     ]);
     setSelectedWallId(null);
   };
@@ -828,14 +1433,14 @@ export default function RoomScene() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo, selectedFurnitureId, selectedOpening, removeWallOpening]);
 
-  // ── Furniture helpers ─────────────────────────────────────────────────────
+  // Furniture helpers
   const addItem = (modelMeta) => {
     const item = {
       id:       uuidv4(),
       filename: modelMeta.filename,
       name:     modelMeta.name,
       url:      modelMeta.url,
-      category: modelMeta.category || null,   // saved so restore works without re-fetching
+      category: modelMeta.category || null,   
       position: [0, 0, 0],
       rotation: [0, 0, 0],
       scale:    [1, 1, 1],
@@ -887,7 +1492,7 @@ export default function RoomScene() {
     setSelectedFurnitureId(newItem.id);
   };
 
-  // ── Camera helpers ────────────────────────────────────────────────────────
+  // Camera helpers 
   const applyCameraPreset = (preset) => {
     setCurrentViewPreset(preset);
     if (cameraMode === 'orbit' && orbitControlsRef.current) {
@@ -911,7 +1516,7 @@ export default function RoomScene() {
     setLightToolbarPos(null);
   };
 
-  // ── Tab definitions ───────────────────────────────────────────────────────
+  // Tab definitions 
   const toggleDesktopPanel = useCallback((tabKey) => {
     if (activeTab === tabKey) {
       setDesktopPanelOpen((open) => !open);
@@ -921,22 +1526,33 @@ export default function RoomScene() {
     setDesktopPanelOpen(true);
   }, [activeTab]);
 
-  const desktopNavItems = [
-    { key: 'walls', label: 'Build', icon: ColumnWidthOutlined },
-    { key: 'materials', label: 'Style', icon: FormatPainterOutlined },
-    { key: 'lighting', label: 'Light', icon: BulbOutlined },
-    { key: 'furniture', label: 'Furnish', icon: AppstoreOutlined },
-    { key: 'view', label: 'View', icon: EyeOutlined },
-  ];
+  const desktopNavItems = useMemo(() => {
+    const items = [
+      { key: 'walls', label: 'Build', icon: ColumnWidthOutlined },
+      { key: 'materials', label: 'Style', icon: FormatPainterOutlined },
+      { key: 'lighting', label: 'Light', icon: BulbOutlined },
+      { key: 'furniture', label: 'Furnish', icon: AppstoreOutlined },
+      { key: 'view', label: 'View', icon: EyeOutlined },
+    ];
+
+    if (selectedRoom) {
+      items.splice(1, 0, { key: 'room', label: 'Room', icon: ApartmentOutlined });
+    }
+
+    return items;
+  }, [selectedRoom]);
 
   const desktopPanelTitle =
+    activeTab === 'room' ? 'Room' :
     activeTab === 'walls' ? 'Build' :
     activeTab === 'materials' ? 'Style' :
     activeTab === 'lighting' ? 'Light' :
     activeTab === 'furniture' ? 'Furnish' :
     'View';
 
-  const desktopPanelContent = activeTab === 'walls' ? (
+  const desktopPanelContent = activeTab === 'room' ? (
+    renderRoomActionPanel('panel')
+  ) : activeTab === 'walls' ? (
     <>
       {selectedWall && (
         <div className="room-floating-context-card">
@@ -984,6 +1600,8 @@ export default function RoomScene() {
                 )}
               </div>
               {renderOpeningDimensionInputs()}
+              {renderDoorTypeControls()}
+              {renderDoorOpenControls()}
               {renderDoorBehaviorControls()}
               {renderWindowTypeControls()}
               {renderWindowBehaviorControls()}
@@ -1125,7 +1743,7 @@ export default function RoomScene() {
     },
   ];
 
-  // ── 3D canvas block ───────────────────────────────────────────────────────
+  // 3D canvas block 
   const canvasBlock = (
     <div ref={sceneRef} style={{ height: '100%', width: '100%', position: 'relative' }}>
 
@@ -1197,7 +1815,7 @@ export default function RoomScene() {
           gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.85, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
           onPointerMissed={handlePointerMissed}
         >
-          {/* ── Lighting ────────────────────────────────────────── */}
+          {/* Lighting */}
           <SceneLighting
             lighting={lighting}
             globalBrightness={lightingState.globalBrightness}
@@ -1205,7 +1823,7 @@ export default function RoomScene() {
             moodAmbient={lightingState.moodAmbientOverride}
           />
 
-          {/* ── Camera controls ─────────────────────────────────── */}
+          {/* Camera controls*/}
           {cameraMode === 'orbit' ? (
             <OrbitControls
               ref={orbitControlsRef}
@@ -1226,7 +1844,7 @@ export default function RoomScene() {
             />
           )}
 
-          {/* ── GizmoHelper — visible whenever something is selected ─
+          {/* GizmoHelper — visible whenever something is selected 
                Placed at top-left so it doesn't conflict with the
                context toolbar (which floats near the selected object).
                On mobile the top-left is always clear of the bottom nav. */}
@@ -1240,38 +1858,148 @@ export default function RoomScene() {
             </GizmoHelper>
           )}
 
-          {/* ── Walls ───────────────────────────────────────────── */}
-          {walls.map((wall) => (
-            <InteractiveWall
-              key={wall.id}
-              ref={(r) => { if (r) wallRefs.current[wall.id] = r; }}
-              wall={wall}
-              isSelected={wall.id === selectedWallId}
-              selectedOpening={selectedOpening?.wallId === wall.id ? selectedOpening : null}
-              openingPreview={openingPreview?.wallId === wall.id ? openingPreview : null}
-              activeOpeningTool={activeTool === 'door' || activeTool === 'window' ? activeTool : null}
-              onSelect={() => {
-                setSelectedWallId(wall.id);
-                setSelectedFurnitureId(null);
-                setSelectedLightId(null);
-                setActiveTab('walls');
-                if (activeTool === 'build') setActiveTool('select');
-              }}
-              onOpeningPreviewMove={(type, point) => updateOpeningPreview(wall, type, point)}
-              onOpeningCommit={() => commitOpeningPreview(wall)}
-              onOpeningSelect={(opening) => {
-                setSelectedWallId(wall.id);
-                setSelectedOpening({ ...opening, wallId: wall.id });
-                setSelectedFurnitureId(null);
-                setSelectedLightId(null);
-                setActiveTab('walls');
-              }}
-              updateOpening={(type, openingId, updates) => updateWallOpening(wall.id, type, openingId, updates)}
-              updateWall={updateWall}
-              setOrbitEnabled={setOrbitEnabled}
-              cameraMode={cameraMode}
-            />
-          ))}
+          {/* Rooms */}
+          {roomWalls.map(({ room, walls: roomScopedWalls }) => {
+            const surfaceBounds = roomSurfaceBounds.find((entry) => entry.roomId === room.id) ?? {
+              centerX: room.x,
+              centerZ: room.z,
+              width: room.width,
+              depth: room.depth,
+            };
+
+            return (
+            <group key={room.id}>
+              <mesh
+                rotation={[-Math.PI / 2, 0, 0]}
+                position={[surfaceBounds.centerX, 0, surfaceBounds.centerZ]}
+                receiveShadow
+                onClick={(event) => {
+                  event.stopPropagation();
+                  selectRoom(room.id, 'walls');
+                }}
+              >
+                <planeGeometry args={[surfaceBounds.width, surfaceBounds.depth]} />
+                <Suspense fallback={<meshStandardMaterial color={floorMaterial.color} roughness={floorMaterial.roughness} metalness={floorMaterial.metalness} />}>
+                  <SurfaceMaterial mat={floorMaterial} repeat={[Math.max(surfaceBounds.width / 2, 1), Math.max(surfaceBounds.depth / 2, 1)]} />
+                </Suspense>
+              </mesh>
+
+              <mesh
+                rotation={[Math.PI / 2, 0, 0]}
+                position={[surfaceBounds.centerX, room.height, surfaceBounds.centerZ]}
+                receiveShadow
+                onClick={(event) => {
+                  event.stopPropagation();
+                  selectRoom(room.id, 'walls');
+                }}
+              >
+                <planeGeometry args={[surfaceBounds.width, surfaceBounds.depth]} />
+                <Suspense fallback={<meshStandardMaterial color={ceilingMaterial.color} roughness={ceilingMaterial.roughness} metalness={ceilingMaterial.metalness} />}>
+                  <SurfaceMaterial mat={ceilingMaterial} repeat={[Math.max(surfaceBounds.width / 2, 1), Math.max(surfaceBounds.depth / 2, 1)]} />
+                </Suspense>
+              </mesh>
+
+              {room.id === selectedRoom?.id && (
+                <>
+                  <mesh rotation={[-Math.PI / 2, 0, 0]} position={[room.x, 0.02, room.z]}>
+                    <planeGeometry args={[room.width + 0.2, room.depth + 0.2]} />
+                    <meshBasicMaterial color={COLORS.action} transparent opacity={0.12} />
+                  </mesh>
+                  <mesh position={[room.x, 0.04, room.z - (room.depth / 2) - 0.04]}>
+                    <boxGeometry args={[room.width + 0.14, 0.05, 0.06]} />
+                    <meshBasicMaterial color={COLORS.action} />
+                  </mesh>
+                  <mesh position={[room.x, 0.04, room.z + (room.depth / 2) + 0.04]}>
+                    <boxGeometry args={[room.width + 0.14, 0.05, 0.06]} />
+                    <meshBasicMaterial color={COLORS.action} />
+                  </mesh>
+                  <mesh position={[room.x - (room.width / 2) - 0.04, 0.04, room.z]}>
+                    <boxGeometry args={[0.06, 0.05, room.depth + 0.14]} />
+                    <meshBasicMaterial color={COLORS.action} />
+                  </mesh>
+                  <mesh position={[room.x + (room.width / 2) + 0.04, 0.04, room.z]}>
+                    <boxGeometry args={[0.06, 0.05, room.depth + 0.14]} />
+                    <meshBasicMaterial color={COLORS.action} />
+                  </mesh>
+                </>
+              )}
+
+              {(roomWalls.length > 1 || room.id === selectedRoom?.id) && (
+                <Text
+                  position={[room.x, room.height + (room.id === selectedRoom?.id ? 0.5 : 0.28), room.z]}
+                  fontSize={room.id === selectedRoom?.id ? 0.28 : 0.24}
+                  color={room.id === selectedRoom?.id ? COLORS.action : COLORS.text}
+                  anchorX="center"
+                  anchorY="middle"
+                >
+                  {room.name}
+                </Text>
+              )}
+
+              {room.id === selectedRoom?.id && (
+                <Html position={[room.x, room.height + 0.86, room.z]} center distanceFactor={10}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 10px',
+                      borderRadius: 999,
+                      background: 'rgba(32, 24, 20, 0.9)',
+                      border: `1px solid ${COLORS.action}88`,
+                      boxShadow: '0 16px 28px rgba(0,0,0,0.24)',
+                      backdropFilter: 'blur(12px)',
+                      pointerEvents: 'auto',
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    <button type="button" className="room-secondary-chip is-active" style={{ minHeight: 32, padding: '0 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={addWallOnSelectedRoomEdge}>
+                      <PlusOutlined />
+                      Wall
+                    </button>
+                    <button type="button" className="room-secondary-chip" style={{ minHeight: 32, padding: '0 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={cycleRoomWallPlacementSide}>
+                      <SwapOutlined />
+                      {roomWallPlacementSide[0].toUpperCase() + roomWallPlacementSide.slice(1)}
+                    </button>
+                  </div>
+                </Html>
+              )}
+
+              {roomScopedWalls.map((wall) => (
+                <InteractiveWall
+                  key={wall.id}
+                  ref={(r) => { if (r) wallRefs.current[wall.id] = r; }}
+                  wall={wall}
+                  isSelected={wall.id === selectedWallId}
+                  selectedOpening={selectedOpening?.wallId === wall.id ? selectedOpening : null}
+                  openingPreview={openingPreview?.wallId === wall.id ? openingPreview : null}
+                  activeOpeningTool={activeTool === 'door' || activeTool === 'window' ? activeTool : null}
+                  onSelect={() => {
+                    setSelectedRoomId(room.id);
+                    setSelectedWallId(wall.id);
+                    setSelectedFurnitureId(null);
+                    setSelectedLightId(null);
+                    setActiveTab('walls');
+                    if (activeTool === 'build') setActiveTool('select');
+                  }}
+                  onOpeningPreviewMove={(type, point) => updateOpeningPreview(wall, type, point)}
+                  onOpeningCommit={() => commitOpeningPreview(wall)}
+                  onOpeningSelect={(opening) => {
+                    setSelectedRoomId(room.id);
+                    setSelectedWallId(wall.id);
+                    setSelectedOpening({ ...opening, wallId: wall.id });
+                    setSelectedFurnitureId(null);
+                    setSelectedLightId(null);
+                    setActiveTab('walls');
+                  }}
+                  updateOpening={(type, openingId, updates) => updateWallOpening(wall.id, type, openingId, updates)}
+                  updateWall={updateWall}
+                  setOrbitEnabled={setOrbitEnabled}
+                  cameraMode={cameraMode}
+                />
+              ))}
+            </group>
+          )})}
 
           <WallGizmo
             selectedWall={selectedWall}
@@ -1281,7 +2009,7 @@ export default function RoomScene() {
             setOrbitEnabled={setOrbitEnabled}
           />
 
-          {/* ── World projectors ────────────────────────────────── */}
+          {/* World projectors*/}
           {selectedWall && (
             <WorldProjector
               type="wall"
@@ -1315,7 +2043,7 @@ export default function RoomScene() {
             );
           })()}
 
-          {/* ── Furniture ───────────────────────────────────────── */}
+          {/* Furniture */}
           <Suspense fallback={null}>
             {placedItems.map((item) => (
               <FurnitureItem
@@ -1338,14 +2066,14 @@ export default function RoomScene() {
             setOrbitEnabled={setOrbitEnabled}
           />
 
-          {/* ── Collision highlights ─────────────────────────────── */}
+          {/* Collision highlights */}
           <CollisionHighlight
             placedItems={placedItems}
             itemStates={spatial.itemStates}
             furnitureRefs={furnitureRefs}
           />
 
-          {/* ── Placed lights ────────────────────────────────────── */}
+          {/* Placed lights */}
           {placedLights.map((light) => (
             <PlacedLight
               key={light.id}
@@ -1357,28 +2085,12 @@ export default function RoomScene() {
             />
           ))}
 
-          {/* ── Floor ───────────────────────────────────────────── */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-            <planeGeometry args={[20, 20]} />
-            <Suspense fallback={<meshStandardMaterial color={floorMaterial.color} roughness={floorMaterial.roughness} metalness={floorMaterial.metalness} />}>
-              <SurfaceMaterial mat={floorMaterial} repeat={[6, 6]} />
-            </Suspense>
-          </mesh>
-
-          {/* ── Ceiling ─────────────────────────────────────────── */}
-          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 3.2, 0]} receiveShadow>
-            <planeGeometry args={[20, 20]} />
-            <Suspense fallback={<meshStandardMaterial color={ceilingMaterial.color} roughness={ceilingMaterial.roughness} metalness={ceilingMaterial.metalness} />}>
-              <SurfaceMaterial mat={ceilingMaterial} repeat={[4, 4]} />
-            </Suspense>
-          </mesh>
-
-          {/* ── Grid + Fog ──────────────────────────────────────── */}
+          {/* Grid + Fog */}
           <DreiGrid
-            args={[20, 20]} cellSize={0.5} cellThickness={0.5}
+            args={[boardFootprint.width, boardFootprint.depth]} cellSize={0.5} cellThickness={0.5}
             cellColor={COLORS.accent} sectionSize={2} sectionThickness={1}
             sectionColor={COLORS.action} fadeDistance={30}
-            position={[0, 0.001, 0]}
+            position={[boardFootprint.centerX, 0.001, boardFootprint.centerZ]}
           />
           <fog attach="fog" args={[lighting.fogColor, 15, 30]} />
         </Canvas>
@@ -1386,7 +2098,7 @@ export default function RoomScene() {
     </div>
   );
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // Render 
   return (
     <div
       style={{
@@ -1691,6 +2403,8 @@ export default function RoomScene() {
                 )}
               </div>
               {renderOpeningDimensionInputs()}
+              {renderDoorTypeControls()}
+              {renderDoorOpenControls()}
               {renderDoorBehaviorControls()}
               {renderWindowTypeControls()}
               {renderWindowBehaviorControls()}
@@ -1716,7 +2430,7 @@ export default function RoomScene() {
         </>
       )}
 
-      {/* ── Context toolbars ─────────────────────────────────────────────── */}
+      {/* Context toolbars */}
       <ContextToolbar
         type="wall"
         screenPos={selectedWall ? wallToolbarPos : null}
@@ -1754,17 +2468,17 @@ export default function RoomScene() {
         navigateTo={navigateTo}
       />
 
-      {/* ── Model preview portal ─────────────────────────────────────────── */}
+      {/*  Model preview portal  */}
       <PreviewPortal />
 
-      {/* ── Spatial score panel ──────────────────────────────────────────── */}
+      {/*  Spatial score panel  */}
       <ScorePanel
         score={spatial.score}
         suggestions={spatial.suggestions}
         visible={placedItems.length > 0}
       />
 
-      {/* ── Save modal ───────────────────────────────────────────────────── */}
+      {/*  Save modal  */}
       <SaveModal
         open={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
@@ -1775,6 +2489,12 @@ export default function RoomScene() {
         downloadSnapshot={projectSave.downloadSnapshot}
         exportJSON={projectSave.exportJSON}
         importJSON={projectSave.importJSON}
+        shareUrl={projectSave.shareUrl}
+        modelAssets={projectSave.modelAssets}
+        assetUploadStatus={projectSave.assetUploadStatus}
+        uploadModelAsset={projectSave.uploadModelAsset}
+        copyShareLink={projectSave.copyShareLink}
+        openSharePage={projectSave.openSharePage}
         autosaveEnabled={projectSave.autosaveEnabled}
         setAutosaveEnabled={projectSave.setAutosaveEnabled}
         recorderProps={recorder}

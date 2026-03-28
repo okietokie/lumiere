@@ -1,6 +1,3 @@
-// src/components/threeD/furniture/ModelPreview.jsx
-// Preview panel — uses a Canvas that only mounts when actively hovering.
-// Destroyed after a short delay when hover ends to free WebGL context.
 import React, { Suspense, useEffect, useRef, useState, useCallback } from 'react';
 import { SkeletonUtils } from 'three-stdlib';
 import { Canvas, useFrame } from '@react-three/fiber';
@@ -102,8 +99,6 @@ export function PreviewPortal() {
     </div>
   );
 }
-
-// ── Lightweight trigger ───────────────────────────────────────────────────────
 export default function ModelPreview({ model, anchorEl }) {
   useEffect(() => {
     if (!anchorEl || !model || !_setPreviewState) return;
@@ -119,8 +114,6 @@ export default function ModelPreview({ model, anchorEl }) {
 
   return null;
 }
-
-// ── Model renderer ────────────────────────────────────────────────────────────
 function PreviewModel({ url }) {
   if (!url) return <NotAvailablePlaceholder />;
   const { scene } = useGLTF(url);
@@ -161,3 +154,4 @@ function LoadingSpinner() {
     </mesh>
   );
 }
+

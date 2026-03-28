@@ -1,4 +1,3 @@
-// src/components/helpers/Wall.jsx
 import { forwardRef } from "react";
 import { COLORS } from "../../../utils/colors.js";
 

@@ -1,18 +1,4 @@
-// src/utils/tintStore.js
-//
-// Shared singleton for furniture tint operations.
-//
-// WHY THIS EXISTS:
-//   Both FurnitureTint.jsx and ContextToolbar.jsx had their own private
-//   _originals Map. They never shared data, so capture in one and apply
-//   in the other always failed silently.
-//   All tint logic now lives here — one Map, one truth.
-//
-// ALSO FIXED:
-//   - captureOriginals always refreshes entries (was skipping if key existed,
-//     so a re-selected item would tint from the already-tinted color)
-//   - Works with the two-group architecture: outerGroup → innerGroup → centerGroup
-//     → clonedScene. traverse() descends all the way regardless.
+// Shares original material colors across tint workflows.
 
 import * as THREE from 'three';
 
@@ -38,13 +24,10 @@ export function normalizeTint(tint) {
   };
 }
 
-// itemId → Map<"meshUuid-matUuid", THREE.Color>
-// Keyed by item id so switching selection never cross-contaminates.
+// Stores original colors by item id and material identity.
 const _store = new Map();
 
-// ── Capture ───────────────────────────────────────────────────────────────────
-// Always refreshes — call this every time an item is selected or becomes active.
-// `meshGroup` is the Three.js Object3D exposed via furnitureRefs.current[id].
+// Refreshes the stored baseline each time an item becomes active.
 export function captureOriginals(itemId, meshGroup) {
   if (!meshGroup || !itemId) return;
   const map = new Map();
@@ -61,7 +44,6 @@ export function captureOriginals(itemId, meshGroup) {
   _store.set(itemId, map);
 }
 
-// ── Apply ─────────────────────────────────────────────────────────────────────
 export function applyTint(itemId, meshGroup, hueShift, saturation, brightness) {
   if (!meshGroup || !itemId) return;
   const map = _store.get(itemId);
@@ -98,12 +80,10 @@ export function applyTint(itemId, meshGroup, hueShift, saturation, brightness) {
   });
 }
 
-// ── Reset to original ─────────────────────────────────────────────────────────
 export function resetTint(itemId, meshGroup) {
   applyTint(itemId, meshGroup, 0, 1, 1);
 }
 
-// ── Clear stored entry (on item delete) ───────────────────────────────────────
 export function clearTintStore(itemId) {
   _store.delete(itemId);
 }

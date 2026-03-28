@@ -1,4 +1,3 @@
-// src/components/helpers/FirstPersonControls.jsx
 import { useState, useEffect } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import { PointerLockControls } from "@react-three/drei";
@@ -78,8 +77,6 @@ export default function FirstPersonControls({ position, setPosition, dimensions,
       camera.position.set(newX, 1.6, newZ);
     }
   });
-
-  // Only sync to React state when the user is done walking (hits ESC)
   const handleUnlock = () => {
     setIsLocked(false);
     setPosition([camera.position.x, camera.position.y, camera.position.z]);

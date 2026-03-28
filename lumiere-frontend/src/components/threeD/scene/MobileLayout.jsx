@@ -1,14 +1,6 @@
-// src/components/threeD/scene/MobileLayout.jsx
-// Full mobile UI — replaces Splitter sidebar with:
-//   • Full-screen 3D canvas
-//   • Bottom navigation bar
-//   • Slide-up panels per tab
-//   • FAB for quick add wall/furniture
 import { useState, useRef, useEffect } from 'react';
 import { COLORS } from '../../../utils/colors';
 import { gsap } from 'gsap';
-
-// ── Icons (inline SVG, no antd dependency) ────────────────────────────────────
 function Icon({ d, size = 22, color = 'currentColor' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
@@ -29,8 +21,6 @@ const ICONS = {
   redo:      'M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z',
   camera:    'M9 3L7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2h-3.17L15 3H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z',
 };
-
-// ── Slide-up panel ────────────────────────────────────────────────────────────
 export function SlidePanel({ open, onClose, title, children, height = '75vh' }) {
   const panelRef = useRef(null);
 
@@ -118,8 +108,6 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
     </>
   );
 }
-
-// ── Bottom navigation bar ─────────────────────────────────────────────────────
 export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, onUndo, onRedo }) {
   const tabs = [
     { key: 'walls',     label: 'Build',     icon: ICONS.walls     },
@@ -209,8 +197,6 @@ export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, on
     </div>
   );
 }
-
-// ── Top bar (mobile) ──────────────────────────────────────────────────────────
 export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
   return (
     <div style={{
@@ -260,3 +246,4 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
     </div>
   );
 }
+

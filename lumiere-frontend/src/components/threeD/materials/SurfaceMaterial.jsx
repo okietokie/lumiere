@@ -1,10 +1,5 @@
-// src/components/threeD/materials/SurfaceMaterial.jsx
-// Generates PBR textures procedurally using HTML Canvas.
-// Zero external requests — works offline, no CORS issues.
 import { useMemo, useEffect } from 'react';
 import * as THREE from 'three';
-
-// ── Procedural texture generators ────────────────────────────────────────────
 
 function makeCanvas(size = 512) {
   const c = document.createElement('canvas');
@@ -19,8 +14,6 @@ function canvasToTexture(canvas, repeat = [4, 4]) {
   tex.needsUpdate = true;
   return tex;
 }
-
-// Wood grain
 function generateWood(color, grainColor, size = 512) {
   const c = makeCanvas(size);
   const ctx = c.getContext('2d');
@@ -41,7 +34,6 @@ function generateWood(color, grainColor, size = 512) {
     ctx.lineWidth = 1 + Math.random() * 2;
     ctx.stroke();
   }
-  // Subtle plank lines
   const planks = 4 + Math.floor(Math.random() * 3);
   for (let i = 1; i < planks; i++) {
     const y = (size / planks) * i;
@@ -50,8 +42,6 @@ function generateWood(color, grainColor, size = 512) {
   }
   return c;
 }
-
-// Marble
 function generateMarble(baseColor, veinColor, size = 512) {
   const c = makeCanvas(size);
   const ctx = c.getContext('2d');
@@ -76,14 +66,11 @@ function generateMarble(baseColor, veinColor, size = 512) {
   }
   return c;
 }
-
-// Concrete
 function generateConcrete(color, size = 512) {
   const c = makeCanvas(size);
   const ctx = c.getContext('2d');
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, size, size);
-  // Noise layer
   const imageData = ctx.getImageData(0, 0, size, size);
   const d = imageData.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -109,8 +96,6 @@ function generateConcrete(color, size = 512) {
   }
   return c;
 }
-
-// Brick
 function generateBrick(mortarColor, brickColor, size = 512) {
   const c = makeCanvas(size);
   const ctx = c.getContext('2d');
@@ -124,7 +109,6 @@ function generateBrick(mortarColor, brickColor, size = 512) {
     const cols = Math.ceil((size + brickW) / (brickW + mortarW));
     for (let col = 0; col < cols; col++) {
       const x = col * (brickW + mortarW) - offset;
-      // Vary each brick color slightly
       const vary = (Math.random() - 0.5) * 20;
       const base = parseInt(brickColor.replace('#', ''), 16);
       const r = Math.max(0, Math.min(255, (base >> 16) + vary));
@@ -136,8 +120,6 @@ function generateBrick(mortarColor, brickColor, size = 512) {
   }
   return c;
 }
-
-// Tiles
 function generateTile(color, groutColor, size = 512) {
   const c = makeCanvas(size);
   const ctx = c.getContext('2d');
@@ -164,8 +146,6 @@ function generateTile(color, groutColor, size = 512) {
   }
   return c;
 }
-
-// Plain with subtle noise (for paint, plaster, ceiling)
 function generatePlain(color, noiseAmount = 12, size = 512) {
   const c = makeCanvas(size);
   const ctx = c.getContext('2d');
@@ -184,8 +164,6 @@ function generatePlain(color, noiseAmount = 12, size = 512) {
   }
   return c;
 }
-
-// Carpet
 function generateCarpet(color, size = 512) {
   const c = makeCanvas(size);
   const ctx = c.getContext('2d');
@@ -205,8 +183,6 @@ function generateCarpet(color, size = 512) {
   }
   return c;
 }
-
-// ── Texture builder map ────────────────────────────────────────────────────────
 function buildTexture(textureId, color) {
   switch (textureId) {
     case 'wood_light':      return generateWood(color, '#3D1F00');
@@ -224,8 +200,6 @@ function buildTexture(textureId, color) {
     default:                return generatePlain(color, 8);
   }
 }
-
-// ── Main export ───────────────────────────────────────────────────────────────
 export default function SurfaceMaterial({ mat, repeat = [4, 4], transparent = false, opacity = 1, depthWrite = true }) {
     const texture = useMemo(() => {
     if (!mat?.textureId) return null;

@@ -7,7 +7,6 @@ export default function HandTracker({ onResults }) {
   const pinchStateRef = useRef(false);
   const prevPosRef = useRef(null);
 
-  // Distance helper
   function getDistance(a, b) {
     const dx = a.x - b.x;
     const dy = a.y - b.y;
@@ -23,7 +22,7 @@ export default function HandTracker({ onResults }) {
     });
 
     hands.setOptions({
-      maxNumHands: 1, // keep it simple for now
+      maxNumHands: 1,
       modelComplexity: 1,
       minDetectionConfidence: 0.7,
       minTrackingConfidence: 0.7,
@@ -35,13 +34,11 @@ export default function HandTracker({ onResults }) {
 
       ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (results.multiHandLandmarks?.length) {
-        const landmarks = results.multiHandLandmarks[0]; // use first hand only
+        const landmarks = results.multiHandLandmarks[0];
 
-        // Draw skeleton
         window.drawConnectors(
           ctx,
           landmarks,
@@ -49,12 +46,9 @@ export default function HandTracker({ onResults }) {
         );
         window.drawLandmarks(ctx, landmarks);
 
-        // =========================
-        // PINCH DETECTION
-        // =========================
+        // Tracks pinch state with separate start and end thresholds.
         const thumb = landmarks[4];
         const index = landmarks[8];
-
         const distance = getDistance(thumb, index);
 
         const PINCH_START = 0.045;
@@ -72,9 +66,7 @@ export default function HandTracker({ onResults }) {
 
         pinchStateRef.current = isPinching;
 
-        // =========================
-        // TWO FINGER MODE DETECTION
-        // =========================
+        // Treats index and middle fingers as the two-finger gesture.
         const indexExtended = landmarks[8].y < landmarks[6].y;
         const middleExtended = landmarks[12].y < landmarks[10].y;
         const ringExtended = landmarks[16].y < landmarks[14].y;
@@ -86,9 +78,7 @@ export default function HandTracker({ onResults }) {
           !ringExtended &&
           !pinkyExtended;
 
-        // =========================
-        // SWIPE DETECTION
-        // =========================
+        // Measures frame-to-frame index-finger movement.
         const currentPos = {
           x: landmarks[8].x,
           y: landmarks[8].y,
@@ -104,7 +94,6 @@ export default function HandTracker({ onResults }) {
 
         prevPosRef.current = currentPos;
 
-        // Send everything upward
         if (onResults) {
           onResults({
             landmarks,
@@ -116,7 +105,7 @@ export default function HandTracker({ onResults }) {
           });
         }
       } else {
-        // Reset if hand disappears
+        // Clears gesture state when the hand leaves the frame.
         prevPosRef.current = null;
         pinchStateRef.current = false;
       }

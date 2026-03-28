@@ -1,10 +1,3 @@
-// src/components/threeD/walls/InteractiveWall.jsx
-// FIXES:
-//  - Drag body/endpoints now uses a stable origin snapshot so the wall
-//    doesn't jump when pointer re-enters after a fast move.
-//  - Pointer events use setPointerCapture so the drag stays locked to this
-//    element even if the pointer leaves the canvas bounds.
-//  - Ghost opacity effect is keyed off of cameraMode properly.
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
@@ -16,8 +9,6 @@ import BasicWindow from '../scene/windows/BasicWindow';
 
 const FADE_START = 1.8;
 const FADE_END   = 0.5;
-
-// Reusable raycaster + plane — allocating once avoids GC pressure
 const _ray   = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _hit   = new THREE.Vector3();
@@ -40,6 +31,7 @@ const InteractiveWall = React.forwardRef(({
     doors = [],
     windows = [],
   } = wall;
+  const safeThickness = Number.isFinite(thickness) && thickness > 0 ? Math.max(thickness, 0.05) : 0.2;
 
   const centerX = (start[0] + end[0]) / 2;
   const centerZ = (start[1] + end[1]) / 2;
@@ -103,15 +95,15 @@ const InteractiveWall = React.forwardRef(({
     }));
 
     const geometry = new THREE.ExtrudeGeometry(wallShape, {
-      depth: thickness,
+      depth: safeThickness,
       bevelEnabled: false,
       steps: 1,
     });
 
-    geometry.translate(0, -height / 2, -thickness / 2);
+    geometry.translate(0, -height / 2, -safeThickness / 2);
     geometry.computeVertexNormals();
     return geometry;
-  }, [doors, height, length, thickness, windows]);
+  }, [doors, height, length, safeThickness, windows]);
 
   // ── First-person proximity fade ──────────────────────────────────────────
   useFrame(() => {
@@ -136,8 +128,6 @@ const InteractiveWall = React.forwardRef(({
       m.transparent = m.opacity < 0.99;
     });
   });
-
-  // ── Ground-plane hit test ─────────────────────────────────────────────────
   const getGroundPos = useCallback((clientX, clientY) => {
     const rect = gl.domElement.getBoundingClientRect();
     const ndc  = new THREE.Vector2(
@@ -161,8 +151,6 @@ const InteractiveWall = React.forwardRef(({
     const maxOffset = Math.max(length - 0.2 - halfWidth, minOffset);
     return THREE.MathUtils.clamp(offset, minOffset, maxOffset);
   }, [length]);
-
-  // ── Drag ─────────────────────────────────────────────────────────────────
   const startDrag = useCallback((e, dragType) => {
     e.stopPropagation();
     // Capture pointer so drag continues even outside the mesh
@@ -196,20 +184,15 @@ const InteractiveWall = React.forwardRef(({
           end:   [ds.initEnd[0]   + dx, ds.initEnd[1]   + dz],
         });
       } else {
-        // Endpoint drag — constrain new endpoint along the wall axis
         const isStartDrag = ds.type === 'start';
         const fixedPoint  = isStartDrag ? ds.initEnd   : ds.initStart;
         const dragAngle   = isStartDrag ? angle + Math.PI : angle;
-
-        // Project pointer onto wall axis
         const newX    = pos.x;
         const newZ    = pos.z;
         const relX    = newX - fixedPoint[0];
         const relZ    = newZ - fixedPoint[1];
         let   newLen  = relX * Math.cos(dragAngle) + relZ * Math.sin(dragAngle);
         newLen = Math.max(0.3, newLen);
-
-        // Snap to 0.5m grid
         const snapped = Math.round(newLen / 0.5) * 0.5;
         if (Math.abs(newLen - snapped) < 0.12) newLen = snapped;
 
@@ -326,7 +309,7 @@ const InteractiveWall = React.forwardRef(({
       : selected ? COLORS.action : COLORS.accent;
     const fillOpacity = preview ? (opening.valid ? 0.24 : 0.18) : selected ? 0.3 : 0.16;
     const panelOpacity = preview ? (opening.valid ? 0.88 : 0.72) : selected ? 0.92 : 0.58;
-    const frameDepth = Math.max(thickness + 0.02, 0.12);
+    const frameDepth = Math.max(safeThickness + 0.02, 0.12);
 
     if (openingType === 'door') {
       return (
@@ -335,7 +318,11 @@ const InteractiveWall = React.forwardRef(({
             position={[localX, bottomOffset, 0]}
             width={openingWidth}
             height={openingHeight}
-            depth={Math.max(thickness * 0.55, 0.05)}
+            doorStyle={opening.doorStyle ?? 'hinged'}
+            openAmount={opening.openAmount ?? 0}
+            slideDirection={opening.slideDirection ?? 'right'}
+            panelCount={opening.panelCount ?? ((opening.doorStyle ?? 'hinged') === 'double' ? 2 : 1)}
+            depth={Math.max(safeThickness * 0.55, 0.05)}
             frameDepth={frameDepth}
             frameThickness={opening.frameThickness ?? 0.04}
             hingeSide={opening.hingeSide ?? 'left'}
@@ -409,7 +396,7 @@ const InteractiveWall = React.forwardRef(({
           position={[localX, bottomOffset, 0]}
           width={openingWidth}
           height={openingHeight}
-          depth={Math.max(thickness * 0.5, 0.03)}
+          depth={Math.max(safeThickness * 0.5, 0.03)}
           frameDepth={frameDepth}
           frameThickness={opening.frameThickness ?? 0.04}
           frameColor={preview ? tint : (selected ? '#8b6a4f' : '#7b5e47')}
@@ -433,37 +420,37 @@ const InteractiveWall = React.forwardRef(({
         )}
         {!preview && selected && (
           <>
-            <mesh position={[localX, centerY, (thickness / 2) + 0.025]} renderOrder={6}>
+            <mesh position={[localX, centerY, (safeThickness / 2) + 0.025]} renderOrder={6}>
               <ringGeometry args={[Math.max(openingWidth / 2, 0.32), Math.max(openingWidth / 2, 0.32) + 0.02, 48]} />
               <meshBasicMaterial color={COLORS.action} transparent opacity={0.65} side={THREE.DoubleSide} />
             </mesh>
-            <mesh position={[0, centerY, (thickness / 2) + 0.018]} renderOrder={6}>
+            <mesh position={[0, centerY, (safeThickness / 2) + 0.018]} renderOrder={6}>
               <planeGeometry args={[length, 0.015]} />
               <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
             </mesh>
             <mesh
-              position={[localX, centerY, (thickness / 2) + 0.04]}
+              position={[localX, centerY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
             >
               <coneGeometry args={[0.08, 0.18, 18]} />
               <meshBasicMaterial color={COLORS.action} depthTest={false} />
             </mesh>
             <mesh
-              position={[localX, centerY, (thickness / 2) + 0.13]}
+              position={[localX, centerY, (safeThickness / 2) + 0.13]}
               rotation={[Math.PI / 2, 0, 0]}
             >
               <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
               <meshBasicMaterial color={COLORS.action} depthTest={false} />
             </mesh>
             <mesh
-              position={[localX - (openingWidth / 2), centerY, (thickness / 2) + 0.04]}
+              position={[localX - (openingWidth / 2), centerY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'start')}
             >
               <boxGeometry args={[0.09, 0.09, 0.09]} />
               <meshBasicMaterial color="#ffd86c" depthTest={false} />
             </mesh>
             <mesh
-              position={[localX + (openingWidth / 2), centerY, (thickness / 2) + 0.04]}
+              position={[localX + (openingWidth / 2), centerY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'end')}
             >
               <boxGeometry args={[0.09, 0.09, 0.09]} />
@@ -583,3 +570,4 @@ const InteractiveWall = React.forwardRef(({
 });
 
 export default InteractiveWall;
+

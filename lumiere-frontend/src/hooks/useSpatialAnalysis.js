@@ -1,16 +1,12 @@
-// src/hooks/useSpatialAnalysis.js
-// Pure client-side spatial intelligence engine.
-// Runs on every render tick to provide live feedback.
-// No backend needed — all geometry math in the browser.
 import { useMemo } from 'react';
 import * as THREE from 'three';
-
-// ── Spacing thresholds (metres) ────────────────────────────────────────────
 const MIN_CLEARANCE    = 0.6;  // minimum walkable gap between objects
 const WALL_MIN         = 0.05; // minimum gap from wall surface
 const WALL_IDEAL_MAX   = 0.3;  // objects further than this from walls score higher (room to breathe)
 
-// ── Category-specific rules ───────────────────────────────────────────────
+// frontClearance -space needed in front (walking space)
+// sideClearance -space needed on sides (for access)
+
 const CATEGORY_RULES = {
   sofa:      { frontClearance: 1.0, sideClearance: 0.4, label: 'Sofa' },
   sofas:     { frontClearance: 1.0, sideClearance: 0.4, label: 'Sofa' },
@@ -30,12 +26,9 @@ function getCategoryFromFilename(filename) {
   const part = (filename || '').split('/')[0].toLowerCase();
   return CATEGORY_RULES[part] || { frontClearance: 0.6, sideClearance: 0.3, label: 'Object' };
 }
-
-// ── Get bounding box for a placed item ───────────────────────────────────
 function getBox(item, furnitureRefs) {
   const mesh = furnitureRefs.current?.[item.id];
   if (!mesh) {
-    // Fallback: estimate from position + scale
     const [px, py, pz] = item.position;
     const [sx,  , sz]  = item.scale;
     const hw = (sx * 0.5) / 2;
@@ -47,8 +40,6 @@ function getBox(item, furnitureRefs) {
   }
   return new THREE.Box3().setFromObject(mesh);
 }
-
-// ── Wall segments as line segments for distance checks ───────────────────
 function wallSegments(walls) {
   return walls.map((w) => ({
     a: new THREE.Vector3(w.start[0], 0, w.start[1]),
@@ -70,20 +61,14 @@ function minDistToWalls(pos, segments) {
   if (!segments.length) return Infinity;
   return Math.min(...segments.map((s) => distToSegment(pos, s.a, s.b)));
 }
-
-
-// ── Gap between two Box3 objects (replaces removed Box3.distanceToBox) ────
 function gapBetweenBoxes(a, b) {
   // If they intersect, gap is 0 (or negative — treat as 0)
   if (a.intersectsBox(b)) return 0;
-  // Compute separation on each axis, take max(0, separation) per axis
   const dx = Math.max(0, Math.max(a.min.x - b.max.x, b.min.x - a.max.x));
   const dy = Math.max(0, Math.max(a.min.y - b.max.y, b.min.y - a.max.y));
   const dz = Math.max(0, Math.max(a.min.z - b.max.z, b.min.z - a.max.z));
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
-
-// ── Main analysis ─────────────────────────────────────────────────────────
 export default function useSpatialAnalysis(placedItems, walls, furnitureRefs) {
   const result = useMemo(() => {
     if (!placedItems.length) return { score: 100, collisions: [], suggestions: [], itemStates: {} };
@@ -103,7 +88,6 @@ export default function useSpatialAnalysis(placedItems, walls, furnitureRefs) {
       for (let j = i + 1; j < boxes.length; j++) {
         const a = boxes[i];
         const b = boxes[j];
-        // Shrink boxes slightly to avoid false positives from touching edges
         const aSmall = a.box.clone().expandByScalar(-0.05);
         const bSmall = b.box.clone().expandByScalar(-0.05);
         if (aSmall.intersectsBox(bSmall)) {
@@ -129,8 +113,6 @@ export default function useSpatialAnalysis(placedItems, walls, furnitureRefs) {
       const rule   = getCategoryFromFilename(item.filename);
       const center = new THREE.Vector3();
       box.getCenter(center);
-
-      // Distance to nearest wall
       const wallDist = minDistToWalls(center, segments);
 
       // Check if too close to wall (but not intentionally against it)
@@ -154,7 +136,6 @@ export default function useSpatialAnalysis(placedItems, walls, furnitureRefs) {
           scoreDeductions += 8;
           const nameA = rule.label;
           const nameB = getCategoryFromFilename(other.item.filename).label;
-          // Avoid duplicate suggestions
           const key = [item.id, other.item.id].sort().join('-');
           if (!suggestions.find((s) => s.key === key)) {
             suggestions.push({
@@ -193,11 +174,7 @@ export default function useSpatialAnalysis(placedItems, walls, furnitureRefs) {
     } else if (placedItems.length < 3) {
       suggestions.push({ type: 'sparse', text: 'Room looks sparse — consider adding more pieces', severity: 'tip' });
     }
-
-    // ── 5. Compute final score ──────────────────────────────────────────
     const score = Math.max(0, Math.min(100, 100 - scoreDeductions));
-
-    // Deduplicate suggestions
     const seen = new Set();
     const uniqueSuggestions = suggestions.filter((s) => {
       const k = s.text;

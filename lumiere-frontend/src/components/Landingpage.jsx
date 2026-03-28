@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom';
 const { Title, Text, Paragraph } = Typography;
 const { Header, Content, Footer } = Layout;
 
-// ── Responsive hook ───────────────────────────────────────────────────────────
+//  Responsive hook 
 function useIsMobile() {
   const [mobile, setMobile] = React.useState(() => window.innerWidth < 768);
   React.useEffect(() => {
@@ -64,7 +64,7 @@ const LandingPage = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: COLORS.background, overflowX: 'hidden' }}>
 
-      {/* ── Header ─────────────────────────────────────────────────────── */}
+      {/*  Header */}
       <Header style={{
         background:   COLORS.surface,
         padding:      '0 16px',
@@ -104,7 +104,7 @@ const LandingPage = () => {
 
       <Content>
 
-        {/* ── Hero ───────────────────────────────────────────────────────── */}
+        {/*  Hero */}
         <section style={{
           padding:    isMobile ? '48px 20px 40px' : '80px 40px',
           background: `linear-gradient(135deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`,
@@ -144,7 +144,7 @@ const LandingPage = () => {
           </div>
         </section>
 
-        {/* ── Features ───────────────────────────────────────────────────── */}
+        {/*  Features */}
         <section style={{ padding: isMobile ? '48px 20px' : '80px 40px' }}>
           <div style={{ textAlign: 'center', marginBottom: 48 }}>
             <Title level={2} style={{ color: COLORS.text, marginBottom: 8 }}>What Lumiere Does</Title>
@@ -177,7 +177,7 @@ const LandingPage = () => {
           </Row>
         </section>
 
-        {/* ── How it works ───────────────────────────────────────────────── */}
+        {/*  How it works */}
         <section style={{
           padding:    isMobile ? '48px 20px' : '80px 40px',
           background: `linear-gradient(135deg, ${COLORS.surface} 0%, ${COLORS.background} 100%)`,
@@ -219,7 +219,7 @@ const LandingPage = () => {
           </Row>
         </section>
 
-        {/* ── Sign up ────────────────────────────────────────────────────── */}
+        {/*  Sign up */}
         <section id="signup-section" style={{ padding: isMobile ? '48px 20px 60px' : '80px 40px' }}>
           <div style={{ maxWidth: 480, margin: '0 auto' }}>
             <Card
@@ -308,7 +308,7 @@ const LandingPage = () => {
         </section>
       </Content>
 
-      {/* ── Footer ─────────────────────────────────────────────────────── */}
+      {/*  Footer */}
       <Footer style={{ background: COLORS.surface, borderTop: `1px solid ${COLORS.action}20`, padding: isMobile ? '32px 20px' : '48px 40px' }}>
         <Row gutter={[32, 32]}>
           <Col xs={24} sm={8}>

@@ -1,13 +1,3 @@
-// src/components/threeD/ui/RecordingPanel.jsx
-//
-// Self-contained recording section embedded directly in SaveModal.
-// Accepts the recorderProps object returned by useRecorder.
-//
-// Visually matches the existing SaveModal aesthetic:
-//  - Same dark palette (COLORS from colors.js)
-//  - Same label/ghost-button style
-//  - GSAP micro-animations on state transitions
-//  - Clean mode selector (not a busy tab strip)
 
 import { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
@@ -23,8 +13,6 @@ const C = {
   recRed:  '#C0504D',
   success: '#7FB069',
 };
-
-// ── Mode card ─────────────────────────────────────────────────────────────────
 function ModeCard({ active, onClick, icon, title, description, disabled }) {
   const ref = useRef(null);
   return (
@@ -90,8 +78,6 @@ function ModeCard({ active, onClick, icon, title, description, disabled }) {
     </button>
   );
 }
-
-// ── Progress bar ──────────────────────────────────────────────────────────────
 function ProgressBar({ pct }) {
   const fillRef = useRef(null);
   useEffect(() => {
@@ -120,8 +106,6 @@ function ProgressBar({ pct }) {
     </div>
   );
 }
-
-// ── Video preview ─────────────────────────────────────────────────────────────
 function VideoPreview({ url, onClose }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -178,8 +162,6 @@ function VideoPreview({ url, onClose }) {
     </div>
   );
 }
-
-// ── RecordingPanel ────────────────────────────────────────────────────────────
 export default function RecordingPanel({
   recState, progress, lastVideoUrl,
   isRecording, isBusy,
@@ -201,8 +183,6 @@ export default function RecordingPanel({
     if (mode === 'auto') startAutoCapture();
     else                 startManualRecording();
   };
-
-  // ── Labels / colours per state ────────────────────────────────────────────
   const stateConfig = {
     idle:             { label: mode === 'auto' ? 'Start Auto Capture' : 'Start Recording',  bg: C.action,   color: '#1A1008' },
     'auto-starting':  { label: 'Starting...',         bg: C.action,   color: '#1A1008' },
@@ -363,8 +343,6 @@ export default function RecordingPanel({
     </div>
   );
 }
-
-// Tiny inline SVG icon — record circle vs play indicator
 function RecordIcon({ mode }) {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">

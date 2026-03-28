@@ -1,4 +1,3 @@
-// src/components/threeD/furniture/FurnitureItem.jsx
 import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
@@ -67,9 +66,6 @@ function toUsableModelUrl(value, fallbackFilename = '') {
   if (_learnedCdnBase) return `${_learnedCdnBase}/${clean}`;
   return `${API_BASE}/api/proxy/models/${clean}`;
 }
-
-// Call this once after the model list is fetched.
-// Pass any model object that has a valid full url + filename.
 export function learnCdnBase(models) {
   for (const m of models) {
     const inferredBase = inferCdnBaseFromModel(m);
@@ -94,18 +90,6 @@ export function learnCdnBase(models) {
     }
   }
 }
-
-// ── URL resolver ──────────────────────────────────────────────────────────────
-//
-// Resolution order:
-//  1. Full https URL already stored in the item → use directly (fast path, always works)
-//  2. No url, but filename + learned CDN base → build full CDN URL
-//  3. No url, no CDN base → fall back to proxy (still works, just slower)
-//  4. Bare relative path → proxy (handles edge cases / stale data)
-//
-// The proxy fallback should now rarely trigger because:
-//  a) New saves include url (fixed in useProjectSave)
-//  b) learnCdnBase() fills the gap for old saves
 
 export function resolveGlbUrl(raw, filename) {
   const cleanFilename = normalizePath(filename);
@@ -160,8 +144,6 @@ export function resolveModelPreviewUrls(raw, filename, explicitPreviewUrl = null
   );
   return [...new Set(urls.filter(Boolean))];
 }
-
-// ── Target sizes per category ─────────────────────────────────────────────────
 const CATEGORY_TARGETS = {
   sofa:       { axis: 'x', size: 2.0 },
   sofas:      { axis: 'x', size: 2.0 },
@@ -201,8 +183,6 @@ function computeNormAndCentroid(scene, category) {
     return { normScale: 1, centroid: [0, 0, 0] };
   }
 }
-
-// Guard wrapper
 const FurnitureItem = forwardRef((props, ref) => {
   const resolvedUrl = resolveGlbUrl(props.item?.url, props.item?.filename);
   if (!resolvedUrl) return null;
@@ -332,3 +312,4 @@ const FurnitureInner = forwardRef(({
 });
 
 export default FurnitureItem;
+

@@ -1,4 +1,3 @@
-// src/utils/colors.js - Professional Black & Brown Dark Palette (Improved Contrast)
 export const COLORS = {
   background: '#2C2420',    // Warmer dark brown - more visible
   surface: '#3A302B',       // Lighter chocolate for cards

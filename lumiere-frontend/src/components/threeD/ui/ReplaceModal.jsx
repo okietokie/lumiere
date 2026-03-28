@@ -1,7 +1,3 @@
-// src/components/ui/ReplaceModal.jsx
-// Modal for replacing a placed furniture item.
-// Shows the model grid — clicking a model replaces the selected item
-// at the exact same position, rotation, and scale.
 import { useEffect, useState, useCallback } from 'react';
 import { Modal, Spin, Empty } from 'antd';
 import { SwapOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -189,3 +185,4 @@ function ModelChip({ model, isCurrent, onClick }) {
     </button>
   );
 }
+

@@ -1,11 +1,3 @@
-// src/components/threeD/furniture/FurnitureGizmo.jsx
-//
-// With the two-group architecture in FurnitureItem:
-//   • TransformControls attaches to outerGroup (position / rotation / userScale)
-//   • normScale lives in innerGroup — the gizmo NEVER sees or modifies it
-//   • On mouseDown  → sync outerGroup to current React state (userScale only)
-//   • On mouseUp    → read outerGroup values directly — they ARE the new userScale
-//   • No division by normScale needed anymore — it's simply not involved
 
 import { useRef, useEffect } from 'react';
 import { TransformControls } from '@react-three/drei';
@@ -77,8 +69,6 @@ function FurnitureGizmoInner({ selectedItem, itemRef, gizmoMode, updateItem, set
     const obj  = itemRef.current;
     const snap = snapshotRef.current;
     if (!obj || !snap) return;
-
-    // outerGroup scale IS the userScale — normScale is in innerGroup, untouched
     const newPosition = [obj.position.x, obj.position.y, obj.position.z];
     const newRotation = [obj.rotation.x, obj.rotation.y, obj.rotation.z];
     const newScale    = [

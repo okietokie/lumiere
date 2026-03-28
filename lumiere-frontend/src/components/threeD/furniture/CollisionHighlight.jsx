@@ -1,6 +1,3 @@
-// src/components/threeD/furniture/CollisionHighlight.jsx
-// Renders a red wireframe bounding box around furniture items in collision.
-// Lives inside <Canvas>. Uses useFrame to update box each tick.
 import { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -56,3 +53,4 @@ export default function CollisionHighlight({ placedItems, itemStates, furnitureR
 
   return <group ref={groupRef} />;
 }
+

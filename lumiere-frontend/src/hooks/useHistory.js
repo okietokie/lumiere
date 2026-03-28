@@ -1,4 +1,3 @@
-// src/hooks/useHistory.js
 import { useState, useCallback } from 'react';
 
 export default function useHistory(initialState) {

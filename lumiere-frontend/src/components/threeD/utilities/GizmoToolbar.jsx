@@ -1,4 +1,3 @@
-// src/components/helpers/GizmoToolbar.jsx
 import React from 'react';
 import { Button } from "antd";
 import { DragOutlined, SwapOutlined, ExpandOutlined } from "@ant-design/icons";

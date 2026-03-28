@@ -9,9 +9,40 @@ export const DEFAULT_WALL_STYLE = {
   textureUrl: null,
 };
 
-export function createWallEntity(overrides = {}) {
+const MIN_WALL_THICKNESS = 0.05;
+
+function normalizeWallThickness(value) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return DEFAULT_WALL_STYLE.thickness;
+  }
+
+  return Math.max(MIN_WALL_THICKNESS, value);
+}
+
+export const DEFAULT_ROOM_DIMENSIONS = {
+  width: 6,
+  depth: 6,
+  height: 3,
+};
+
+export function createRoomEntity(overrides = {}) {
   return {
     id: uuidv4(),
+    name: 'Room 1',
+    type: 'room',
+    x: 0,
+    z: 0,
+    ...DEFAULT_ROOM_DIMENSIONS,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  };
+}
+
+export function createWallEntity(overrides = {}) {
+  const wall = {
+    id: uuidv4(),
+    roomId: null,
     start: [-1, 0],
     end: [1, 0],
     doors: [],
@@ -25,6 +56,9 @@ export function createWallEntity(overrides = {}) {
     ...DEFAULT_WALL_STYLE,
     ...overrides,
   };
+
+  wall.thickness = normalizeWallThickness(wall.thickness);
+  return wall;
 }
 
 export function createDoorEntity(overrides = {}) {
@@ -32,10 +66,14 @@ export function createDoorEntity(overrides = {}) {
     id: uuidv4(),
     wallId: null,
     type: 'single',
+    doorStyle: 'hinged',
     offsetAlongWall: 0.9,
     width: 0.9,
     height: 2.1,
     bottomOffset: 0,
+    openAmount: 0,
+    slideDirection: 'right',
+    panelCount: 1,
     swingDirection: 'inward',
     hingeSide: 'left',
     opensInward: true,
@@ -66,6 +104,40 @@ export function createWindowEntity(overrides = {}) {
     updatedAt: Date.now(),
     ...overrides,
   };
+}
+
+export function createWallsFromRoom(room, wallOverrides = {}) {
+  const width = room?.width ?? DEFAULT_ROOM_DIMENSIONS.width;
+  const depth = room?.depth ?? DEFAULT_ROOM_DIMENSIONS.depth;
+  const height = room?.height ?? DEFAULT_ROOM_DIMENSIONS.height;
+  const x = room?.x ?? 0;
+  const z = room?.z ?? 0;
+  const halfWidth = width / 2;
+  const halfDepth = depth / 2;
+
+  return [
+    createWallEntity({
+      roomId: room?.id ?? null,
+      start: [x - halfWidth, z - halfDepth],
+      end: [x + halfWidth, z - halfDepth],
+      height,
+      ...wallOverrides,
+    }),
+    createWallEntity({
+      roomId: room?.id ?? null,
+      start: [x - halfWidth, z - halfDepth],
+      end: [x - halfWidth, z + halfDepth],
+      height,
+      ...wallOverrides,
+    }),
+    createWallEntity({
+      roomId: room?.id ?? null,
+      start: [x + halfWidth, z - halfDepth],
+      end: [x + halfWidth, z + halfDepth],
+      height,
+      ...wallOverrides,
+    }),
+  ];
 }
 
 export function getWallMetrics(wall) {

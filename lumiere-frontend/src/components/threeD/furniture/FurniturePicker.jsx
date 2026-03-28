@@ -1,17 +1,3 @@
-// src/components/threeD/furniture/FurniturePicker.jsx
-//
-// KEY CHANGE vs broken offscreen version:
-//   Each card still gets its own <Canvas> (reliable, correct rendering).
-//   BUT — the Canvas is only MOUNTED when the card scrolls into view
-//   (IntersectionObserver with 80px rootMargin).
-//   Cards that scroll OUT are unmounted after a short delay, freeing the
-//   WebGL context. This keeps the live context count at ~4-6 at any time,
-//   well within the browser's 8-16 limit.
-//
-// Other improvements retained:
-//   - Uses /manifest order (high-priority categories first, small files first)
-//   - Background prefetch with progress bar
-//   - Shimmer skeleton while canvas is loading
 
 import React, {
   useEffect, useState, useCallback, useRef, useMemo, Suspense,
@@ -30,8 +16,6 @@ import FurnitureTint from './FurnitureTint';
 import { resolveGlbUrl, learnCdnBase, resolveModelPreviewUrls } from './FurnitureItem';
 import FurnitureModelCard from './FurnitureModelCard';
 import useModelPrefetch, { fetchModelManifest } from '../../../hooks/useModelPrefetch';
-
-// ── 3D preview components ─────────────────────────────────────────────────────
 
 function SpinnerMesh() {
   const ref = useRef();
@@ -75,8 +59,6 @@ function RotatingModel({ url, filename }) {
     </Bounds>
   );
 }
-
-// CardPreview — the actual Canvas, only rendered when visible
 function CardPreview({ url, filename }) {
   const [ready, setReady] = useState(false);
 
@@ -169,17 +151,6 @@ function ThumbnailPreview({ url, filename, alt, onFallback }) {
     />
   );
 }
-
-// ── ModelCard — mounts Canvas only when in viewport ───────────────────────────
-//
-// State machine:
-//   'idle'     → card not yet seen; shows shimmer
-//   'mounted'  → card in viewport; Canvas is alive
-//   'frozen'   → card scrolled away; Canvas unmounted but last frame preserved
-//                via a cheap <img> snapshot (we keep the last rendered frame)
-//
-// In practice with a 2-column grid and typical screen height, only 4-6 cards
-// are in view simultaneously, keeping WebGL context count comfortably low.
 
 function ModelCard({ model, onPlace }) {
   const [hovered,  setHovered]  = useState(false);
@@ -320,8 +291,6 @@ function ModelCard({ model, onPlace }) {
     </button>
   );
 }
-
-// ── FurniturePicker ────────────────────────────────────────────────────────────
 export default function FurniturePicker({
   selectedItem, placedItems, addItem, deleteItem, gizmoMode, setGizmoMode,
   furnitureRefs, tint, setTint,
@@ -336,8 +305,6 @@ export default function FurniturePicker({
   });
   const setPrefetchProgress = () => {};
   const setPrefetchDone = () => {};
-
-  // ── Fetch model list — tries /manifest first (sorted), falls back to /list ──
   const fetchModels = useCallback(async (force = false) => {
     setLoading(true); setError(null);
     try {
@@ -553,3 +520,4 @@ export default function FurniturePicker({
     </div>
   );
 }
+

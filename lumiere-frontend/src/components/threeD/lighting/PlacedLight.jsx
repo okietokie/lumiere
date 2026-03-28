@@ -1,4 +1,3 @@
-// src/components/threeD/lighting/PlacedLight.jsx
 import { useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -11,8 +10,6 @@ export default function PlacedLight({
   const [hovered, setHovered] = useState(false);
   const glowRef  = useRef();
   const dragging = useRef(false);
-
-  // ── Glow pulse — safe: checks ref before accessing ────────────────────────
   const bobOffset = useRef(Math.random() * Math.PI * 2); // random phase per light
   useFrame((state, delta) => {
     if (!glowRef.current || !light.enabled) return;
@@ -21,8 +18,6 @@ export default function PlacedLight({
     glowRef.current.scale.setScalar(
       THREE.MathUtils.lerp(glowRef.current.scale.x, targetScale, delta * 6)
     );
-
-    // Gentle pulse using sin — no Date.now() (uses R3F clock instead)
     const pulse = 1 + Math.sin(state.clock.elapsedTime * 2 + bobOffset.current) * 0.06;
     const targetOpacity = (isSelected ? 0.85 : 0.45) * pulse;
     glowRef.current.material.opacity = THREE.MathUtils.lerp(
@@ -31,8 +26,6 @@ export default function PlacedLight({
       delta * 8,
     );
   });
-
-  // ── Drag ──────────────────────────────────────────────────────────────────
   const getWorldPos = (clientX, clientY) => {
     const rect  = gl.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -139,3 +132,4 @@ export default function PlacedLight({
     </group>
   );
 }
+

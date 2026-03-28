@@ -1,4 +1,3 @@
-// src/components/threeD/camera/FirstPersonControls.jsx
 import { useEffect, useRef } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
@@ -12,8 +11,6 @@ const GRAVITY      = 12.0;
 const BOB_FREQ     = 8.0;
 const BOB_AMP      = 0.055;
 const MOUSE_SPEED  = 0.65;
-
-// How far from room centre the player can wander before soft pushback kicks in
 const SOFT_LIMIT   = 10.0;  // metres — comfortably outside any wall
 const PUSH_STRENGTH = 6.0;  // how hard the pushback force is
 
@@ -33,8 +30,6 @@ export default function FirstPersonControls({
   });
   const velocityY   = useRef(0);
   const bobTime     = useRef(0);
-
-  // Room centre — computed from walls, used for pushback
   const roomCentre = useRef(new THREE.Vector3(0, 0, 0));
   useEffect(() => {
     if (!walls || walls.length === 0) return;
@@ -93,8 +88,6 @@ export default function FirstPersonControls({
     document.addEventListener('pointerlockchange', onChange);
     return () => document.removeEventListener('pointerlockchange', onChange);
   }, [gl.domElement, setIsLocked]);
-
-  // ── Teleport ─────────────────────────────────────────────────────────────────
   const prevTeleport = useRef(null);
   useEffect(() => {
     if (!onTeleport) return;
@@ -149,11 +142,6 @@ export default function FirstPersonControls({
       ny = EYE_LEVEL;
       velocityY.current = 0;
     }
-
-    // ── Soft pushback beyond SOFT_LIMIT ─────────────────────────────────────
-    // Instead of a hard clamp, we apply a gentle force pushing back toward
-    // the room centre when the player ventures too far. This feels natural —
-    // like walking into thick fog — rather than hitting an invisible wall.
     const cx  = roomCentre.current.x;
     const cz  = roomCentre.current.z;
     const dx  = nx - cx;
@@ -161,9 +149,7 @@ export default function FirstPersonControls({
     const dist = Math.sqrt(dx * dx + dz * dz);
 
     if (dist > SOFT_LIMIT) {
-      // How far past the limit (0 at boundary, grows outward)
       const overflow = dist - SOFT_LIMIT;
-      // Normalised direction back toward centre
       const pushX = -(dx / dist) * overflow * PUSH_STRENGTH * dt;
       const pushZ = -(dz / dist) * overflow * PUSH_STRENGTH * dt;
       nx += pushX;

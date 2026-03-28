@@ -1,11 +1,3 @@
-// src/hooks/useModelPrefetch.js
-//
-// Shared model-catalog + prefetch service.
-//
-// Goals:
-//   1. Start warming model bytes as soon as the app loads.
-//   2. Reuse the same manifest request everywhere in the session.
-//   3. Avoid duplicate prefetch loops when both App and FurniturePicker mount.
 
 import { useEffect, useState } from 'react';
 import { learnCdnBase } from '../components/threeD/furniture/FurnitureItem';
@@ -168,3 +160,4 @@ export default function useModelPrefetch(options = {}) {
 
   return state;
 }
+

@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import LandingPage from "./components/Landingpage";
 import RoomScene from "./components/threeD/scene/RoomScene";
 import ModelPreviewStudio from "./components/admin/ModelPreviewStudio";
+import ProjectViewerPage from "./components/viewer/ProjectViewerPage";
 import { COLORS } from "./utils/colors";
 import { ToastProvider } from "./ui/ToastNotification";
 import useModelPrefetch from "./hooks/useModelPrefetch";
@@ -24,6 +25,7 @@ function RouteWrapper() {
       <Routes>
         <Route path="/"          element={<LandingPage />} />
         <Route path="/user/room" element={<RoomScene />}   />
+        <Route path="/view/:projectId" element={<ProjectViewerPage />} />
         <Route path="/admin/model-previews" element={<ModelPreviewStudio />} />
       </Routes>
     </div>

@@ -1,4 +1,3 @@
-// src/components/threeD/camera/WalkHUD.jsx
 import React, { useEffect, useState } from 'react';
 import { COLORS } from '../../../utils/colors';
 

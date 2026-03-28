@@ -1,48 +1,37 @@
-# app/services/model_service.py
-# Performance edition.
-#
-# Changes vs original:
-#   - upsert_model now accepts and stores size_bytes
-#   - get_manifest() returns models sorted by priority score
-#   - list_models() result is cached in-process for 60 s to avoid hammering MongoDB
-#     on every furniture-tab open
-
 import logging
 import time
 from app.database import database
 
 logger = logging.getLogger(__name__)
 
-# ── Category priority scores ───────────────────────────────────────────────────
-# Higher score = prefetch sooner. Based on typical usage frequency.
-# Chairs and sofas are placed most often so they load first.
+# Prioritizes frequently placed categories during manifest sorting.
 CATEGORY_PRIORITY: dict[str, int] = {
-    "sofa":       95,
-    "sofas":      95,
-    "chair":      90,
-    "chairs":     90,
-    "table":      85,
-    "tables":     85,
-    "bed":        80,
-    "beds":       80,
-    "lamp":       70,
-    "lamps":      70,
-    "cupboard":   65,
-    "cupboards":  65,
+    "sofa": 95,
+    "sofas": 95,
+    "chair": 90,
+    "chairs": 90,
+    "table": 85,
+    "tables": 85,
+    "bed": 80,
+    "beds": 80,
+    "lamp": 70,
+    "lamps": 70,
+    "cupboard": 65,
+    "cupboards": 65,
     "chandelier": 55,
-    "curtain":    50,
-    "curtains":   50,
-    "window":     45,
-    "windows":    45,
-    "stair":      40,
-    "others":     30,
+    "curtain": 50,
+    "curtains": 50,
+    "window": 45,
+    "windows": 45,
+    "stair": 40,
+    "others": 30,
     "uncategorized": 20,
 }
 
-# ── In-process list cache (avoids repeated MongoDB round-trips) ────────────────
-_list_cache: list | None      = None
-_list_cache_ts: float         = 0.0
-LIST_CACHE_TTL                = 60.0   # seconds
+# Caches the model list briefly to reduce repeated database reads.
+_list_cache: list | None = None
+_list_cache_ts: float = 0.0
+LIST_CACHE_TTL = 60.0
 
 
 async def list_models() -> list:
@@ -60,7 +49,7 @@ async def list_models() -> list:
         doc["id"] = str(doc.pop("_id"))
         models.append(doc)
 
-    _list_cache    = models
+    _list_cache = models
     _list_cache_ts = now
     return models
 
@@ -68,21 +57,17 @@ async def list_models() -> list:
 async def get_manifest() -> list:
     """
     Return models sorted for optimal prefetch order:
-      1. By category priority (descending) — high-traffic categories first
-      2. By size_bytes (ascending) — smaller files first within same category
-
-    This means the frontend can prefetch in manifest order and get the most
-    impactful models ready with the least bytes transferred first.
+      1. By category priority.
+      2. By file size within the same category.
     """
     models = await list_models()
     enriched = []
     for m in models:
-        cat      = (m.get("category") or "uncategorized").lower()
+        cat = (m.get("category") or "uncategorized").lower()
         priority = CATEGORY_PRIORITY.get(cat, 20)
-        size     = m.get("size_bytes") or 999_999_999  # unknown size sorts last
+        size = m.get("size_bytes") or 999_999_999
         enriched.append({**m, "priority": priority, "size_bytes": size})
 
-    # Sort: highest priority first, then smallest file first
     enriched.sort(key=lambda x: (-x["priority"], x["size_bytes"]))
     return enriched
 
@@ -134,14 +119,14 @@ async def upsert_model(
     size_bytes: int | None = None,
 ) -> str:
     """Insert or update a model record. Called by the upload script."""
-    global _list_cache  # invalidate cache on write
+    global _list_cache
     _list_cache = None
 
     fields: dict = {
-        "name":     name,
+        "name": name,
         "filename": filename,
         "category": category,
-        "url":      url,
+        "url": url,
     }
     if size_bytes is not None:
         fields["size_bytes"] = size_bytes

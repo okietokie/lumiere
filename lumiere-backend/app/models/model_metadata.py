@@ -1,4 +1,3 @@
-# app/models/model_metadata.py
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -8,3 +7,4 @@ class ModelMetadata(BaseModel):
     filename: str
     description: Optional[str] = None
     preview_url: Optional[str] = None
+

@@ -1,4 +1,3 @@
-// src/components/helpers/Room.jsx
 import { useMemo, useRef, useEffect } from "react";
 import { gsap } from "gsap";
 import * as THREE from 'three';

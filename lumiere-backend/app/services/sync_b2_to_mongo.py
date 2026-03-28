@@ -1,10 +1,3 @@
-# app/services/sync_b2_to_mongo.py
-# Performance edition.
-#
-# Changes vs original:
-#   - Records file size_bytes from B2 metadata at sync time.
-#     No extra network request — B2 ls() already returns content_length.
-#   - Logs total bytes registered for visibility.
 
 import os
 import logging

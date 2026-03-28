@@ -1,4 +1,3 @@
-// src/components/threeD/walls/WallEditor.jsx
 import React from 'react';
 import { Button, Popconfirm, Slider, InputNumber } from 'antd';
 import GizmoToolbar from '../utilities/GizmoToolbar';
@@ -32,7 +31,7 @@ export default function WallEditorPanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
 
-      {/* ── Wall tools ──────────────────────────────────────────────────── */}
+      {/*  Wall tools  */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
           <SettingOutlined style={{ marginRight: 10, color: COLORS.action, fontSize: 18 }} />
@@ -52,7 +51,7 @@ export default function WallEditorPanel({
 
           {selectedWall ? (
             <>
-              {/* ── Info row ───────────────────────────────────────────── */}
+              {/*  Info row  */}
               <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '6px 10px',
@@ -67,7 +66,7 @@ export default function WallEditorPanel({
                 </span>
               </div>
 
-              {/* ── Wall color ─────────────────────────────────────────── */}
+              {/*  Wall color  */}
               <Row label="Wall Color">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{
@@ -85,7 +84,7 @@ export default function WallEditorPanel({
               </Row>
 
               <div id="wall-dimensions" />
-              {/* ── Height slider ──────────────────────────────────────── */}
+              {/*  Height slider  */}
               <SliderRow
                 label="Height"
                 value={selectedWall.height}
@@ -94,7 +93,7 @@ export default function WallEditorPanel({
                 onChange={(v) => updateWall(selectedWall.id, { height: v })}
               />
 
-              {/* ── Thickness slider ───────────────────────────────────── */}
+              {/*  Thickness slider  */}
               <SliderRow
                 label="Thickness"
                 value={selectedWall.thickness}
@@ -103,7 +102,7 @@ export default function WallEditorPanel({
                 onChange={(v) => updateWall(selectedWall.id, { thickness: v })}
               />
 
-              {/* ── Tip ────────────────────────────────────────────────── */}
+              {/*  Tip  */}
               <div style={{
                 color: COLORS.secondary, fontSize: 12,
                 padding: '6px 10px',
@@ -114,11 +113,11 @@ export default function WallEditorPanel({
                 💡 Drag the wall body to move it · drag the gold handles to resize
               </div>
 
-              {/* ── Gizmo mode ────────────────────────────────────────── */}
+              {/*  Gizmo mode  */}
               <div id="wall-gizmo" />
               <GizmoToolbar gizmoMode={gizmoMode} setGizmoMode={setGizmoMode} />
 
-              {/* ── Actions ────────────────────────────────────────────── */}
+              {/*  Actions  */}
               <div style={{ display: 'flex', gap: 8 }}>
                 <Button
                   icon={<ScissorOutlined />}
@@ -143,7 +142,7 @@ export default function WallEditorPanel({
         </div>
       </div>
 
-      {/* ── Environment finishes ────────────────────────────────────────── */}
+      {/*  Environment finishes  */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
           <BgColorsOutlined style={{ marginRight: 10, color: COLORS.action, fontSize: 18 }} />
@@ -187,8 +186,6 @@ export default function WallEditorPanel({
   );
 }
 
-// ── Small helpers ─────────────────────────────────────────────────────────────
-
 function Row({ label, children }) {
   return (
     <div style={{
@@ -225,3 +222,4 @@ function SliderRow({ label, value, min, max, step, unit, onChange }) {
     </div>
   );
 }
+

@@ -1,12 +1,3 @@
-// src/components/threeD/ui/RecordingIndicator.jsx
-//
-// Floating indicator shown over the 3D canvas while a recording is active.
-// Shows:  ● REC  in auto mode
-//         ● REC  00:00  in manual mode (live timer)
-//         [ Stop ] in manual mode
-//
-// Positioned fixed top-left so it doesn't conflict with the toolbar or
-// the precision popup (top-right). Mobile-safe — large enough touch target.
 
 import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';

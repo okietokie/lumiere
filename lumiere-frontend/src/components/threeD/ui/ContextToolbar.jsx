@@ -1,14 +1,3 @@
-// src/components/threeD/ui/ContextToolbar.jsx
-//
-// KEY CHANGES vs previous version:
-//  1. Precision popup is PINNED to the top of the screen (just below any top bar),
-//     never floating near the object — so it never covers what you're editing.
-//  2. "Precise" standalone button fully removed from furniture list.
-//  3. Double-tap Move/Rotate/Scale/Resize opens per-mode popup (same as before).
-//  4. Popup is compact and docked top-right, well clear of the 3D scene.
-//  5. All tint, ghost, split, speech-bubble, gsap animations preserved.
-//  6. Wall precision: Move=centreX/Z, Rotate=angle°, Resize=length/height/thickness.
-//  7. Mobile: 44px tap targets, hold-to-repeat steppers.
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
@@ -26,8 +15,6 @@ import {
 const TOOLBAR_W = { wall: 420, furniture: 260, light: 160 };
 const TOOLBAR_H = 64;
 const MARGIN    = 10;
-
-// ── Button definitions ─────────────────────────────────────────────────────────
 const WALL_BUTTONS = [
   { iconName: 'drag',    label: 'Move',     action: 'gizmo:translate', tab: 'walls',     section: 'wall-gizmo',      precision: true  },
   { iconName: 'swap',    label: 'Rotate',   action: 'gizmo:rotate',    tab: 'walls',     section: 'wall-gizmo',      precision: true  },
@@ -51,8 +38,6 @@ const LIGHT_BUTTONS = [
   { iconName: 'bulb',    label: 'Edit',     action: 'tab',             tab: 'lighting',  section: 'light-selected',  precision: false },
   { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,        section: null,              danger: true     },
 ];
-
-// ── WorldProjector (R3F component) ────────────────────────────────────────────
 export function WorldProjector({ worldPosition, type, onScreenPos }) {
   const { camera, gl } = useThree();
   const vec = useRef(new THREE.Vector3());
@@ -73,8 +58,6 @@ export function WorldProjector({ worldPosition, type, onScreenPos }) {
   });
   return null;
 }
-
-// ── ContextToolbar ─────────────────────────────────────────────────────────────
 export default function ContextToolbar({
   type, screenPos,
   gizmoMode, onGizmoChange,
@@ -218,7 +201,7 @@ export default function ContextToolbar({
 
   return (
     <>
-      {/* ── Main toolbar pill ─────────────────────────────────────── */}
+      {/*  Main toolbar pill */}
       <div
         ref={toolbarRef}
         style={{
@@ -340,7 +323,7 @@ export default function ContextToolbar({
         )}
       </div>
 
-      {/* ── Precision popup — PINNED TO TOP of viewport ──────────── */}
+      {/*  Precision popup — PINNED TO TOP of viewport  */}
       {precisionMode && selectedItem && (
         <PrecisionPopup
           mode={precisionMode}
@@ -351,13 +334,11 @@ export default function ContextToolbar({
         />
       )}
 
-      {/* ── Speech bubble ─────────────────────────────────────────── */}
+      {/*  Speech bubble */}
       {bubble && <SpeechBubble text={bubble.text} x={bubble.x} y={bubble.y} placeBelow={bubble.placeBelow} />}
     </>
   );
 }
-
-// ── Axis colour palette (matches Three.js gizmo conventions) ─────────────────
 const AXIS_COLORS = {
   X: '#FF4D4D',   // red
   Y: '#4DDD6E',   // green
@@ -372,14 +353,8 @@ function axisColor(label) {
   if (l.startsWith('Z')) return AXIS_COLORS.Z;
   return AXIS_COLORS.W;
 }
-
-// ── PrecisionPopup ─────────────────────────────────────────────────────────────
-// Pinned top-right (desktop) or top-centre (mobile), always clear of the scene.
-// Fields are ALWAYS stacked vertically — never in columns — so nothing is clipped.
 function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
   const popupRef = useRef(null);
-
-  // ── field definitions ──────────────────────────────────────────────────────
   const buildFields = () => {
     if (toolbarType === 'furniture') {
       const pos   = Array.isArray(item.position) ? item.position : [0, 0, 0];
@@ -439,8 +414,6 @@ function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
     setVals(Object.fromEntries(fields.map((f) => [f.key, f.init])));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemSig]);
-
-  // ── live apply ─────────────────────────────────────────────────────────────
   const applyKey = useCallback((key, rawNum) => {
     const num = parseFloat(rawNum);
     if (!isFinite(num)) return;
@@ -487,8 +460,6 @@ function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vals, item, mode, toolbarType]);
-
-  // ── position: pinned top-right / top-centre ────────────────────────────────
   const isMobile = window.innerWidth < 768;
   const POPUP_W  = Math.min(300, window.innerWidth - 24);
   const popLeft  = isMobile
@@ -533,13 +504,13 @@ function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e)       => e.stopPropagation()}
     >
-      {/* ── Coloured top accent bar ── */}
+      {/*  Coloured top accent bar  */}
       <div style={{
         height: 2,
         background: 'linear-gradient(90deg, #C49A6C 0%, rgba(196,154,108,0.1) 100%)',
       }} />
 
-      {/* ── Header ── */}
+      {/*  Header  */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '14px 16px 10px',
@@ -580,7 +551,7 @@ function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
         >×</button>
       </div>
 
-      {/* ── Fields — always single column, never clipped ── */}
+      {/*  Fields — always single column, never clipped  */}
       <div style={{ padding: '12px 16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {fields.map((f) => (
           <FieldRow
@@ -592,7 +563,7 @@ function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
         ))}
       </div>
 
-      {/* ── Footer hint ── */}
+      {/*  Footer hint  */}
       <div style={{
         padding: '0 16px 12px',
         display: 'flex', alignItems: 'center', gap: 6,
@@ -606,10 +577,6 @@ function PrecisionPopup({ mode, toolbarType, item, onUpdate, onClose }) {
     </div>
   );
 }
-
-// ── FieldRow ───────────────────────────────────────────────────────────────────
-// Each field stacks vertically. Axis label has a colour-coded left border.
-// +/− buttons are large enough for mobile (44px height).
 function FieldRow({ field, value, onChange }) {
   const [localStr, setLocalStr] = useState(fmtVal(value, field.step));
   const repeatRef               = useRef(null);
@@ -752,8 +719,6 @@ function StepBtn({ dir, color, onStart, onStop }) {
     </button>
   );
 }
-
-// ── TintSlider ─────────────────────────────────────────────────────────────────
 function TintSlider({ label, value, min, max, step, unit, color, onChange }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
@@ -782,8 +747,6 @@ function TintSlider({ label, value, min, max, step, unit, color, onChange }) {
     </div>
   );
 }
-
-// ── Icons ──────────────────────────────────────────────────────────────────────
 function Icon({ name, size = 15 }) {
   const paths = {
     drag:    'M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
@@ -804,8 +767,6 @@ function Icon({ name, size = 15 }) {
     </svg>
   );
 }
-
-// ── ToolbarBtn ─────────────────────────────────────────────────────────────────
 function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
   const btnRef = useRef(null);
   return (
@@ -849,8 +810,6 @@ function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
     </button>
   );
 }
-
-// ── SpeechBubble ───────────────────────────────────────────────────────────────
 function SpeechBubble({ text, x, y, placeBelow = false }) {
   const ref                   = useRef(null);
   const [visible, setVisible] = useState(false);
@@ -928,3 +887,4 @@ function PinIcon({ pinned }) {
     </svg>
   );
 }
+

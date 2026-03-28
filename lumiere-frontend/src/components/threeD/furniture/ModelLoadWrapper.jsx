@@ -1,10 +1,7 @@
-// src/components/threeD/furniture/ModelLoadWrapper.jsx
 import React, { useState, useEffect } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const POLL_MS  = 2000;
-
-// ── Module-level status cache shared across all component instances ───────────
 const _cache = {};   // filename → 'idle' | 'downloading' | 'ready'
 const _subs  = {};   // filename → Set of setStatus callbacks
 const _polls = {};   // filename → interval id
@@ -43,8 +40,6 @@ function _startPolling(filename) {
   _pollOnce(filename); // check immediately
   _polls[filename] = setInterval(() => _pollOnce(filename), POLL_MS);
 }
-
-// ── Public: trigger download + start polling ─────────────────────────────────
 export async function prefetchModel(filename) {
   if (_cache[filename] === 'ready') return;
   _startPolling(filename); // start polling right away (optimistic)
@@ -52,10 +47,6 @@ export async function prefetchModel(filename) {
     await fetch(`${API_BASE}/api/models/prefetch/${filename}`, { method: 'POST' });
   } catch { /* ignore network errors */ }
 }
-
-// ── Hook: subscribe to a filename's status ────────────────────────────────────
-// Returns 'idle' | 'downloading' | 'ready'
-// Does NOT trigger download — call prefetchModel() separately.
 export function useModelStatus(filename) {
   const [status, setStatus] = useState(_cache[filename] || 'idle');
 
@@ -67,8 +58,6 @@ export function useModelStatus(filename) {
 
   return status;
 }
-
-// ── Hook: start polling when active=true (e.g. after prefetch) ───────────────
 export function useModelPolling(filename, active) {
   useEffect(() => {
     if (active && _cache[filename] !== 'ready') {
@@ -76,8 +65,6 @@ export function useModelPolling(filename, active) {
     }
   }, [filename, active]);
 }
-
-// ── Error boundary ────────────────────────────────────────────────────────────
 export class ModelErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(e) { return { error: e }; }
@@ -87,8 +74,6 @@ export class ModelErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
-
-// ── Wireframe placeholder shown while downloading ─────────────────────────────
 export function LoadingPlaceholder({ scale = [1, 1, 1] }) {
   return (
     <mesh scale={scale}>

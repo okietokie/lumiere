@@ -1,4 +1,3 @@
-// src/hooks/useLighting.js
 import { useState, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -64,9 +63,6 @@ export default function useLighting() {
   const [selectedLightId,   setSelectedLightId]    = useState(null);
   const [globalBrightness,  setGlobalBrightness]   = useState(1.0);
   const [previewMode,       setPreviewMode]         = useState(false);
-
-  // ── Mood ambient override — this is what makes moods visible even with no
-  //    placed lights. SceneLighting reads this and blends the ambient color.
   const [moodAmbientOverride, setMoodAmbientOverride] = useState(null);
 
   const addLight = useCallback((type) => {
@@ -115,8 +111,6 @@ export default function useLighting() {
   }, []);
 
   const selectedLight = placedLights.find((l) => l.id === selectedLightId);
-
-  // ── Memoize lighting so it doesn't recompute every render ─────────────────
   const lighting = useMemo(() => getTimeOfDayLighting(timeOfDay), [timeOfDay]);
 
   return {

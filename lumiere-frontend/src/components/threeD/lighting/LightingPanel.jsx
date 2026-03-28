@@ -1,4 +1,3 @@
-// src/components/threeD/lighting/LightingPanel.jsx
 import React from 'react';
 import { Button, Slider, Switch, Popconfirm, Tooltip } from 'antd';
 import {
@@ -17,8 +16,6 @@ export default function LightingPanel({
   globalBrightness, setGlobalBrightness,
   previewMode, setPreviewMode,
 }) {
-
-  // Which time-of-day label are we closest to?
   const nearestPreset = TIME_PRESETS.reduce((a, b) =>
     Math.abs(b.time - timeOfDay) < Math.abs(a.time - timeOfDay) ? b : a
   );
@@ -26,7 +23,7 @@ export default function LightingPanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/*  Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <BulbOutlined style={{ color: COLORS.action, fontSize: 18 }} />
@@ -51,7 +48,7 @@ export default function LightingPanel({
         </Tooltip>
       </div>
 
-      {/* ── Time of day slider ───────────────────────────────────────────── */}
+      {/*  Time of day slider */}
       <Section title="Time of Day">
         <div style={{ paddingBottom: 4 }}>
           {/* Label row */}
@@ -102,7 +99,7 @@ export default function LightingPanel({
         </div>
       </Section>
 
-      {/* ── Global brightness ────────────────────────────────────────────── */}
+      {/*  Global brightness */}
       <Section title="Scene Brightness">
         <SliderRow
           value={globalBrightness}
@@ -112,7 +109,7 @@ export default function LightingPanel({
         />
       </Section>
 
-      {/* ── Mood presets ─────────────────────────────────────────────────── */}
+      {/*  Mood presets */}
       <Section title="Mood">
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {MOOD_PRESETS.map((mood) => (
@@ -141,7 +138,7 @@ export default function LightingPanel({
         </div>
       </Section>
 
-      {/* ── Add lights ───────────────────────────────────────────────────── */}
+      {/*  Add lights */}
       <Section title="Add Light">
         <div style={{ display: 'flex', gap: 8 }}>
           {Object.entries(LIGHT_TYPES).map(([type, config]) => (
@@ -175,7 +172,7 @@ export default function LightingPanel({
       </Section>
 
       <div id="light-selected" />
-      {/* ── Selected light controls ──────────────────────────────────────── */}
+      {/*  Selected light controls */}
       {selectedLight && (
         <Section title={`${LIGHT_TYPES[selectedLight.type].icon} ${LIGHT_TYPES[selectedLight.type].label}`} highlight>
 
@@ -281,8 +278,6 @@ export default function LightingPanel({
     </div>
   );
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function Section({ title, children, highlight }) {
   return (
     <div>
@@ -317,3 +312,4 @@ function SliderRow({ value, min, max, step, onChange, label }) {
     </div>
   );
 }
+
