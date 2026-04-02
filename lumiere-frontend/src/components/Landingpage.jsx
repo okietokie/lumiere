@@ -36,11 +36,17 @@ import {
 import { authApi } from '../api/auth';
 import { COLORS } from '../utils/colors';
 
+// 1. ADD THIS IMPORT
+import { useNavigate } from 'react-router-dom';
+
 const { Title, Text, Paragraph } = Typography;
 const { Header, Content, Footer } = Layout;
 const { Step } = Steps;
 
 const LandingPage = () => {
+  // 2. ADD THIS HOOK INSIDE THE COMPONENT
+  const navigate = useNavigate();
+
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
   const [activeStep, setActiveStep] = React.useState(0);
@@ -168,21 +174,24 @@ const LandingPage = () => {
           </Col>
           <Col>
             <Space wrap>
+              {/* 3. ADD onClick TO LOGIN BUTTON */}
               <Button 
                 type="primary" 
                 size="middle"
+                onClick={() => navigate('/login')}
                 style={{
                   background: COLORS.action,
                   borderColor: COLORS.action,
                   fontWeight: 500
                 }}
-                
               >
                 Login
               </Button>
+              {/* 3. ADD onClick TO GET STARTED BUTTON */}
               <Button 
                 type="primary" 
                 size="middle"
+                onClick={() => navigate('/register')}
                 style={{
                   background: COLORS.action,
                   borderColor: COLORS.action
@@ -621,8 +630,10 @@ const LandingPage = () => {
                       fontSize: '0.875rem'
                     }}>
                       Already have an account?{' '}
+                      {/* 3. ADD onClick TO INLINE LOGIN BUTTON */}
                       <Button 
                         type="link" 
+                        onClick={() => navigate('/login')}
                         style={{ 
                           padding: '0 4px',
                           color: COLORS.action,
@@ -672,10 +683,10 @@ const LandingPage = () => {
               <Text strong style={{ color: COLORS.text, marginBottom: '10px' }}>
                 Quick Links
               </Text>
-              <Button type="link" style={{ color: `${COLORS.text}70`, padding: 0 }}>
+              <Button onClick={() => navigate('/register')} type="link" style={{ color: `${COLORS.text}70`, padding: 0 }}>
                 Signup
               </Button>
-              <Button type="link" style={{ color: `${COLORS.text}70`, padding: 0 }}>
+              <Button onClick={() => navigate('/login')} type="link" style={{ color: `${COLORS.text}70`, padding: 0 }}>
                 Login
               </Button>
               <Button type="link" style={{ color: `${COLORS.text}70`, padding: 0 }}>
