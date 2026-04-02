@@ -1,15 +1,12 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport, Html, Text } from "@react-three/drei";
 import { useState, useEffect, useRef, Suspense, useCallback, useMemo } from "react";
-import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Input, Select, Slider } from "antd";
+import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Slider } from "antd";
 import {
   EyeOutlined,
   VerticalLeftOutlined,
   VerticalRightOutlined,
-  BorderOutlined,
   ApartmentOutlined,
-  PlusOutlined,
-  SwapOutlined,
   UndoOutlined,
   RedoOutlined,
   SaveOutlined,
@@ -20,18 +17,22 @@ import {
   DeleteOutlined,
   LeftOutlined,
   RightOutlined,
+  UpOutlined,
+  DownOutlined,
   LoginOutlined,
   LogoutOutlined,
+  CheckOutlined,
+  CloseOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
 import { COLORS } from "../../../utils/colors";
 import {
-  addRoomAdjacent as positionAdjacentRoom,
   generateLayoutWalls,
   getLayoutBounds,
-  hasRoomOverlap,
   ROOM_DIRECTION_ORDER,
+  addRoomAdjacent,
+  hasRoomOverlap,
 } from "../../../utils/roomLayout";
 import {
   createRoomEntity,
@@ -69,7 +70,22 @@ import useSpatialAnalysis  from "../../../hooks/useSpatialAnalysis";
 import SaveModal           from "../ui/SaveModal";
 import { useToast }        from "../../../ui/ToastNotification";
 import { SlidePanel, BottomNav, MobileTopBar } from "./MobileLayout";
+import RevealActionButton from "./RevealActionButton";
 import useProjectSave      from "../../../hooks/useProjectSave";
+import RoomCreationPanel from "../rooms/RoomCreationPanel";
+import PendingRoomNameInput from "../rooms/PendingRoomNameInput";
+import useRoomCreation from "../rooms/useRoomCreation";
+import SpaceDashboardRoundedIcon from "@mui/icons-material/SpaceDashboardRounded";
+import KeyboardDoubleArrowLeftRoundedIcon from "@mui/icons-material/KeyboardDoubleArrowLeftRounded";
+import KeyboardDoubleArrowRightRoundedIcon from "@mui/icons-material/KeyboardDoubleArrowRightRounded";
+import KeyboardDoubleArrowUpRoundedIcon from "@mui/icons-material/KeyboardDoubleArrowUpRounded";
+import KeyboardDoubleArrowDownRoundedIcon from "@mui/icons-material/KeyboardDoubleArrowDownRounded";
+import ArchitectureRoundedIcon from "@mui/icons-material/ArchitectureRounded";
+import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
+import TextureRoundedIcon from "@mui/icons-material/TextureRounded";
+import ChairRoundedIcon from "@mui/icons-material/ChairRounded";
+import LightbulbRoundedIcon from "@mui/icons-material/LightbulbRounded";
+import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
 
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
@@ -87,6 +103,12 @@ const DOOR_STYLE_OPTIONS = [
   { key: 'hinged', label: 'Single Hinged Door' },
   { key: 'sliding', label: 'Single Sliding Door' },
   { key: 'double', label: 'Double Hinged Door' },
+];
+
+const ROOM_ACTION_BUTTONS = [
+  { key: 'wall', icon: SpaceDashboardRoundedIcon, label: 'Add Wall' },
+  { key: 'room', icon: HomeWorkRoundedIcon, label: 'Add Room' },
+  { key: 'direction', icon: KeyboardDoubleArrowRightRoundedIcon, label: 'Change Side' },
 ];
 
 export default function RoomScene() {
@@ -129,7 +151,6 @@ export default function RoomScene() {
   // UI state 
   const [selectedWallId,      setSelectedWallId]      = useState(null);
   const [selectedOpening,     setSelectedOpening]     = useState(null);
-  const [pendingRoomCreation, setPendingRoomCreation] = useState(null);
   const [roomWallPlacementSide, setRoomWallPlacementSide] = useState('right');
   const [cameraMode,          setCameraMode]          = useState('orbit');
   const [gizmoMode,           setGizmoMode]           = useState('translate');
@@ -143,6 +164,7 @@ export default function RoomScene() {
   const [currentViewPreset,   setCurrentViewPreset]   = useState('perspective');
   const [saveModalOpen,       setSaveModalOpen]       = useState(false);
   const [currentProjectId,    setCurrentProjectId]    = useState(null);
+  const [wallToolbarPinned,   setWallToolbarPinned]   = useState(false);
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
   const [furnitureToolbarPos, setFurnitureToolbarPos] = useState(null);
   const [lightToolbarPos,     setLightToolbarPos]     = useState(null);
@@ -170,7 +192,12 @@ export default function RoomScene() {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
-  const openMobilePanel = (tab) => { setActiveTab(tab); setMobilePanelOpen(true); };
+  const openMobilePanel = useCallback((tab) => {
+    const hasSelectedRoom = Boolean(selectedRoomId || rooms[0]?.id);
+    const nextTab = tab === 'room' && !hasSelectedRoom ? 'walls' : tab;
+    setActiveTab(nextTab);
+    setMobilePanelOpen(true);
+  }, [rooms, selectedRoomId]);
   const sidebarRef = useRef(null);
   const desktopPanelInitRef = useRef(false);
 
@@ -196,6 +223,55 @@ export default function RoomScene() {
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null,
     [rooms, selectedRoomId]
   );
+  const roomCreation = useRoomCreation({
+    rooms,
+    setRooms,
+    walls,
+    setWalls,
+    selectedRoom,
+    setSelectedRoomId,
+    setSelectedWallId,
+    setSelectedOpening,
+    setSelectedFurnitureId,
+    setSelectedLightId,
+    setActiveTab,
+    rebuildResolvedWalls: (nextRooms, wallSource = walls) => {
+      const manualWalls = wallSource.filter((wall) => wall?.source === 'manual');
+      const layoutWalls = generateLayoutWalls(nextRooms, wallSource.filter((wall) => wall?.source !== 'manual'));
+      return [...layoutWalls, ...manualWalls];
+    },
+    toast,
+  });
+  const pendingScenePreviewRoom = useMemo(() => {
+    const pending = roomCreation.pendingRoomCreation;
+    if (!pending || pending.sceneStep !== 'details') return null;
+
+    const sourceRoom = rooms.find((room) => room.id === pending.sourceRoomId);
+    if (!sourceRoom) return null;
+
+    const width = Number(pending.width);
+    const depth = Number(pending.depth);
+    const height = Number(pending.height);
+
+    if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(depth) || depth <= 0 || !Number.isFinite(height) || height <= 0) {
+      return null;
+    }
+
+    const previewRoom = addRoomAdjacent(sourceRoom, pending.direction, {
+      id: 'pending-room-preview',
+      name: pending.name?.trim() || 'New room',
+      type: pending.type ?? 'room',
+      width,
+      depth,
+      height,
+    });
+
+    return {
+      ...previewRoom,
+      overlapsExisting: hasRoomOverlap(previewRoom, rooms),
+    };
+  }, [roomCreation.pendingRoomCreation, rooms]);
+
   const boardFootprint = useMemo(() => {
     const layoutBounds = getLayoutBounds(rooms);
     const wallPoints = walls.flatMap((wall) => wall ? [wall.start, wall.end] : []).filter(Boolean);
@@ -528,7 +604,7 @@ export default function RoomScene() {
         <div style={openingFieldCardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span style={{ color: COLORS.text, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <BorderOutlined />
+              <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} />
               Height
             </span>
             <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
@@ -776,10 +852,10 @@ export default function RoomScene() {
     setSelectedOpening(null);
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
-    setPendingRoomCreation(null);
+    roomCreation.cancelPendingRoomCreation();
     if (nextTab) setActiveTab(nextTab);
     if (activeTool === 'build') setActiveTool('select');
-  }, [activeTool]);
+  }, [activeTool, roomCreation]);
 
   const rebuildResolvedWalls = useCallback((nextRooms, wallSource = walls) => {
     const manualWalls = wallSource.filter((wall) => wall?.source === 'manual');
@@ -787,24 +863,18 @@ export default function RoomScene() {
     return [...layoutWalls, ...manualWalls];
   }, [walls]);
 
-  const cycleRoomWallPlacementSide = useCallback(() => {
-    setRoomWallPlacementSide((prev) => {
-      const index = ROOM_DIRECTION_ORDER.indexOf(prev);
-      return ROOM_DIRECTION_ORDER[(index + 1) % ROOM_DIRECTION_ORDER.length];
-    });
-  }, []);
-
-  const addWallOnSelectedRoomEdge = useCallback(() => {
-    if (!selectedRoom) {
+  const addWallOnRoomEdge = useCallback((roomId, side) => {
+    const room = rooms.find((entry) => entry.id === roomId);
+    if (!room) {
       toast.info('Select a room first.');
       return;
     }
 
-    const bounds = selectedRoomSurfaceBounds ?? {
-      centerX: selectedRoom.x,
-      centerZ: selectedRoom.z,
-      width: selectedRoom.width,
-      depth: selectedRoom.depth,
+    const bounds = roomSurfaceBounds.find((entry) => entry.roomId === room.id) ?? {
+      centerX: room.x,
+      centerZ: room.z,
+      width: room.width,
+      depth: room.depth,
     };
     const left = bounds.centerX - bounds.width / 2;
     const right = bounds.centerX + bounds.width / 2;
@@ -814,13 +884,13 @@ export default function RoomScene() {
     let start;
     let end;
 
-    if (roomWallPlacementSide === 'left') {
+    if (side === 'left') {
       start = [left, top];
       end = [left, bottom];
-    } else if (roomWallPlacementSide === 'right') {
+    } else if (side === 'right') {
       start = [right, top];
       end = [right, bottom];
-    } else if (roomWallPlacementSide === 'top') {
+    } else if (side === 'top') {
       start = [left, top];
       end = [right, top];
     } else {
@@ -829,7 +899,7 @@ export default function RoomScene() {
     }
 
     const existingWall = walls.find((wall) =>
-      wall?.roomId === selectedRoom.id
+      wall?.roomId === room.id
       && Array.isArray(wall?.start)
       && Array.isArray(wall?.end)
       && wall?.start?.[0] === start[0]
@@ -839,9 +909,10 @@ export default function RoomScene() {
     );
 
     if (existingWall) {
+      setSelectedRoomId(room.id);
       setSelectedWallId(existingWall.id);
       setActiveTab('walls');
-      toast.info(`A wall already exists on the ${roomWallPlacementSide} edge.`);
+      toast.info(`A wall already exists on the ${side} edge.`);
       return;
     }
 
@@ -851,146 +922,320 @@ export default function RoomScene() {
     }
 
     const newWall = createWallEntity({
-      roomId: selectedRoom.id,
+      roomId: room.id,
       start,
       end,
-      height: selectedRoom.height ?? 3,
+      height: room.height ?? 3,
       source: 'manual',
-      boundarySide: roomWallPlacementSide,
+      boundarySide: side,
     });
 
     setWalls((prev) => [...prev, newWall]);
+    setSelectedRoomId(room.id);
     setSelectedWallId(newWall.id);
     setSelectedOpening(null);
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
     setActiveTab('walls');
-    toast.success(`Wall added on the ${roomWallPlacementSide} edge.`);
-  }, [roomWallPlacementSide, selectedRoom, selectedRoomSurfaceBounds, setWalls, toast, walls]);
+    toast.success(`Wall added on the ${side} edge.`);
+  }, [roomSurfaceBounds, rooms, setWalls, toast, walls]);
 
-  const queueRoomAdd = useCallback((direction) => {
-    if (!selectedRoom) {
-      toast.info('Select a room first.');
-      return;
-    }
-    setPendingRoomCreation({
-      sourceRoomId: selectedRoom.id,
-      direction,
-      name: `${selectedRoom.name} ${direction[0].toUpperCase()}${direction.slice(1)}`,
-      type: 'room',
-      width: 3,
-      depth: 4,
-      height: selectedRoom.height ?? 3,
+  const cycleRoomWallPlacementSide = useCallback(() => {
+    setRoomWallPlacementSide((prev) => {
+      const index = ROOM_DIRECTION_ORDER.indexOf(prev);
+      return ROOM_DIRECTION_ORDER[(index + 1) % ROOM_DIRECTION_ORDER.length];
     });
-  }, [selectedRoom, toast]);
-
-  const updatePendingRoomCreation = useCallback((field, value) => {
-    setPendingRoomCreation((prev) => (prev ? { ...prev, [field]: value } : prev));
   }, []);
 
-  const cancelPendingRoomCreation = useCallback(() => {
-    setPendingRoomCreation(null);
-  }, []);
-
-  const addRoomAdjacent = useCallback((sourceRoomId, direction, width, depth, options = {}) => {
-    const sourceRoom = rooms.find((room) => room.id === sourceRoomId);
-    if (!sourceRoom) {
-      toast.error('The selected source room is no longer available.');
-      return { ok: false, reason: 'missing-source-room' };
-    }
-
-    const numericWidth = Number(width);
-    const numericDepth = Number(depth);
-    const numericHeight = Number(options.height ?? sourceRoom.height ?? 3);
-
-    if (!Number.isFinite(numericWidth) || numericWidth <= 0 || !Number.isFinite(numericDepth) || numericDepth <= 0 || !Number.isFinite(numericHeight) || numericHeight <= 0) {
-      toast.info('Width, depth, and height must be greater than 0.');
-      return { ok: false, reason: 'invalid-dimensions' };
-    }
-
-    const name = options.name?.trim();
-    const type = options.type?.trim();
-    if (!name) {
-      toast.info('Enter a room name.');
-      return { ok: false, reason: 'missing-name' };
-    }
-    if (!type) {
-      toast.info('Enter a room type.');
-      return { ok: false, reason: 'missing-type' };
-    }
-
-    const roomToCreate = createRoomEntity({
-      name,
-      type,
-      width: numericWidth,
-      depth: numericDepth,
-      height: numericHeight,
-    });
-    const positionedRoom = positionAdjacentRoom(sourceRoom, direction, roomToCreate);
-
-    if (hasRoomOverlap(positionedRoom, rooms)) {
-      toast.error('Room creation cancelled because the new room would overlap an existing room and its walls.');
-      return { ok: false, reason: 'overlap' };
-    }
-
-    const nextRooms = [...rooms, positionedRoom];
-    const nextWalls = rebuildResolvedWalls(nextRooms, walls);
-
-    setRooms(nextRooms);
-    setWalls(nextWalls);
-    setSelectedRoomId(positionedRoom.id);
-    setSelectedWallId(null);
-    setSelectedOpening(null);
-    setSelectedFurnitureId(null);
-    setSelectedLightId(null);
-
-    return { ok: true, room: positionedRoom };
-  }, [rebuildResolvedWalls, rooms, setWalls, toast, walls]);
-
-  const submitPendingRoomCreation = useCallback(() => {
-    if (!pendingRoomCreation) return;
-
-    const result = addRoomAdjacent(
-      pendingRoomCreation.sourceRoomId,
-      pendingRoomCreation.direction,
-      pendingRoomCreation.width,
-      pendingRoomCreation.depth,
-      {
-        name: pendingRoomCreation.name,
-        type: pendingRoomCreation.type,
-        height: pendingRoomCreation.height,
-      }
+  const renderRoomQuickActions = useCallback((room, variant = 'panel') => {
+    const compact = variant !== 'scene';
+    const isPendingRoomForDirection = (direction) => (
+      roomCreation.pendingRoomCreation?.sourceRoomId === room.id
+      && roomCreation.pendingRoomCreation.direction === direction
     );
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: compact ? 'wrap' : 'nowrap',
+        gap: compact ? 8 : 10,
+        overflowX: compact ? 'visible' : 'auto',
+      }}>
+        {ROOM_ACTION_BUTTONS.filter(({ key }) => !(compact && key === 'room')).map(({ key, icon, label }) => {
+          if (!compact && key === 'room' && isPendingRoomForDirection(roomWallPlacementSide)) {
+            return (
+              <div
+                key={`${room.id}-${key}-input`}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: isMobile ? 'flex-end' : 'stretch',
+                  gap: 8,
+                  overflow: 'visible',
+                }}
+              >
+                {isMobile && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      marginRight: 6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Cancel room creation"
+                      onClick={roomCreation.cancelPendingRoomCreation}
+                      style={{
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        position: 'relative',
+                        border: 'none',
+                        padding: 0,
+                        width: 38,
+                        height: 38,
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        borderRadius: 14,
+                      }}
+                    >
+                      <span
+                        style={{
+                          position: 'absolute',
+                          inset: '4px 0 0',
+                          borderRadius: 14,
+                          background: 'rgba(36, 28, 24, 0.95)',
+                          boxShadow: '0 1px 1px rgba(255,255,255,0.18), inset 0 2px 2px rgba(0,0,0,0.3)',
+                        }}
+                      />
+                      <span
+                        style={{
+                          position: 'absolute',
+                          left: 3,
+                          right: 3,
+                          bottom: 3,
+                          top: 6,
+                          borderRadius: 14,
+                          background: 'linear-gradient(145deg, #6d5649, #3d2f28)',
+                          boxShadow: '0 3px 6px rgba(0,0,0,0.38)',
+                        }}
+                      />
+                      <span
+                        style={{
+                          position: 'relative',
+                          zIndex: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '100%',
+                          height: '100%',
+                          borderRadius: 14,
+                          transform: 'translateY(-1px)',
+                          color: '#f6ede3',
+                          background: 'linear-gradient(145deg, #5c473d, #7a6559)',
+                          textShadow: '0 -1px rgba(0,0,0,0.25)',
+                        }}
+                      >
+                        <CloseOutlined style={{ fontSize: 14 }} />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={roomCreation.pendingRoomCreation?.sceneStep === 'details' ? 'Create room' : 'Continue room creation'}
+                      onClick={() => {
+                        if (roomCreation.pendingRoomCreation?.sceneStep === 'details') {
+                          roomCreation.submitPendingRoomCreation();
+                          return;
+                        }
+                        roomCreation.advancePendingRoomCreationToDetails();
+                      }}
+                      style={{
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        position: 'relative',
+                        border: 'none',
+                        padding: 0,
+                        width: 38,
+                        height: 38,
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        borderRadius: 14,
+                      }}
+                    >
+                      <span
+                        style={{
+                          position: 'absolute',
+                          inset: '4px 0 0',
+                          borderRadius: 14,
+                          background: 'rgba(51, 39, 30, 0.96)',
+                          boxShadow: '0 1px 1px rgba(255,255,255,0.18), inset 0 2px 2px rgba(0,0,0,0.3)',
+                        }}
+                      />
+                      <span
+                        style={{
+                          position: 'absolute',
+                          left: 3,
+                          right: 3,
+                          bottom: 3,
+                          top: 6,
+                          borderRadius: 14,
+                          background: 'linear-gradient(145deg, #b48a60, #6b5138)',
+                          boxShadow: '0 3px 6px rgba(0,0,0,0.38)',
+                        }}
+                      />
+                      <span
+                        style={{
+                          position: 'relative',
+                          zIndex: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '100%',
+                          height: '100%',
+                          borderRadius: 14,
+                          transform: 'translateY(-1px)',
+                          color: '#fffaf4',
+                          background: 'linear-gradient(145deg, #c49a6c, #8b6b4d)',
+                          textShadow: '0 -1px rgba(0,0,0,0.25)',
+                        }}
+                      >
+                        <CheckOutlined style={{ fontSize: 14 }} />
+                      </span>
+                    </button>
+                  </div>
+                )}
+                <PendingRoomNameInput
+                  value={roomCreation.pendingRoomCreation?.name ?? ''}
+                  onChange={(value) => roomCreation.updatePendingRoomCreation('name', value)}
+                  accent={COLORS.accent}
+                  showDimensions={roomCreation.pendingRoomCreation?.sceneStep === 'details'}
+                  dimensions={{
+                    width: roomCreation.pendingRoomCreation?.width ?? 3,
+                    height: roomCreation.pendingRoomCreation?.height ?? 3,
+                    depth: roomCreation.pendingRoomCreation?.depth ?? 4,
+                  }}
+                  onDimensionChange={(field, value) => roomCreation.updatePendingRoomCreation(field, value)}
+                  onNameEnter={roomCreation.advancePendingRoomCreationToDetails}
+                  onSubmit={roomCreation.submitPendingRoomCreation}
+                  isMobileView={isMobile}
+                />
+              </div>
+            );
+          }
 
-    if (!result?.ok) {
-      if (result?.reason === 'missing-source-room') {
-        setPendingRoomCreation(null);
-      }
-      return;
-    }
+          return (
+            <RevealActionButton
+              key={`${room.id}-${key}`}
+              label={key === 'direction' ? roomWallPlacementSide[0].toUpperCase() + roomWallPlacementSide.slice(1) : label}
+              icon={key === 'direction'
+                ? (roomWallPlacementSide === 'left'
+                  ? KeyboardDoubleArrowLeftRoundedIcon
+                  : roomWallPlacementSide === 'right'
+                    ? KeyboardDoubleArrowRightRoundedIcon
+                    : roomWallPlacementSide === 'top'
+                      ? KeyboardDoubleArrowUpRoundedIcon
+                      : KeyboardDoubleArrowDownRoundedIcon)
+                : icon}
+              active={key === 'wall'
+                ? activeTab === 'walls' && selectedRoom?.id === room.id
+                : key === 'room'
+                  ? isPendingRoomForDirection(roomWallPlacementSide)
+                  : selectedRoom?.id === room.id}
+              onClick={() => {
+                if (key === 'wall') {
+                  addWallOnRoomEdge(room.id, roomWallPlacementSide);
+                  return;
+                }
+                if (key === 'room') {
+                  roomCreation.queueRoomAdd(roomWallPlacementSide, room);
+                  return;
+                }
+                cycleRoomWallPlacementSide();
+              }}
+              variant={compact ? 'pill' : 'reveal'}
+            />
+          );
+        })}
+      </div>
+    );
+  }, [activeTab, addWallOnRoomEdge, cycleRoomWallPlacementSide, roomCreation, roomWallPlacementSide, selectedRoom]);
 
-    setPendingRoomCreation(null);
-    toast.success(`${result.room.name} added to the ${pendingRoomCreation.direction}.`);
-  }, [addRoomAdjacent, pendingRoomCreation, toast]);
+  const renderRoomSidebarCards = useCallback(() => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {rooms.map((room) => {
+        const isActive = selectedRoom?.id === room.id;
+        return (
+          <div
+            key={room.id}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              padding: '14px 16px',
+              borderRadius: 22,
+              background: isActive ? 'rgba(55, 45, 40, 0.88)' : 'rgba(33, 27, 24, 0.78)',
+              border: `1px solid ${isActive ? COLORS.action : `${COLORS.secondary}44`}`,
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRoomId(room.id);
+                  setActiveTab('room');
+                }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  padding: 0,
+                  color: COLORS.text,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{room.name}</div>
+                <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>
+                  {Number(room.width).toFixed(1)}m × {Number(room.depth).toFixed(1)}m
+                </div>
+              </button>
+              {isActive && (
+                <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                  Selected
+                </div>
+              )}
+            </div>
+            {renderRoomQuickActions(room, 'panel')}
+          </div>
+        );
+      })}
+    </div>
+  ), [renderRoomQuickActions, rooms, selectedRoom]);
 
-  const renderRoomActionPanel = useCallback((variant = 'panel') => {
+  const renderRoomActionPanel = (variant = 'panel') => {
     if (!selectedRoom) return null;
 
-    const containerStyle = variant === 'sidebar'
+    const isSidebarVariant = variant === 'sidebar';
+    const isMobileVariant = variant === 'mobile';
+    const containerStyle = isSidebarVariant
       ? {
           display: 'flex',
           flexDirection: 'column',
           gap: 12,
-          padding: '14px 16px',
-          background: `${COLORS.background}D9`,
-          borderRadius: 22,
-          border: `1px solid ${COLORS.secondary}50`,
+          padding: 0,
         }
-      : undefined;
+      : isMobileVariant
+        ? {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }
+        : undefined;
 
     return (
-      <div className={variant === 'panel' ? 'room-floating-context-card' : undefined} style={containerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div style={containerStyle}>
+        <div style={{ display: 'flex', alignItems: isMobileVariant ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
             <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700 }}>Selected Room</div>
             <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>
@@ -1001,77 +1246,32 @@ export default function RoomScene() {
             Room Actions
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('left')}>Add Left</button>
-          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('right')}>Add Right</button>
-          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('top')}>Add Top</button>
-          <button type="button" className="room-secondary-chip" onClick={() => queueRoomAdd('bottom')}>Add Bottom</button>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          flexWrap: 'nowrap',
+          gap: 10,
+          overflowX: 'auto',
+          paddingLeft: 6,
+          paddingTop: 10,
+          paddingBottom: 4,
+          scrollbarWidth: 'none',
+        }}>
+          {renderRoomQuickActions(selectedRoom, 'panel')}
         </div>
-        {pendingRoomCreation?.sourceRoomId === selectedRoom.id && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px', borderRadius: 18, ...openingPanelTone }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div>
-                <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4 }}>
-                  Add {pendingRoomCreation.direction}
-                </div>
-                <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
-                  Create a room next to {selectedRoom.name}
-                </div>
-              </div>
-              <button type="button" className="room-secondary-chip" style={{ minHeight: 32, padding: '0 12px' }} onClick={cancelPendingRoomCreation}>
-                Cancel
-              </button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-              <div style={openingFieldCardStyle}>
-                <span style={{ color: COLORS.text, fontSize: 11 }}>Name</span>
-                <Input value={pendingRoomCreation.name} onChange={(event) => updatePendingRoomCreation('name', event.target.value)} placeholder="Room name" />
-              </div>
-              <div style={openingFieldCardStyle}>
-                <span style={{ color: COLORS.text, fontSize: 11 }}>Type</span>
-                <Select
-                  value={pendingRoomCreation.type}
-                  onChange={(value) => updatePendingRoomCreation('type', value)}
-                  options={[
-                    { value: 'room', label: 'Room' },
-                    { value: 'bedroom', label: 'Bedroom' },
-                    { value: 'living-room', label: 'Living Room' },
-                    { value: 'kitchen', label: 'Kitchen' },
-                    { value: 'bathroom', label: 'Bathroom' },
-                  ]}
-                />
-              </div>
-              <div style={openingFieldCardStyle}>
-                <span style={{ color: COLORS.text, fontSize: 11 }}>Width</span>
-                <InputNumber min={0.5} step={0.1} value={pendingRoomCreation.width} onChange={(value) => updatePendingRoomCreation('width', value)} style={{ width: '100%' }} addonAfter="m" />
-              </div>
-              <div style={openingFieldCardStyle}>
-                <span style={{ color: COLORS.text, fontSize: 11 }}>Depth</span>
-                <InputNumber min={0.5} step={0.1} value={pendingRoomCreation.depth} onChange={(value) => updatePendingRoomCreation('depth', value)} style={{ width: '100%' }} addonAfter="m" />
-              </div>
-              <div style={openingFieldCardStyle}>
-                <span style={{ color: COLORS.text, fontSize: 11 }}>Height</span>
-                <InputNumber min={2} step={0.1} value={pendingRoomCreation.height} onChange={(value) => updatePendingRoomCreation('height', value)} style={{ width: '100%' }} addonAfter="m" />
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button type="button" className="room-secondary-chip" onClick={cancelPendingRoomCreation}>Cancel</button>
-              <button type="button" className="room-secondary-chip is-active" onClick={submitPendingRoomCreation}>Create Room</button>
-            </div>
-          </div>
-        )}
+        <RoomCreationPanel
+          pendingRoomCreation={roomCreation.pendingRoomCreation?.sourceRoomId === selectedRoom.id ? roomCreation.pendingRoomCreation : null}
+          selectedRoom={selectedRoom}
+          isMobileVariant={isMobileVariant}
+          openingFieldCardStyle={openingFieldCardStyle}
+          cancelPendingRoomCreation={roomCreation.cancelPendingRoomCreation}
+          updatePendingRoomCreation={roomCreation.updatePendingRoomCreation}
+          submitPendingRoomCreation={roomCreation.submitPendingRoomCreation}
+        />
       </div>
     );
-  }, [
-    cancelPendingRoomCreation,
-    openingFieldCardStyle,
-    openingPanelTone,
-    pendingRoomCreation,
-    queueRoomAdd,
-    selectedRoom,
-    submitPendingRoomCreation,
-    updatePendingRoomCreation,
-  ]);
+  };
 
   const renderWindowBehaviorControls = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
@@ -1158,12 +1358,12 @@ export default function RoomScene() {
       {
         key: 'height',
         label: 'Height',
-        icon: <BorderOutlined />,
+        icon: <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} />,
         content: (
           <div style={{ ...openingFieldCardStyle, width: '100%' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <span style={{ color: COLORS.text, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <BorderOutlined />
+                <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} />
                 Height
               </span>
               <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
@@ -1506,12 +1706,12 @@ export default function RoomScene() {
 
   const handlePointerMissed = () => {
     setSelectedWallId(null);
+    setWallToolbarPos(null);
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
     setSelectedOpening(null);
     setOpeningPreview(null);
     setActiveTool('select');
-    setWallToolbarPos(null);
     setFurnitureToolbarPos(null);
     setLightToolbarPos(null);
   };
@@ -1528,15 +1728,15 @@ export default function RoomScene() {
 
   const desktopNavItems = useMemo(() => {
     const items = [
-      { key: 'walls', label: 'Build', icon: ColumnWidthOutlined },
-      { key: 'materials', label: 'Style', icon: FormatPainterOutlined },
-      { key: 'lighting', label: 'Light', icon: BulbOutlined },
-      { key: 'furniture', label: 'Furnish', icon: AppstoreOutlined },
-      { key: 'view', label: 'View', icon: EyeOutlined },
+      { key: 'walls', label: 'Build', icon: ArchitectureRoundedIcon },
+      { key: 'materials', label: 'Style', icon: TextureRoundedIcon },
+      { key: 'lighting', label: 'Light', icon: LightbulbRoundedIcon },
+      { key: 'furniture', label: 'Furnish', icon: ChairRoundedIcon },
+      { key: 'view', label: 'View', icon: VisibilityRoundedIcon },
     ];
 
     if (selectedRoom) {
-      items.splice(1, 0, { key: 'room', label: 'Room', icon: ApartmentOutlined });
+      items.splice(1, 0, { key: 'room', label: 'Room', icon: HomeWorkRoundedIcon });
     }
 
     return items;
@@ -1674,7 +1874,7 @@ export default function RoomScene() {
                 className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
                 onClick={() => applyCameraPreset(k)}
               >
-                {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <BorderOutlined /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
+                {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
               </button>
             </Tooltip>
           ))}
@@ -1698,6 +1898,11 @@ export default function RoomScene() {
   );
 
   const tabItems = [
+    ...(selectedRoom ? [{
+      key: 'room',
+      label: <span className="room-tab-label"><ApartmentOutlined /> Room</span>,
+      children: renderRoomActionPanel('sidebar'),
+    }] : []),
     {
       key: 'walls',
       label: <span className="room-tab-label"><ColumnWidthOutlined /> Build</span>,
@@ -1938,29 +2143,25 @@ export default function RoomScene() {
 
               {room.id === selectedRoom?.id && (
                 <Html position={[room.x, room.height + 0.86, room.z]} center distanceFactor={10}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '8px 10px',
-                      borderRadius: 999,
-                      background: 'rgba(32, 24, 20, 0.9)',
-                      border: `1px solid ${COLORS.action}88`,
-                      boxShadow: '0 16px 28px rgba(0,0,0,0.24)',
-                      backdropFilter: 'blur(12px)',
-                      pointerEvents: 'auto',
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    <button type="button" className="room-secondary-chip is-active" style={{ minHeight: 32, padding: '0 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={addWallOnSelectedRoomEdge}>
-                      <PlusOutlined />
-                      Wall
-                    </button>
-                    <button type="button" className="room-secondary-chip" style={{ minHeight: 32, padding: '0 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={cycleRoomWallPlacementSide}>
-                      <SwapOutlined />
-                      {roomWallPlacementSide[0].toUpperCase() + roomWallPlacementSide.slice(1)}
-                    </button>
+                  <div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexWrap: 'nowrap',
+                        gap: 10,
+                        padding: 0,
+                        borderRadius: 999,
+                        background: 'transparent',
+                        border: 'none',
+                        boxShadow: 'none',
+                        backdropFilter: 'none',
+                        pointerEvents: 'auto',
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      {renderRoomQuickActions(room, 'scene')}
+                    </div>
                   </div>
                 </Html>
               )}
@@ -2000,6 +2201,55 @@ export default function RoomScene() {
               ))}
             </group>
           )})}
+
+          {pendingScenePreviewRoom && (
+            <group>
+              <mesh
+                position={[pendingScenePreviewRoom.x, pendingScenePreviewRoom.height / 2, pendingScenePreviewRoom.z]}
+                renderOrder={2}
+              >
+                <boxGeometry args={[pendingScenePreviewRoom.width, pendingScenePreviewRoom.height, pendingScenePreviewRoom.depth]} />
+                <meshStandardMaterial
+                  color={pendingScenePreviewRoom.overlapsExisting ? '#e58d73' : COLORS.action}
+                  transparent
+                  opacity={pendingScenePreviewRoom.overlapsExisting ? 0.18 : 0.12}
+                  depthWrite={false}
+                />
+              </mesh>
+              <lineSegments
+                position={[pendingScenePreviewRoom.x, pendingScenePreviewRoom.height / 2, pendingScenePreviewRoom.z]}
+                renderOrder={3}
+              >
+                <edgesGeometry args={[new THREE.BoxGeometry(pendingScenePreviewRoom.width, pendingScenePreviewRoom.height, pendingScenePreviewRoom.depth)]} />
+                <lineBasicMaterial
+                  color={pendingScenePreviewRoom.overlapsExisting ? '#f2b29d' : '#f3d0a9'}
+                  transparent
+                  opacity={0.9}
+                />
+              </lineSegments>
+              <mesh
+                rotation={[-Math.PI / 2, 0, 0]}
+                position={[pendingScenePreviewRoom.x, 0.03, pendingScenePreviewRoom.z]}
+                renderOrder={1}
+              >
+                <planeGeometry args={[pendingScenePreviewRoom.width, pendingScenePreviewRoom.depth]} />
+                <meshBasicMaterial
+                  color={pendingScenePreviewRoom.overlapsExisting ? '#e58d73' : COLORS.action}
+                  transparent
+                  opacity={pendingScenePreviewRoom.overlapsExisting ? 0.16 : 0.22}
+                />
+              </mesh>
+              <Text
+                position={[pendingScenePreviewRoom.x, pendingScenePreviewRoom.height + 0.36, pendingScenePreviewRoom.z]}
+                fontSize={0.24}
+                color={pendingScenePreviewRoom.overlapsExisting ? '#f2b29d' : COLORS.action}
+                anchorX="center"
+                anchorY="middle"
+              >
+                {`${pendingScenePreviewRoom.name} Preview`}
+              </Text>
+            </group>
+          )}
 
           <WallGizmo
             selectedWall={selectedWall}
@@ -2139,6 +2389,7 @@ export default function RoomScene() {
             onSave={() => setSaveModalOpen(true)}
             canUndo={canUndo} canRedo={canRedo}
             onUndo={undo} onRedo={redo}
+            showRoomTab={Boolean(selectedRoom)}
           />
           {selectedOpeningEntity && (
             <div
@@ -2190,26 +2441,35 @@ export default function RoomScene() {
             open={mobilePanelOpen}
             onClose={() => setMobilePanelOpen(false)}
             title={
+              activeTab === 'room'      ? 'Room' :
               activeTab === 'walls'     ? 'Walls' :
               activeTab === 'materials' ? 'Materials & Style' :
               activeTab === 'lighting'  ? 'Lighting' : 'Furniture'
             }
-            height={activeTab === 'furniture' ? '82vh' : '72vh'}
+            height={activeTab === 'furniture' ? '82vh' : activeTab === 'room' ? '76vh' : '72vh'}
           >
+            {activeTab === 'room' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {renderRoomActionPanel('mobile')}
+              </div>
+            )}
             {activeTab === 'walls' && (
-              <WallEditorPanel
-                selectedWall={selectedWall} addWall={addWall} splitWall={splitWall}
-                deleteWall={deleteWall} updateWall={updateWall}
-                gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
-                envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
-                setEnvColors={(updater) => {
-                  const next = typeof updater === 'function'
-                    ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
-                    : updater;
-                  if (next.floor   !== floorMaterial.color)   updateSurface('floor',   { color: next.floor });
-                  if (next.ceiling !== ceilingMaterial.color) updateSurface('ceiling', { color: next.ceiling });
-                }}
-              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {renderRoomActionPanel('mobile')}
+                <WallEditorPanel
+                  selectedWall={selectedWall} addWall={addWall} splitWall={splitWall}
+                  deleteWall={deleteWall} updateWall={updateWall}
+                  gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
+                  envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
+                  setEnvColors={(updater) => {
+                    const next = typeof updater === 'function'
+                      ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
+                      : updater;
+                    if (next.floor   !== floorMaterial.color)   updateSurface('floor',   { color: next.floor });
+                    if (next.ceiling !== ceilingMaterial.color) updateSurface('ceiling', { color: next.ceiling });
+                  }}
+                />
+              </div>
             )}
             {activeTab === 'materials' && (
               <MaterialPanel
@@ -2265,16 +2525,14 @@ export default function RoomScene() {
                     {desktopNavItems.map(({ key, label, icon: Icon }) => {
                       const isActive = desktopPanelOpen && activeTab === key;
                       return (
-                        <Tooltip key={key} title={label} placement="right">
-                          <button
-                            type="button"
-                            className={isActive ? 'room-floating-rail-button is-active' : 'room-floating-rail-button'}
-                            onClick={() => toggleDesktopPanel(key)}
-                            aria-label={label}
-                          >
-                            <Icon />
-                          </button>
-                        </Tooltip>
+                        <RevealActionButton
+                          key={key}
+                          label={label}
+                          icon={Icon}
+                          active={isActive}
+                          onClick={() => toggleDesktopPanel(key)}
+                          variant="sidebar"
+                        />
                       );
                     })}
                   </div>
@@ -2349,7 +2607,7 @@ export default function RoomScene() {
                               className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
                               onClick={() => applyCameraPreset(k)}
                             >
-                              {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <BorderOutlined /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
+                              {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
                             </button>
                           </Tooltip>
                         ))}
@@ -2446,6 +2704,8 @@ export default function RoomScene() {
         navigateTo={navigateTo}
         selectedItem={selectedWall}
         onPrecisionUpdate={(updates) => selectedWall && updateWall(selectedWall.id, updates)}
+        isPinned={wallToolbarPinned}
+        onPinnedChange={setWallToolbarPinned}
       />
       <ContextToolbar
         type="furniture"
@@ -2901,13 +3161,183 @@ export default function RoomScene() {
           color: ${COLORS.action};
         }
         .room-secondary-chip.is-active {
-          background: linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%);
+          background: ${COLORS.accent};
           border-color: ${COLORS.action};
-          color: ${COLORS.background};
+          color: ${COLORS.text};
         }
         .room-secondary-chip.is-danger:hover {
           border-color: rgba(255, 107, 107, 0.8);
           color: #ff8d8d;
+        }
+        .room-creation-panel {
+          position: relative;
+          overflow: hidden;
+          background:
+            radial-gradient(circle at top left, rgba(196, 154, 108, 0.16) 0%, rgba(196, 154, 108, 0) 34%),
+            linear-gradient(180deg, #2d211d 0%, #1a1310 100%);
+          border: 1px solid rgba(201, 171, 146, 0.14);
+          box-shadow:
+            0 24px 48px rgba(0, 0, 0, 0.34),
+            inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .room-creation-panel::before {
+          content: "";
+          position: absolute;
+          inset: 0 0 auto 0;
+          height: 120px;
+          background: linear-gradient(135deg, rgba(210, 164, 114, 0.18) 0%, rgba(210, 164, 114, 0) 72%);
+          pointer-events: none;
+        }
+        .room-creation-field {
+          min-height: 106px;
+          justify-content: space-between;
+          padding: 16px 16px 14px !important;
+          border-radius: 18px !important;
+          background: rgba(255,255,255,0.035) !important;
+          border: 1px solid rgba(201, 171, 146, 0.08) !important;
+          backdrop-filter: blur(14px);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+        .room-creation-source-chip,
+        .room-creation-status-pill,
+        .room-creation-top-action,
+        .room-creation-secondary,
+        .room-creation-primary {
+          font: inherit;
+          border: 0;
+        }
+        .room-creation-source-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          min-height: 38px;
+          padding: 0 14px;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.05);
+          color: rgba(240, 227, 216, 0.88);
+          font-size: 12px;
+          font-weight: 600;
+          border: 1px solid rgba(201, 171, 146, 0.12);
+        }
+        .room-creation-source-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: #c69a6c;
+          box-shadow: 0 0 0 4px rgba(198, 154, 108, 0.18);
+        }
+        .room-creation-status-pill {
+          display: inline-flex;
+          align-items: center;
+          min-height: 38px;
+          padding: 0 14px;
+          border-radius: 999px;
+          background: rgba(198, 154, 108, 0.14);
+          color: #e0b789;
+          font-size: 12px;
+          font-weight: 700;
+          border: 1px solid rgba(198, 154, 108, 0.16);
+        }
+        .room-creation-top-action,
+        .room-creation-secondary {
+          min-height: 44px;
+          padding: 0 18px;
+          border-radius: 14px;
+          background: rgba(255,255,255,0.05);
+          color: rgba(244, 234, 226, 0.94);
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          border: 1px solid rgba(201, 171, 146, 0.14);
+          transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+        }
+        .room-creation-top-action:hover,
+        .room-creation-secondary:hover {
+          background: rgba(255,255,255,0.08);
+          border-color: rgba(210, 164, 114, 0.32);
+          transform: translateY(-1px);
+        }
+        .room-creation-primary {
+          min-height: 46px;
+          padding: 0 22px;
+          border-radius: 14px;
+          background: linear-gradient(135deg, #bb8d5e 0%, #d3a26e 100%);
+          color: #fff8f1;
+          font-size: 13px;
+          font-weight: 800;
+          letter-spacing: 0.01em;
+          cursor: pointer;
+          box-shadow: 0 14px 30px rgba(126, 83, 43, 0.34);
+          transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        }
+        .room-creation-primary:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 18px 34px rgba(126, 83, 43, 0.42);
+          filter: brightness(1.04);
+        }
+        .room-creation-panel .ant-input,
+        .room-creation-panel .ant-input-number,
+        .room-creation-panel .ant-input-number-group-addon,
+        .room-creation-panel .ant-select-selector {
+          border-radius: 14px !important;
+          min-height: 46px !important;
+          border-color: rgba(201, 171, 146, 0.1) !important;
+          box-shadow: none !important;
+        }
+        .room-creation-panel .ant-input,
+        .room-creation-panel .ant-input-number-input,
+        .room-creation-panel .ant-select-selection-item,
+        .room-creation-panel .ant-select-selection-placeholder {
+          font-size: 15px !important;
+        }
+        .room-creation-panel .ant-input,
+        .room-creation-panel .ant-input-number,
+        .room-creation-panel .ant-select-selector {
+          background: rgba(58, 42, 35, 0.92) !important;
+          color: #f6ede6 !important;
+        }
+        .room-creation-panel .ant-input {
+          padding-inline: 14px !important;
+        }
+        .room-creation-panel .ant-input::placeholder,
+        .room-creation-panel .ant-select-selection-placeholder {
+          color: rgba(228, 211, 198, 0.5) !important;
+        }
+        .room-creation-panel .ant-input-number {
+          display: flex !important;
+          align-items: center;
+        }
+        .room-creation-panel .ant-input-number-input-wrap {
+          display: flex;
+          align-items: center;
+        }
+        .room-creation-panel .ant-input-number-input {
+          height: 44px !important;
+          padding-inline: 14px !important;
+          color: #f6ede6 !important;
+        }
+        .room-creation-panel .ant-input-number-handler-wrap {
+          display: none !important;
+        }
+        .room-creation-panel .ant-select-selector {
+          padding-inline: 14px !important;
+        }
+        .room-creation-panel .ant-select-arrow {
+          color: #d2a472 !important;
+        }
+        .room-creation-panel .ant-input:focus,
+        .room-creation-panel .ant-input:hover,
+        .room-creation-panel .ant-input-number:hover,
+        .room-creation-panel .ant-input-number-focused,
+        .room-creation-panel .ant-select:hover .ant-select-selector,
+        .room-creation-panel .ant-select-focused .ant-select-selector {
+          border-color: rgba(210, 164, 114, 0.48) !important;
+        }
+        .room-creation-unit.ant-input[readonly] {
+          background: rgba(255,255,255,0.06) !important;
+          color: rgba(241, 229, 218, 0.88) !important;
+          font-weight: 700;
+          padding-inline: 0 !important;
         }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: ${COLORS.secondary}; border-radius: 999px; }

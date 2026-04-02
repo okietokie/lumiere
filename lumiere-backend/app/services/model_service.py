@@ -1,5 +1,6 @@
 import logging
 import time
+from pymongo.errors import PyMongoError
 from app.database import database
 
 logger = logging.getLogger(__name__)
@@ -41,13 +42,19 @@ async def list_models() -> list:
     if _list_cache is not None and (now - _list_cache_ts) < LIST_CACHE_TTL:
         return _list_cache
 
-    cursor = database["models"].find()
     models = []
-    async for doc in cursor:
-        if not doc.get("url"):
-            continue
-        doc["id"] = str(doc.pop("_id"))
-        models.append(doc)
+    try:
+        cursor = database["models"].find()
+        async for doc in cursor:
+            if not doc.get("url"):
+                continue
+            doc["id"] = str(doc.pop("_id"))
+            models.append(doc)
+    except PyMongoError as exc:
+        logger.error("Model list failed because MongoDB is unavailable: %s", exc)
+        if _list_cache is not None:
+            return _list_cache
+        return []
 
     _list_cache = models
     _list_cache_ts = now
@@ -73,7 +80,11 @@ async def get_manifest() -> list:
 
 
 async def get_model_by_filename(filename: str) -> dict | None:
-    doc = await database["models"].find_one({"filename": filename})
+    try:
+        doc = await database["models"].find_one({"filename": filename})
+    except PyMongoError as exc:
+        logger.error("Model lookup by filename failed: %s", exc)
+        return None
     if doc:
         doc["id"] = str(doc.pop("_id"))
     return doc
@@ -87,7 +98,11 @@ async def get_model_by_id(model_id: str) -> dict | None:
     except Exception:
         return None
 
-    doc = await database["models"].find_one({"_id": oid})
+    try:
+        doc = await database["models"].find_one({"_id": oid})
+    except PyMongoError as exc:
+        logger.error("Model lookup by id failed: %s", exc)
+        return None
     if doc:
         doc["id"] = str(doc.pop("_id"))
     return doc
@@ -104,10 +119,14 @@ async def set_model_preview_url(model_id: str, preview_url: str) -> bool:
     except Exception:
         return False
 
-    result = await database["models"].update_one(
-        {"_id": oid},
-        {"$set": {"preview_url": preview_url}},
-    )
+    try:
+        result = await database["models"].update_one(
+            {"_id": oid},
+            {"$set": {"preview_url": preview_url}},
+        )
+    except PyMongoError as exc:
+        logger.error("Setting model preview failed: %s", exc)
+        return False
     return result.matched_count > 0
 
 
@@ -131,12 +150,20 @@ async def upsert_model(
     if size_bytes is not None:
         fields["size_bytes"] = size_bytes
 
-    result = await database["models"].update_one(
-        {"filename": filename},
-        {"$set": fields},
-        upsert=True,
-    )
+    try:
+        result = await database["models"].update_one(
+            {"filename": filename},
+            {"$set": fields},
+            upsert=True,
+        )
+    except PyMongoError as exc:
+        logger.error("Upserting model failed: %s", exc)
+        raise RuntimeError("Model database is unavailable") from exc
     if result.upserted_id:
         return str(result.upserted_id)
-    doc = await database["models"].find_one({"filename": filename})
+    try:
+        doc = await database["models"].find_one({"filename": filename})
+    except PyMongoError as exc:
+        logger.error("Reloading model after upsert failed: %s", exc)
+        raise RuntimeError("Model database is unavailable") from exc
     return str(doc["_id"])

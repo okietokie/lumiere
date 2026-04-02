@@ -39,7 +39,10 @@ def get_http_client() -> httpx.AsyncClient:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await sync_b2_to_mongo()
+    try:
+        await sync_b2_to_mongo()
+    except Exception:
+        logger.exception("Startup sync failed; continuing without B2/Mongo warm sync.")
     logger.info("Server ready.")
     yield
     global _http_client

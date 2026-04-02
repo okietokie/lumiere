@@ -1,41 +1,47 @@
-
-import os
 import logging
+import os
+
+from pymongo.errors import PyMongoError
+
 from app.database import database
 
 logger = logging.getLogger(__name__)
 
-B2_KEY_ID       = os.getenv("B2_KEY_ID")
-B2_APP_KEY      = os.getenv("B2_APP_KEY")
-B2_BUCKET_NAME  = os.getenv("B2_BUCKET_NAME")
-CDN_BASE        = os.getenv("CDN_BASE", "")
+B2_KEY_ID = os.getenv("B2_KEY_ID")
+B2_APP_KEY = os.getenv("B2_APP_KEY")
+B2_BUCKET_NAME = os.getenv("B2_BUCKET_NAME")
+CDN_BASE = os.getenv("CDN_BASE", "")
 
 
 async def sync_b2_to_mongo():
     if not B2_KEY_ID or not B2_APP_KEY:
-        logger.warning("B2_KEY_ID / B2_APP_KEY not set — skipping B2 sync.")
+        logger.warning("B2_KEY_ID / B2_APP_KEY not set - skipping B2 sync.")
         return
 
     try:
-        from b2sdk.v2 import InMemoryAccountInfo, B2Api
-        info   = InMemoryAccountInfo()
+        from b2sdk.v2 import B2Api, InMemoryAccountInfo
+
+        info = InMemoryAccountInfo()
         b2_api = B2Api(info)
         b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
         bucket = b2_api.get_bucket_by_name(B2_BUCKET_NAME)
-        logger.info(f"B2 sync: connected to '{B2_BUCKET_NAME}'.")
-    except Exception as e:
-        logger.error(f"B2 sync: could not connect — {e}")
+        logger.info("B2 sync: connected to '%s'.", B2_BUCKET_NAME)
+    except Exception as exc:
+        logger.error("B2 sync: could not connect - %s", exc)
         return
 
-    # Fetch all existing MongoDB entries for fast lookup (url → size already stored)
     existing: dict[str, int | None] = {}
-    async for doc in database["models"].find({}, {"url": 1, "size_bytes": 1}):
-        if doc.get("url"):
-            existing[doc["url"]] = doc.get("size_bytes")
+    try:
+        async for doc in database["models"].find({}, {"url": 1, "size_bytes": 1}):
+            if doc.get("url"):
+                existing[doc["url"]] = doc.get("size_bytes")
+    except PyMongoError as exc:
+        logger.error("B2 sync: MongoDB unavailable during existing-model scan - %s", exc)
+        return
 
-    inserted  = 0
-    updated   = 0
-    skipped   = 0
+    inserted = 0
+    updated = 0
+    skipped = 0
     total_bytes = 0
 
     try:
@@ -44,14 +50,12 @@ async def sync_b2_to_mongo():
             if not name.lower().endswith((".glb", ".gltf")):
                 continue
 
-            cdn_url    = f"{CDN_BASE.rstrip('/')}/{name}"
-            size_bytes = getattr(file_version, "content_length", None) or \
-                         getattr(file_version, "size", None)
+            cdn_url = f"{CDN_BASE.rstrip('/')}/{name}"
+            size_bytes = getattr(file_version, "content_length", None) or getattr(file_version, "size", None)
             if size_bytes:
                 total_bytes += size_bytes
 
             if cdn_url in existing:
-                # Update size_bytes if we now have it and didn't before
                 if size_bytes and existing[cdn_url] is None:
                     await database["models"].update_one(
                         {"url": cdn_url},
@@ -62,10 +66,10 @@ async def sync_b2_to_mongo():
                     skipped += 1
                 continue
 
-            parts         = name.split("/")
-            category      = parts[0].lower() if len(parts) > 1 else "uncategorized"
+            parts = name.split("/")
+            category = parts[0].lower() if len(parts) > 1 else "uncategorized"
             filename_only = parts[-1]
-            display_name  = (
+            display_name = (
                 filename_only.rsplit(".", 1)[0]
                 .replace("_", " ")
                 .replace("-", " ")
@@ -73,10 +77,10 @@ async def sync_b2_to_mongo():
             )
 
             fields = {
-                "name":        display_name,
-                "filename":    name,
-                "category":    category,
-                "url":         cdn_url,
+                "name": display_name,
+                "filename": name,
+                "category": category,
+                "url": cdn_url,
                 "description": None,
             }
             if size_bytes:
@@ -89,16 +93,23 @@ async def sync_b2_to_mongo():
             )
             inserted += 1
             logger.info(
-                f"B2 sync: registered '{name}' → {cdn_url}"
-                + (f" ({size_bytes // 1024}KB)" if size_bytes else "")
+                "B2 sync: registered '%s' -> %s%s",
+                name,
+                cdn_url,
+                f" ({size_bytes // 1024}KB)" if size_bytes else "",
             )
-
-    except Exception as e:
-        logger.error(f"B2 sync: error listing bucket — {e}")
+    except PyMongoError as exc:
+        logger.error("B2 sync: MongoDB write failed - %s", exc)
+        return
+    except Exception as exc:
+        logger.error("B2 sync: error listing bucket - %s", exc)
         return
 
     total_mb = total_bytes / 1024 / 1024
     logger.info(
-        f"B2 sync complete — {inserted} new, {updated} size-updated, "
-        f"{skipped} unchanged. Total bucket size: {total_mb:.1f}MB"
+        "B2 sync complete - %s new, %s size-updated, %s unchanged. Total bucket size: %.1fMB",
+        inserted,
+        updated,
+        skipped,
+        total_mb,
     )

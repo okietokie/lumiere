@@ -1,12 +1,855 @@
+@import url("https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,600;6..96,700&family=Outfit:wght@300;400;500;600;700;800&display=swap");
 
-html, body{
-  height: 100vh;
+:root {
+  --lp-bg: #110b09;
+  --lp-bg-2: #1c120f;
+  --lp-panel: rgba(37, 23, 18, 0.82);
+  --lp-panel-soft: rgba(58, 38, 30, 0.58);
+  --lp-line: rgba(239, 204, 165, 0.14);
+  --lp-line-strong: rgba(239, 204, 165, 0.28);
+  --lp-text: #f6eadf;
+  --lp-muted: rgba(246, 234, 223, 0.68);
+  --lp-accent: #d3a274;
+  --lp-accent-deep: #9b6543;
+  --lp-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
+  --lp-inner: inset 0 1px 0 rgba(255, 240, 224, 0.08), inset 0 -22px 34px rgba(0, 0, 0, 0.12);
+  --lp-radius-xl: 40px;
+  --lp-radius-lg: 28px;
+  --lp-radius-md: 22px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
   margin: 0;
-  padding: 0;
+  min-width: 320px;
+  color: var(--lp-text);
+  font-family: "Outfit", sans-serif;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(130, 78, 48, 0.2), transparent 26%),
+    radial-gradient(circle at 80% 14%, rgba(201, 149, 103, 0.08), transparent 18%),
+    radial-gradient(circle at 50% 90%, rgba(92, 52, 34, 0.14), transparent 28%),
+    linear-gradient(180deg, #1f1411 0%, #120b09 40%, #080605 100%);
 }
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 120px 120px;
+  mask-image: radial-gradient(circle at center, black 38%, transparent 90%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+}
+
 #root {
-  width: 100%;
-  text-align: center;
+  min-height: 100vh;
 }
 
+.landing-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: clip;
+}
 
+.landing-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0 6%, rgba(255, 235, 214, 0.04) 6% 6.15%, transparent 6.15% 93.85%, rgba(255, 235, 214, 0.04) 93.85% 94%, transparent 94%),
+    linear-gradient(180deg, rgba(255, 235, 214, 0.04), transparent 10%);
+}
+
+.lp-hero-backdrop {
+  position: absolute;
+  inset: -16rem auto auto -10rem;
+  width: 72rem;
+  height: 52rem;
+  pointer-events: none;
+  filter: blur(42px);
+  background:
+    radial-gradient(circle at 34% 32%, rgba(208, 154, 104, 0.2), transparent 22%),
+    radial-gradient(circle at 62% 36%, rgba(96, 56, 37, 0.3), transparent 26%),
+    radial-gradient(circle at 72% 22%, rgba(247, 221, 190, 0.08), transparent 16%);
+}
+
+.lp-nav,
+.lp-main {
+  position: relative;
+  z-index: 1;
+}
+
+.lp-nav {
+  width: min(1240px, calc(100% - 32px));
+  margin: 18px auto 0;
+  padding: 16px 18px 16px 24px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 20px;
+  align-items: center;
+  border: 1px solid var(--lp-line);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(43, 28, 22, 0.7), rgba(25, 17, 14, 0.88));
+  backdrop-filter: blur(20px);
+  box-shadow: var(--lp-shadow), var(--lp-inner);
+}
+
+.lp-brand {
+  margin: 0;
+  font-family: "Bodoni Moda", serif;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.lp-brand-sub,
+.lp-eyebrow,
+.lp-card-index,
+.lp-floating-panel span,
+.lp-stat-card span,
+.lp-showcase-copy p,
+.lp-signup-card label {
+  color: var(--lp-muted);
+}
+
+.lp-brand-sub,
+.lp-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.72rem;
+}
+
+.lp-nav-actions,
+.lp-hero-actions,
+.lp-signup-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lp-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 24px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.lp-button-primary {
+  color: #23140d;
+  background: linear-gradient(180deg, #f1c89c 0%, #d49a6d 54%, #b7794f 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 232, 0.76),
+    inset 0 -8px 16px rgba(123, 75, 45, 0.18),
+    0 18px 34px rgba(176, 112, 70, 0.22);
+}
+
+.lp-button-ghost {
+  color: var(--lp-text);
+  border-color: var(--lp-line);
+  background: linear-gradient(180deg, rgba(71, 47, 37, 0.6), rgba(28, 19, 15, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 247, 239, 0.06);
+}
+
+.lp-main {
+  width: min(1240px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 88px;
+}
+
+.lp-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.94fr) minmax(450px, 1.06fr);
+  gap: 34px;
+  align-items: center;
+  min-height: calc(100vh - 130px);
+}
+
+.lp-copy,
+.lp-section-head,
+.lp-showcase-copy,
+.lp-signup-copy-block,
+.lp-experience-copy {
+  position: relative;
+}
+
+.lp-copy::before,
+.lp-section-head::before,
+.lp-showcase-copy::before,
+.lp-signup-copy-block::before,
+.lp-experience-copy::before {
+  content: "";
+  position: absolute;
+  left: -18px;
+  top: 0.15em;
+  bottom: 0.15em;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(239, 204, 165, 0.38), transparent);
+}
+
+.lp-copy h1,
+.lp-experience-copy h2,
+.lp-section-head h2,
+.lp-showcase-copy h2,
+.lp-signup-copy-block h2,
+.lp-signup-card h3,
+.lp-trust h2,
+.lp-feature-card h2,
+.lp-core-card h3,
+.lp-flow-step h3 {
+  margin: 0;
+  font-family: "Bodoni Moda", serif;
+  font-weight: 600;
+  line-height: 0.95;
+}
+
+.lp-copy h1 {
+  margin-top: 18px;
+  max-width: 8ch;
+  font-size: clamp(4.2rem, 8vw, 7.7rem);
+}
+
+.lp-hero-text,
+.lp-experience-copy p,
+.lp-feature-card p,
+.lp-core-card p,
+.lp-flow-step p,
+.lp-showcase-copy p,
+.lp-signup-copy,
+.lp-signup-copy-block p,
+.lp-stat-card span {
+  color: var(--lp-muted);
+  line-height: 1.72;
+  font-size: 1rem;
+}
+
+.lp-hero-text {
+  max-width: 34rem;
+  margin: 24px 0 0;
+}
+
+.lp-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.lp-stat-card,
+.lp-feature-card,
+.lp-core-card,
+.lp-flow-step,
+.lp-signup-card,
+.lp-floating-panel,
+.lp-visual-frame,
+.lp-experience,
+.lp-showcase,
+.lp-trust,
+.lp-showcase-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--lp-line);
+  background:
+    linear-gradient(180deg, rgba(47, 30, 24, 0.82), rgba(22, 15, 12, 0.94)),
+    radial-gradient(circle at top, rgba(255, 231, 202, 0.05), transparent 42%);
+  box-shadow: var(--lp-shadow), var(--lp-inner);
+}
+
+.lp-stat-card {
+  min-height: 124px;
+  padding: 18px;
+  border-radius: 20px;
+  backdrop-filter: blur(14px);
+}
+
+.lp-stat-card strong {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 1.18rem;
+}
+
+.lp-visual {
+  perspective: 1600px;
+}
+
+.lp-visual-frame {
+  padding: 18px;
+  border-radius: var(--lp-radius-xl);
+  transform: rotate(-1.5deg);
+}
+
+.lp-visual-frame::after {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border-radius: 30px;
+  border: 1px solid rgba(255, 228, 196, 0.06);
+  pointer-events: none;
+}
+
+.lp-canvas-shell {
+  position: relative;
+  height: 700px;
+  overflow: hidden;
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 24% 18%, rgba(231, 193, 156, 0.12), transparent 18%),
+    radial-gradient(circle at 82% 80%, rgba(116, 67, 42, 0.26), transparent 24%),
+    linear-gradient(150deg, #271914 0%, #16100d 56%, #0d0908 100%);
+}
+
+.lp-canvas-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 84%);
+}
+
+.lp-canvas-shell canvas {
+  display: block;
+}
+
+.lp-canvas-glow {
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+}
+
+.lp-canvas-glow-left {
+  left: -44px;
+  top: 38px;
+  background: rgba(168, 106, 67, 0.28);
+}
+
+.lp-canvas-glow-right {
+  right: -56px;
+  bottom: 22px;
+  background: rgba(211, 162, 116, 0.2);
+}
+
+.lp-floating-panel {
+  position: absolute;
+  min-width: 210px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(89, 60, 46, 0.74), rgba(28, 19, 15, 0.86));
+  backdrop-filter: blur(18px);
+}
+
+.lp-floating-panel strong {
+  display: block;
+  margin-top: 8px;
+}
+
+.lp-floating-panel-top {
+  top: 18px;
+  right: 18px;
+}
+
+.lp-floating-panel-bottom {
+  left: 18px;
+  bottom: 18px;
+}
+
+.lp-panel-shine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(125deg, rgba(255, 242, 226, 0.1), transparent 18%, transparent 74%, rgba(255, 228, 200, 0.06));
+}
+
+.lp-feature-strip,
+.lp-core-grid,
+.lp-flow,
+.lp-showcase,
+.lp-signup-section {
+  margin-top: 52px;
+}
+
+.lp-feature-strip {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr 1fr;
+  gap: 16px;
+}
+
+.lp-feature-card {
+  min-height: 250px;
+  padding: 26px;
+  border-radius: var(--lp-radius-lg);
+  backdrop-filter: blur(14px);
+}
+
+.lp-feature-card:nth-child(2) {
+  transform: translateY(26px);
+}
+
+.lp-feature-card:nth-child(3) {
+  transform: translateY(10px);
+}
+
+.lp-card-index {
+  display: inline-block;
+  margin: 0 0 24px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 204, 165, 0.12);
+}
+
+.lp-feature-card h2 {
+  margin-bottom: 14px;
+  font-size: 2rem;
+}
+
+.lp-experience,
+.lp-showcase,
+.lp-signup-section {
+  padding: 20px;
+  border-radius: calc(var(--lp-radius-xl) + 4px);
+}
+
+.lp-experience {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(460px, 1.06fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.lp-experience-copy,
+.lp-showcase-copy,
+.lp-signup-copy-block {
+  padding: 28px 26px 28px 34px;
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(59, 38, 30, 0.3), rgba(18, 11, 9, 0.1));
+}
+
+.lp-experience-copy h2,
+.lp-section-head h2,
+.lp-showcase-copy h2,
+.lp-signup-copy-block h2,
+.lp-trust h2 {
+  margin-top: 16px;
+  font-size: clamp(3rem, 5vw, 4.6rem);
+}
+
+.lp-experience-notes {
+  margin-top: 26px;
+  display: grid;
+  gap: 12px;
+}
+
+.lp-experience-notes div {
+  padding: 18px 18px 18px 48px;
+  border-radius: 20px;
+  position: relative;
+  color: var(--lp-muted);
+  background: linear-gradient(180deg, rgba(56, 36, 29, 0.6), rgba(22, 15, 12, 0.9));
+  border: 1px solid rgba(239, 204, 165, 0.1);
+}
+
+.lp-experience-notes div::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 22px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #efc595, #b87a4f);
+  box-shadow: 0 0 18px rgba(211, 162, 116, 0.3);
+}
+
+.lp-experience-scene {
+  min-height: 100%;
+  border-radius: 30px;
+  overflow: hidden;
+}
+
+.lp-section-head {
+  max-width: 780px;
+  margin-bottom: 24px;
+  padding-left: 18px;
+}
+
+.lp-core-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.lp-core-card {
+  min-height: 230px;
+  padding: 24px;
+  border-radius: 26px;
+}
+
+.lp-core-card:nth-child(3n + 2) {
+  transform: translateY(16px);
+}
+
+.lp-core-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 18px;
+  border-radius: 18px;
+  color: #26150f;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  background: linear-gradient(180deg, #f3c695 0%, #c98958 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 232, 0.8),
+    0 14px 24px rgba(182, 116, 70, 0.18);
+}
+
+.lp-core-card h3,
+.lp-flow-step h3 {
+  margin-bottom: 12px;
+  font-size: 1.85rem;
+}
+
+.lp-flow-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.lp-flow-line {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 34px;
+  height: 1px;
+  transform-origin: left;
+  background: linear-gradient(90deg, transparent, rgba(239, 204, 165, 0.9), transparent);
+}
+
+.lp-flow-step {
+  z-index: 1;
+  min-height: 254px;
+  padding: 24px;
+  border-radius: 28px;
+}
+
+.lp-flow-step:nth-child(3) {
+  transform: translateY(20px);
+}
+
+.lp-flow-step:nth-child(4) {
+  transform: translateY(40px);
+}
+
+.lp-flow-step span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 22px;
+  border-radius: 50%;
+  color: #26150f;
+  font-weight: 700;
+  background: linear-gradient(180deg, #f0c493 0%, #c88856 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 232, 0.75),
+    0 12px 20px rgba(182, 116, 70, 0.22);
+}
+
+.lp-showcase {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(470px, 1.08fr);
+  gap: 20px;
+  align-items: center;
+}
+
+.lp-showcase-frame {
+  padding: 20px;
+  border-radius: 34px;
+  background:
+    linear-gradient(180deg, rgba(60, 39, 31, 0.74), rgba(18, 12, 9, 0.94));
+}
+
+.lp-showcase-screen {
+  padding: 18px;
+  border-radius: 26px;
+  background:
+    linear-gradient(180deg, rgba(22, 14, 11, 0.96), rgba(46, 29, 23, 0.86));
+  box-shadow:
+    inset 0 20px 28px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 242, 226, 0.06);
+}
+
+.lp-showcase-video {
+  position: relative;
+  min-height: 360px;
+  overflow: hidden;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 20% 24%, rgba(223, 181, 138, 0.22), transparent 16%),
+    radial-gradient(circle at 74% 34%, rgba(101, 61, 39, 0.34), transparent 26%),
+    linear-gradient(140deg, #2f1d17 0%, #6a4636 26%, #1f1411 58%, #0e0908 100%);
+  box-shadow:
+    inset 0 18px 28px rgba(0, 0, 0, 0.32),
+    0 24px 40px rgba(0, 0, 0, 0.24);
+}
+
+.lp-showcase-video::before {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 235, 214, 0.08);
+}
+
+.lp-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 22px;
+}
+
+.lp-preview-badge {
+  align-self: flex-start;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 204, 165, 0.12);
+  background: rgba(20, 12, 10, 0.64);
+  backdrop-filter: blur(10px);
+}
+
+.lp-preview-track {
+  align-self: flex-end;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 92px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(19, 12, 10, 0.62);
+  border: 1px solid rgba(239, 204, 165, 0.08);
+}
+
+.lp-preview-track span {
+  width: 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f1c492 0%, #ae6e43 100%);
+  box-shadow: 0 0 16px rgba(199, 138, 87, 0.28);
+}
+
+.lp-trust {
+  margin-top: 52px;
+  padding: 42px 54px;
+  border-radius: 36px;
+  text-align: center;
+  background:
+    radial-gradient(circle at top center, rgba(211, 162, 116, 0.08), transparent 26%),
+    linear-gradient(180deg, rgba(47, 30, 24, 0.82), rgba(20, 13, 10, 0.96));
+}
+
+.lp-signup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 0.82fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.lp-signup-card {
+  padding: 28px;
+  border-radius: 28px;
+}
+
+.lp-signup-card h3 {
+  margin-top: 14px;
+  font-size: clamp(2.2rem, 4vw, 3.2rem);
+}
+
+.lp-signup-copy {
+  margin: 14px 0 22px;
+}
+
+.lp-signup-card label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+}
+
+.lp-signup-card input {
+  width: 100%;
+  min-height: 56px;
+  padding: 0 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(239, 204, 165, 0.1);
+  color: var(--lp-text);
+  background:
+    linear-gradient(180deg, rgba(18, 12, 10, 0.95), rgba(42, 27, 21, 0.84));
+  box-shadow: inset 0 1px 0 rgba(255, 244, 235, 0.05);
+}
+
+.lp-signup-card input:focus {
+  outline: 1px solid rgba(239, 204, 165, 0.34);
+  border-color: rgba(239, 204, 165, 0.34);
+}
+
+.lp-signup-actions .lp-button {
+  flex: 1;
+}
+
+@media (max-width: 1120px) {
+  .lp-hero,
+  .lp-experience,
+  .lp-showcase,
+  .lp-signup-layout,
+  .lp-feature-strip,
+  .lp-core-cards,
+  .lp-flow-track {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-hero {
+    min-height: auto;
+    padding-top: 30px;
+  }
+
+  .lp-copy::before,
+  .lp-section-head::before,
+  .lp-showcase-copy::before,
+  .lp-signup-copy-block::before,
+  .lp-experience-copy::before {
+    display: none;
+  }
+
+  .lp-feature-card:nth-child(2),
+  .lp-feature-card:nth-child(3),
+  .lp-core-card:nth-child(3n + 2),
+  .lp-flow-step:nth-child(3),
+  .lp-flow-step:nth-child(4) {
+    transform: none;
+  }
+
+  .lp-flow-line {
+    display: none;
+  }
+
+  .lp-canvas-shell {
+    height: 560px;
+  }
+
+  .lp-visual-frame {
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .lp-nav,
+  .lp-main {
+    width: min(100% - 20px, 1240px);
+  }
+
+  .lp-nav {
+    grid-template-columns: 1fr;
+    border-radius: 28px;
+    padding: 18px;
+  }
+
+  .lp-nav-actions,
+  .lp-hero-actions,
+  .lp-signup-actions {
+    width: 100%;
+  }
+
+  .lp-nav-actions .lp-button,
+  .lp-hero-actions .lp-button,
+  .lp-signup-actions .lp-button {
+    width: 100%;
+  }
+
+  .lp-copy h1 {
+    max-width: 10ch;
+    font-size: clamp(3rem, 15vw, 4.8rem);
+  }
+
+  .lp-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-canvas-shell {
+    height: 420px;
+  }
+
+  .lp-floating-panel {
+    min-width: unset;
+    left: 14px;
+    right: 14px;
+  }
+
+  .lp-floating-panel-top {
+    top: 14px;
+  }
+
+  .lp-floating-panel-bottom {
+    bottom: 14px;
+  }
+
+  .lp-experience,
+  .lp-showcase,
+  .lp-signup-section,
+  .lp-trust {
+    padding: 16px;
+  }
+
+  .lp-experience-copy,
+  .lp-showcase-copy,
+  .lp-signup-copy-block,
+  .lp-signup-card {
+    padding: 22px 18px;
+  }
+
+  .lp-showcase-video {
+    min-height: 260px;
+  }
+
+  .lp-trust {
+    padding: 28px 20px;
+  }
+}

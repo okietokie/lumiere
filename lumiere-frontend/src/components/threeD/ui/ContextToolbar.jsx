@@ -70,12 +70,13 @@ export default function ContextToolbar({
   onPrecisionUpdate,
   wallGhost,
   activeOpeningTool,
+  isPinned = false,
+  onPinnedChange,
 }) {
   const toolbarRef              = useRef(null);
   const [tintOpen, setTintOpen] = useState(false);
   const [bubble,   setBubble]   = useState(null);
   const bubbleTimer             = useRef(null);
-  const [isPinned, setIsPinned] = useState(false);
   const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 560);
 
   const [precisionMode, setPrecisionMode] = useState(null);
@@ -102,7 +103,6 @@ export default function ContextToolbar({
   }, [screenPos]);
 
   useEffect(() => { setPrecisionMode(null); }, [selectedItem?.id]);
-  useEffect(() => { if (!screenPos) setIsPinned(false); }, [screenPos]);
 
   useEffect(() => {
     if (tintOpen && selectedFurnitureMesh) {
@@ -122,7 +122,7 @@ export default function ContextToolbar({
     );
   }, [tintOpen, selectedFurnitureMesh, selectedItem?.id, selectedItem?.tint]);
 
-  if (!screenPos) return null;
+  if (!selectedItem || (!screenPos && !isPinned)) return null;
 
   const currentTint = normalizeTint(selectedItem?.tint);
   const toolbarWidth = isNarrow
@@ -199,6 +199,25 @@ export default function ContextToolbar({
     onTintChange?.({ ...DEFAULT_TINT });
   };
 
+  const mobilePinButtonStyle = {
+    width: isNarrow ? (isPinned ? 140 : 44) : 36,
+    minWidth: isNarrow ? (isPinned ? 140 : 44) : 36,
+    height: isNarrow ? 44 : 36,
+    borderRadius: isNarrow ? (isPinned ? 50 : '50%') : 999,
+    border: isNarrow
+      ? 'none'
+      : (isPinned ? '1px solid rgba(196,154,108,0.55)' : '1px solid rgba(255,255,255,0.08)'),
+    background: isNarrow
+      ? (isPinned ? COLORS.action : '#1f1814')
+      : (isPinned ? 'rgba(196,154,108,0.18)' : 'rgba(255,255,255,0.04)'),
+    color: isNarrow
+      ? COLORS.text
+      : (isPinned ? '#C49A6C' : 'rgba(232,224,216,0.8)'),
+    boxShadow: isNarrow
+      ? `0 0 0 4px ${isPinned ? 'rgba(196, 154, 108, 0.32)' : 'rgba(122, 101, 89, 0.28)'}`
+      : 'none',
+  };
+
   return (
     <>
       {/*  Main toolbar pill */}
@@ -213,7 +232,7 @@ export default function ContextToolbar({
           display:        'flex',
           flexDirection:  'column',
           gap:            0,
-          background:     'rgba(12,9,7,0.93)',
+          background:     'transparent',
           border:         '1px solid rgba(196,154,108,0.3)',
           borderRadius:   12,
           backdropFilter: 'blur(16px)',
@@ -223,34 +242,24 @@ export default function ContextToolbar({
           overflow:       'hidden',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: isNarrow ? 4 : 2, padding: isNarrow ? '6px' : '5px 6px' }}>
-          <button
-            type="button"
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: isNarrow ? 8 : 2,
+          padding: isNarrow ? '8px' : '5px 6px',
+          overflowX: isNarrow ? 'auto' : 'visible',
+          scrollbarWidth: 'none',
+        }}>
+          <MobilePinButton
+            compact={isNarrow}
+            pinned={isPinned}
+            style={mobilePinButtonStyle}
             onClick={() => {
-              setIsPinned((prev) => {
-                const next = !prev;
-                showBubble(next ? 'Toolbar pinned to top' : 'Toolbar follows selection again', toolbarRef.current);
-                return next;
-              });
+              const next = !isPinned;
+              onPinnedChange?.(next);
+              showBubble(next ? 'Toolbar pinned to top' : 'Toolbar follows selection again', toolbarRef.current);
             }}
-            title={isPinned ? 'Unpin toolbar' : 'Pin toolbar to top'}
-            style={{
-              width: isNarrow ? 34 : 36,
-              minWidth: isNarrow ? 34 : 36,
-              height: isNarrow ? 34 : 36,
-              borderRadius: 999,
-              border: isPinned ? '1px solid rgba(196,154,108,0.55)' : '1px solid rgba(255,255,255,0.08)',
-              background: isPinned ? 'rgba(196,154,108,0.18)' : 'rgba(255,255,255,0.04)',
-              color: isPinned ? '#C49A6C' : 'rgba(232,224,216,0.8)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            <PinIcon pinned={isPinned} />
-          </button>
+          />
           {buttons.map((btn, i) => {
             const gizmoKey   = btn.action.startsWith('gizmo:') ? btn.action.split(':')[1] : null;
             const isActive   = (gizmoKey && gizmoKey === gizmoMode)
@@ -747,6 +756,76 @@ function TintSlider({ label, value, min, max, step, unit, color, onChange }) {
     </div>
   );
 }
+
+function MobilePinButton({ compact, pinned, style, onClick }) {
+  const btnRef = useRef(null);
+  const [revealed, setRevealed] = useState(false);
+  const revealTimeoutRef = useRef(null);
+
+  useEffect(() => () => {
+    if (revealTimeoutRef.current) clearTimeout(revealTimeoutRef.current);
+  }, []);
+
+  const revealTemporarily = () => {
+    setRevealed(true);
+    clearTimeout(revealTimeoutRef.current);
+    revealTimeoutRef.current = setTimeout(() => setRevealed(false), 1600);
+  };
+
+  const expanded = compact ? revealed : true;
+
+  return (
+    <button
+      ref={btnRef}
+      type="button"
+      title={pinned ? 'Unpin toolbar' : 'Pin toolbar to top'}
+      onClick={(event) => {
+        if (compact && !revealed) {
+          event.preventDefault();
+          revealTemporarily();
+          return;
+        }
+        onClick?.(event);
+      }}
+      onMouseEnter={() => {
+        if (compact) setRevealed(true);
+        else gsap.to(btnRef.current, { scale: 1.1, duration: 0.1 });
+      }}
+      onMouseLeave={() => {
+        if (compact) setRevealed(false);
+        else gsap.to(btnRef.current, { scale: 1, duration: 0.1 });
+      }}
+      onFocus={() => compact && setRevealed(true)}
+      onBlur={() => compact && setRevealed(false)}
+      style={compact ? mobileLinkButtonStyle({ expanded, active: pinned }) : {
+        marginRight: 8,
+        ...style,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        flexShrink: 0,
+        position: 'relative',
+        overflow: 'hidden',
+        transitionDuration: '0.3s',
+        transitionProperty: 'width, min-width, border-radius, background, box-shadow',
+        padding: 0,
+        fontWeight: 700,
+      }}
+    >
+      <span style={compact ? mobileLinkIconStyle(expanded) : { display: 'inline-flex', lineHeight: 0 }}>
+        <PinIcon pinned={pinned} />
+      </span>
+      {compact && (
+        <>
+          <span style={mobileLinkOverlayStyle({ expanded, active: pinned })} />
+          <span style={mobileLinkTitleStyle(expanded)}>{pinned ? 'Unpin' : 'Pin'}</span>
+        </>
+      )}
+    </button>
+  );
+}
+
 function Icon({ name, size = 15 }) {
   const paths = {
     drag:    'M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
@@ -767,42 +846,201 @@ function Icon({ name, size = 15 }) {
     </svg>
   );
 }
+
+function mobileLinkButtonStyle({ expanded, active = false, danger = false }) {
+  const bg = danger
+    ? 'rgba(116, 27, 22, 0.96)'
+    : active
+      ? '#d7b38a'
+      : '#f6f1ea';
+  const fg = danger ? '#fff1ef' : active ? '#251913' : '#231814';
+  return {
+    display: 'inline-flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: expanded ? 106 : 44,
+    minWidth: expanded ? 106 : 44,
+    height: 38,
+    borderRadius: 9,
+    position: 'relative',
+    zIndex: 1,
+    overflow: 'hidden',
+    transformOrigin: 'center left',
+    transition: 'width 0.2s ease-in, box-shadow 0.2s ease-in, background 0.2s ease-in',
+    textDecoration: 'none',
+    color: fg,
+    background: bg,
+    border: 'none',
+    flexShrink: 0,
+    boxShadow: active
+      ? '0 8px 18px rgba(196,154,108,0.28)'
+      : '0 6px 16px rgba(0,0,0,0.14)',
+    cursor: 'pointer',
+    padding: 0,
+  };
+}
+
+function mobileLinkOverlayStyle({ expanded, active = false, danger = false }) {
+  return {
+    position: 'absolute',
+    zIndex: -1,
+    content: '""',
+    display: 'block',
+    borderRadius: 9,
+    width: '100%',
+    height: '100%',
+    top: 0,
+    left: 0,
+    transform: expanded ? 'translateX(0)' : 'translateX(100%)',
+    transition: 'transform 0.2s ease-in',
+    transformOrigin: 'center right',
+    backgroundColor: danger
+      ? 'rgba(154, 55, 47, 0.92)'
+      : active
+        ? 'rgba(255,255,255,0.22)'
+        : '#ece3d7',
+    pointerEvents: 'none',
+  };
+}
+
+function mobileLinkIconStyle(expanded) {
+  return {
+    left: 11,
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    transform: expanded ? 'translateX(0)' : 'translateX(0)',
+    transition: 'transform 0.2s ease-in',
+  };
+}
+
+function mobileLinkTitleStyle(expanded) {
+  return {
+    transform: expanded ? 'translateX(0)' : 'translateX(100%)',
+    opacity: expanded ? 1 : 0,
+    transition: 'transform 0.2s ease-in, opacity 0.2s ease-in',
+    transformOrigin: 'center right',
+    display: 'block',
+    textAlign: 'center',
+    textIndent: 18,
+    width: '100%',
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.01em',
+    pointerEvents: 'none',
+  };
+}
+
 function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
   const btnRef = useRef(null);
+  const [revealed, setRevealed] = useState(false);
+  const revealTimeoutRef = useRef(null);
+
+  useEffect(() => () => {
+    if (revealTimeoutRef.current) clearTimeout(revealTimeoutRef.current);
+  }, []);
+
+  const revealTemporarily = () => {
+    setRevealed(true);
+    clearTimeout(revealTimeoutRef.current);
+    revealTimeoutRef.current = setTimeout(() => setRevealed(false), 1600);
+  };
+
+  const expanded = compact ? revealed : true;
+
   return (
     <button
       ref={btnRef}
-      onClick={onClick}
+      onClick={(event) => {
+        if (compact && !revealed) {
+          event.preventDefault();
+          revealTemporarily();
+          return;
+        }
+        onClick(event);
+      }}
       title={btn.precision ? `${btn.label}  (double-tap for precision)` : btn.label}
-      onMouseEnter={() => gsap.to(btnRef.current, { scale: 1.1, duration: 0.1 })}
-      onMouseLeave={() => gsap.to(btnRef.current, { scale: 1,   duration: 0.1 })}
-      style={{
-        display:       'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding:       compact ? '5px 6px' : '6px 9px', borderRadius: 8,
-        border:        active || precisionActive
+      onMouseEnter={() => {
+        if (compact) setRevealed(true);
+        else gsap.to(btnRef.current, { scale: 1.1, duration: 0.1 });
+      }}
+      onMouseLeave={() => {
+        if (compact) setRevealed(false);
+        else gsap.to(btnRef.current, { scale: 1, duration: 0.1 });
+      }}
+      onFocus={() => compact && setRevealed(true)}
+      onBlur={() => compact && setRevealed(false)}
+      style={compact ? mobileLinkButtonStyle({
+        expanded,
+        active: active || precisionActive,
+        danger: btn.danger,
+      }) : {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 3,
+        padding: '6px 9px',
+        borderRadius: 8,
+        border: active || precisionActive
           ? `1px solid rgba(196,154,108,${precisionActive ? '0.75' : '0.5'})`
           : '1px solid transparent',
-        background:    btn.danger ? 'rgba(220,53,69,0.15)'
-          : precisionActive ? 'rgba(196,154,108,0.26)'
-          : active       ? 'rgba(196,154,108,0.18)'
-          : 'transparent',
-        color:         btn.danger ? '#ff6b6b' : (active || precisionActive) ? '#C49A6C' : '#E8E0D8',
-        cursor:        'pointer', transition: 'background 0.12s',
-        minWidth:      compact ? 30 : 34, minHeight: compact ? 36 : 44, position: 'relative',
-        flex:          compact ? '1 1 0' : '0 0 auto',
+        background: (
+          btn.danger ? 'rgba(220,53,69,0.15)'
+            : precisionActive ? 'rgba(196,154,108,0.26)'
+            : active ? 'rgba(196,154,108,0.18)'
+            : 'transparent'
+        ),
+        color: btn.danger ? '#ff6b6b' : (active || precisionActive) ? '#C49A6C' : '#E8E0D8',
+        cursor: 'pointer',
+        transition: 'background 0.12s',
+        width: 'auto',
+        minWidth: 34,
+        height: 44,
+        minHeight: 44,
+        position: 'relative',
+        flex: '0 0 auto',
+        overflow: 'hidden',
+        boxShadow: 'none',
+        whiteSpace: 'nowrap',
       }}
-      onMouseOver={(e) => { if (!btn.danger && !active) e.currentTarget.style.background = 'rgba(196,154,108,0.13)'; }}
-      onMouseOut={(e)  => { if (!btn.danger && !active) e.currentTarget.style.background = 'transparent'; }}
+      onMouseOver={(e) => {
+        if (!compact && !btn.danger && !active) e.currentTarget.style.background = 'rgba(196,154,108,0.13)';
+      }}
+      onMouseOut={(e)  => {
+        if (!compact && !btn.danger && !active) e.currentTarget.style.background = 'transparent';
+      }}
     >
-      <Icon name={btn.iconName} size={compact ? 14 : 15} />
+      <span style={{
+        position: compact ? 'absolute' : 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: compact ? 28 : 'auto',
+        lineHeight: 0,
+        ...(compact ? mobileLinkIconStyle(expanded) : {}),
+        pointerEvents: 'none',
+      }}>
+        <Icon name={btn.iconName} size={compact ? 18 : 15} />
+      </span>
       {!compact && (
         <span style={{ fontSize: 8, fontFamily: 'Inter, sans-serif', opacity: 0.65, letterSpacing: '0.05em' }}>
           {btn.label}
         </span>
       )}
+      {compact && (
+        <>
+          <span style={mobileLinkOverlayStyle({
+            expanded,
+            active: active || precisionActive,
+            danger: btn.danger,
+          })} />
+          <span style={mobileLinkTitleStyle(expanded)}>{btn.label}</span>
+        </>
+      )}
       {precisionActive && (
         <div style={{
-          position: 'absolute', top: 5, right: 5,
+          position: 'absolute', top: compact ? 8 : 5, right: compact ? 8 : 5,
           width: 5, height: 5, borderRadius: '50%',
           background: '#C49A6C', boxShadow: '0 0 4px #C49A6C',
         }} />

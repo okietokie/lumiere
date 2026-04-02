@@ -11,6 +11,7 @@ function Icon({ d, size = 22, color = 'currentColor' }) {
 
 const ICONS = {
   walls:     'M3 3h18v2H3zm0 8h18v2H3zm0 8h18v2H3z',
+  room:      'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',
   materials: 'M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37-1.34-1.34a1 1 0 0 0-1.41 0L9 12.25 11.75 15l8.96-8.96a1 1 0 0 0 0-1.41z',
   lighting:  'M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z',
   furniture: 'M7 13c1.66 0 3-1.34 3-3S8.66 7 7 7s-3 1.34-3 3 1.34 3 3 3zm12-6h-8v7H3V5H1v15h2v-3h18v3h2v-9c0-2.21-1.79-4-4-4z',
@@ -108,9 +109,10 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
     </>
   );
 }
-export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, onUndo, onRedo }) {
+export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, onUndo, onRedo, showRoomTab = false }) {
   const tabs = [
     { key: 'walls',     label: 'Build',     icon: ICONS.walls     },
+    ...(showRoomTab ? [{ key: 'room', label: 'Room', icon: ICONS.room }] : []),
     { key: 'materials', label: 'Style',     icon: ICONS.materials },
     { key: 'furniture', label: 'Furnish',   icon: ICONS.furniture  },
     { key: 'lighting',  label: 'Light',     icon: ICONS.lighting  },
