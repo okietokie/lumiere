@@ -1,4 +1,13 @@
-# PYTHON / BACKEND
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Python / backend
 venv/
 lumiere-backend/venv/
 __pycache__/
@@ -6,44 +15,43 @@ __pycache__/
 *.pyo
 *.pyc
 *.egg-info/
-dist/
-build/
 .pytest_cache/
 
-# ENV FILES
+# Build output
+dist/
+build/
+dist-ssr/
+
+# Environment files
 .env
 lumiere-backend/.env
 lumiere-frontend/.env.local
+*.local
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# NODE / FRONTEND
+# Node / frontend
 node_modules/
 lumiere-frontend/node_modules/
-dist/
 
-# LOGS
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.user
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# OS FILES
+# OS files
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# VS CODE
-.vscode/
-*.suo
-*.user
-
-# MISC
+# Misc
 *.pem
 *.key
-
-
-
