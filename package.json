@@ -3,13 +3,10 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "concurrently \"npm:dev-backend\" \"npm:dev-frontend\"",
-    "dev-backend": "cd lumiere-backend && venv\\Scripts\\python -m uvicorn app.main:app --reload --reload-dir app",
+    "dev-backend": "cd lumiere-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --reload-dir app",
     "dev-frontend": "cd lumiere-frontend && npm run dev"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
-  },
-  "dependencies": {
-    "framer-motion": "^12.35.0"
   }
 }

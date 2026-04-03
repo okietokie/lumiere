@@ -1,15 +1,9 @@
-// colors.js - Professional Black & Brown Dark Palette
-
 export const COLORS = {
-
-  background: '#1A1614',    // Deep "Off-Black" Coffee
-
-  surface: '#26211E',       // Slightly lighter chocolate for cards
-
-  secondary: '#5E4B43',     // Muted earthy brown for borders/icons
-
-  text: '#D9C5B2',          // Sand/Bone color for high-readability text
-
-  action: '#A67C52'         // Copper/Oak for CTA buttons
-
+  background: "#2C2420",
+  surface: "#3A302B",
+  secondary: "#7A6559",
+  text: "#F2E5D5",
+  action: "#C49A6C",
+  accent: "#8B6B4D",
+  grid: "#9E8B7F",
 };

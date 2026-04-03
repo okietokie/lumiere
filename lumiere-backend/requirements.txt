@@ -1,4 +1,4 @@
-﻿fastapi
+fastapi
 uvicorn
 python-dotenv
 motor
@@ -8,3 +8,7 @@ fastapi-mail
 bcrypt==4.0.1
 dnspython==2.8.0
 pymongo==4.16.0
+httpx
+python-multipart
+b2sdk
+PyJWT==2.10.1

@@ -4,6 +4,7 @@ import { Form, Input, Button, Card, Typography, Layout, App } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import { COLORS } from '../../utils/colors.js';
 import { authApi } from '../../api/auth.js';
+import { getApiErrorMessage } from '../../utils/apiError.js';
 
 const { Title, Text } = Typography;
 const { Content } = Layout;
@@ -30,7 +31,7 @@ const ResetPassword = () => {
       message.success('Password reset successfully! Redirecting to login...');
       setTimeout(() => navigate('/login'), 3000);
     } catch (error) {
-      const errMsg = error.response?.data?.detail || 'Failed to reset password. The link may have expired.';
+      const errMsg = getApiErrorMessage(error, 'Failed to reset password. The link may have expired.');
       message.error(errMsg);
     } finally {
       setLoading(false);

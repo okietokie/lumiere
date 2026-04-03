@@ -4,6 +4,8 @@ import { UserOutlined, LockOutlined, ArrowLeftOutlined, MailOutlined } from '@an
 import { useNavigate, Link } from 'react-router-dom';
 import { COLORS } from '../../utils/colors.js';
 import { authApi } from '../../api/auth.js';
+import { getApiErrorMessage } from '../../utils/apiError.js';
+import { storeAuthSession } from '../../utils/authStorage.js';
 
 const { Title, Text } = Typography;
 const { Content } = Layout;
@@ -22,10 +24,11 @@ const Login = () => {
         email: values.email,
         password: values.password,
       });
+      storeAuthSession(response.data);
       message.success('Login Successful!');
-      navigate('/dashboard');
+      navigate('/user/room');
     } catch (error) {
-      const errMsg = error.response?.data?.detail || 'Invalid credentials. Please try again.';
+      const errMsg = getApiErrorMessage(error, 'Invalid login details. Please try again.');
       message.error(errMsg);
     } finally {
       setLoading(false);
@@ -39,7 +42,7 @@ const Login = () => {
       message.success('If an account exists, a reset link has been sent!');
       setIsModalVisible(false);
     } catch (error) {
-      message.error('Failed to send reset link. Please try again.');
+      message.error(getApiErrorMessage(error, 'Failed to send reset link. Please try again.'));
     } finally {
       setForgotLoading(false);
     }

@@ -1,135 +1,120 @@
-import React, { useEffect } from "react";
-import { ConfigProvider, App as AntApp } from "antd";
-import barba from "@barba/core";
+import { useEffect } from "react";
+import { App as AntApp, ConfigProvider } from "antd";
 import gsap from "gsap";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-
-import LandingPage from "./components/Landingpage.jsx";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import LandingPage from "./components/Landingpage";
 import Login from "./components/login/login.jsx";
 import Register from "./components/login/Register.jsx";
 import ResetPassword from "./components/login/ResetPassword.jsx";
+import RoomScene from "./components/threeD/scene/RoomScene";
+import ModelPreviewStudio from "./components/admin/ModelPreviewStudio";
+import ProjectViewerPage from "./components/viewer/ProjectViewerPage";
 import { COLORS } from "./utils/colors";
+import { ToastProvider } from "./ui/ToastNotification";
+import useModelPrefetch from "./hooks/useModelPrefetch";
+
+function RouteShell() {
+  const location = useLocation();
+  const isFullscreenRoute = location.pathname === "/user/room";
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        height: isFullscreenRoute ? "100vh" : "auto",
+        width: "100vw",
+        overflowX: "hidden",
+        overflowY: isFullscreenRoute ? "hidden" : "auto",
+        background: COLORS.background,
+        color: COLORS.text,
+      }}
+    >
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/user/room" element={<RoomScene />} />
+        <Route path="/view/:projectId" element={<ProjectViewerPage />} />
+        <Route path="/admin/model-previews" element={<ModelPreviewStudio />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
+  );
+}
 
 function App() {
-  useEffect(() => {
-    barba.init({
-      sync: true,
-      transitions: [
-        {
-          name: "opacity-transition",
-          leave(data) {
-            return gsap.to(data.current.container, {
-              opacity: 0,
-              duration: 0.5,
-              ease: "power2.inOut",
-            });
-          },
-          enter(data) {
-            return gsap.from(data.next.container, {
-              opacity: 0,
-              duration: 0.8,
-              ease: "power3.out",
-              delay: 0.2,
-            });
-          },
-        },
-      ],
-    });
+  useModelPrefetch({ autostart: true, delay: 1200 });
 
-    return () => {
-      if (barba?.destroy) {
-        barba.destroy();
-      }
-    };
+  useEffect(() => {
+    gsap.fromTo(
+      "body",
+      { opacity: 0 },
+      { opacity: 1, duration: 0.8, ease: "power3.out" }
+    );
   }, []);
 
   return (
     <ConfigProvider
       theme={{
-        algorithm: undefined,
         token: {
-          colorPrimary: COLORS?.action || "#1677ff",
-          colorBgBase: COLORS?.background || "#1A1614",
-          colorBgContainer: COLORS?.surface || "#26211E",
-          colorBorder: `${COLORS?.action || "#A67C52"}33`,
-          colorText: COLORS?.text || "#D9C5B2",
-          colorTextPlaceholder: "rgba(217, 197, 178, 0.55)",
-          colorIcon: COLORS?.text || "#D9C5B2",
+          colorPrimary: COLORS.action,
+          colorBgBase: COLORS.background,
+          colorBgContainer: COLORS.surface,
+          colorBorder: `${COLORS.action}33`,
+          colorText: COLORS.text,
+          colorTextPlaceholder: "rgba(242, 229, 213, 0.55)",
+          colorIcon: COLORS.text,
           borderRadius: 16,
           wireframe: false,
         },
         components: {
           Layout: {
-            bodyBg: COLORS?.background || "#1A1614",
-            headerBg: COLORS?.background || "#1A1614",
+            bodyBg: COLORS.background,
+            headerBg: COLORS.background,
           },
           Card: {
-            colorBgContainer: COLORS?.surface || "#26211E",
+            colorBgContainer: COLORS.surface,
           },
           Input: {
             colorBgContainer: "#312A26",
-            colorBorder: `${COLORS?.action || "#A67C52"}40`,
-            colorText: COLORS?.text || "#D9C5B2",
-            colorTextPlaceholder: "rgba(217, 197, 178, 0.55)",
-            activeBorderColor: COLORS?.action || "#A67C52",
-            hoverBorderColor: COLORS?.action || "#A67C52",
-            activeShadow: "0 0 0 2px rgba(166, 124, 82, 0.18)",
+            colorBorder: `${COLORS.action}40`,
+            colorText: COLORS.text,
+            colorTextPlaceholder: "rgba(242, 229, 213, 0.55)",
+            activeBorderColor: COLORS.action,
+            hoverBorderColor: COLORS.action,
+            activeShadow: "0 0 0 2px rgba(196, 154, 108, 0.18)",
           },
           Button: {
             primaryColor: "#F8F3ED",
-            defaultColor: COLORS?.text || "#D9C5B2",
-            defaultBorderColor: `${COLORS?.action || "#A67C52"}40`,
+            defaultColor: COLORS.text,
+            defaultBorderColor: `${COLORS.action}40`,
           },
           Form: {
-            labelColor: COLORS?.text || "#D9C5B2",
+            labelColor: COLORS.text,
           },
           Divider: {
-            colorSplit: "rgba(217, 197, 178, 0.16)",
+            colorSplit: "rgba(242, 229, 213, 0.16)",
           },
           Modal: {
-            contentBg: COLORS?.surface || "#26211E",
-            headerBg: COLORS?.surface || "#26211E",
-            titleColor: COLORS?.text || "#D9C5B2",
-            colorText: COLORS?.text || "#D9C5B2",
+            contentBg: COLORS.surface,
+            headerBg: COLORS.surface,
+            titleColor: COLORS.text,
+            colorText: COLORS.text,
           },
           Checkbox: {
-            colorText: COLORS?.text || "#D9C5B2",
+            colorText: COLORS.text,
           },
         },
       }}
     >
-      <div
-        data-barba="wrapper"
-        style={{
-          minHeight: "100vh",
-          width: "100vw",
-          overflow: "hidden",
-          background: COLORS?.background || "#ffffff",
-          color: COLORS?.text || "#000000",
-        }}
-      >
-        <div
-          data-barba="container"
-          style={{
-            margin: 0,
-            padding: 0,
-            height: "100%",
-            width: "100%",
-          }}
-        >
-          <AntApp>
-            <Router>
-              <Routes>
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Router>
-          </AntApp>
-        </div>
-      </div>
+      <AntApp>
+        <ToastProvider>
+          <BrowserRouter>
+            <RouteShell />
+          </BrowserRouter>
+        </ToastProvider>
+      </AntApp>
     </ConfigProvider>
   );
 }

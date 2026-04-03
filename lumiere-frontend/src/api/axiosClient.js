@@ -1,5 +1,5 @@
-//src/api/axiosClient.js
 import axios from "axios";
+import { clearAuthSession, getAccessToken } from "../utils/authStorage.js";
 
 const axiosClient = axios.create({
   baseURL:
@@ -13,7 +13,7 @@ const axiosClient = axios.create({
 
 axiosClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
+    const token = getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -25,8 +25,16 @@ axiosClient.interceptors.request.use(
 axiosClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("token");
+    const requestUrl = error.config?.url || "";
+    const currentPath = window.location.pathname;
+    const isAuthRequest = requestUrl.includes("/api/auth/login");
+    const isAuthScreen =
+      currentPath === "/login" ||
+      currentPath === "/register" ||
+      currentPath === "/reset-password";
+
+    if (error.response?.status === 401 && !isAuthRequest && !isAuthScreen) {
+      clearAuthSession();
       window.location.href = "/login";
     }
     return Promise.reject(error);

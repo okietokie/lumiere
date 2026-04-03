@@ -1,4 +1,3 @@
-
 # PYTHON / BACKEND
 venv/
 lumiere-backend/venv/
@@ -44,3 +43,6 @@ desktop.ini
 # MISC
 *.pem
 *.key
+
+
+

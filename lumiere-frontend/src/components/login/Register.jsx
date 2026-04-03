@@ -4,6 +4,7 @@ import { UserOutlined, MailOutlined, LockOutlined, ArrowLeftOutlined } from '@an
 import { useNavigate, Link } from 'react-router-dom';
 import { COLORS } from '../../utils/colors.js';
 import { authApi } from '../../api/auth.js';
+import { getApiErrorMessage } from '../../utils/apiError.js';
 
 const { Title, Text } = Typography;
 const { Content } = Layout;
@@ -24,7 +25,7 @@ const Register = () => {
       message.success('Account created successfully!');
       setTimeout(() => navigate('/login'), 1500);
     } catch (error) {
-      const errMsg = error.response?.data?.detail || 'Registration failed. Please try again.';
+      const errMsg = getApiErrorMessage(error, 'Registration failed. Please try again.');
       message.error(errMsg);
     } finally {
       setLoading(false);
