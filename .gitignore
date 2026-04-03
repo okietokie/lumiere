@@ -1,63 +1,46 @@
-<<<<<<< HEAD
+
+# PYTHON / BACKEND
 venv/
 lumiere-backend/venv/
 __pycache__/
-*.pyc
-.env
-node_modules/
-lumiere-frontend/node_modules/
-lumiere-backend/.env
-lumiere-frontend/.env.local
-=======
-# ========================
-# PYTHON / BACKEND
-# ========================
-venv/
-__pycache__/
 *.py[cod]
 *.pyo
-.env
+*.pyc
 *.egg-info/
 dist/
 build/
 .pytest_cache/
 
-# ========================
-# NODE / FRONTEND
-# ========================
-node_modules/
-dist/
+# ENV FILES
 .env
+lumiere-backend/.env
+lumiere-frontend/.env.local
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# ========================
+# NODE / FRONTEND
+node_modules/
+lumiere-frontend/node_modules/
+dist/
+
 # LOGS
-# ========================
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# ========================
 # OS FILES
-# ========================
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ========================
 # VS CODE
-# ========================
 .vscode/
 *.suo
 *.user
 
-# ========================
 # MISC
-# ========================
 *.pem
 *.key
->>>>>>> loginsignup
