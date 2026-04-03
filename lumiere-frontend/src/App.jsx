@@ -36,12 +36,6 @@ function App() {
       ],
     });
 
-    gsap.from("body", {
-      opacity: 0,
-      duration: 0.8,
-      ease: "power3.out",
-    });
-
     return () => {
       if (barba?.destroy) {
         barba.destroy();
@@ -52,15 +46,62 @@ function App() {
   return (
     <ConfigProvider
       theme={{
+        algorithm: undefined,
         token: {
           colorPrimary: COLORS?.action || "#1677ff",
+          colorBgBase: COLORS?.background || "#1A1614",
+          colorBgContainer: COLORS?.surface || "#26211E",
+          colorBorder: `${COLORS?.action || "#A67C52"}33`,
+          colorText: COLORS?.text || "#D9C5B2",
+          colorTextPlaceholder: "rgba(217, 197, 178, 0.55)",
+          colorIcon: COLORS?.text || "#D9C5B2",
+          borderRadius: 16,
+          wireframe: false,
+        },
+        components: {
+          Layout: {
+            bodyBg: COLORS?.background || "#1A1614",
+            headerBg: COLORS?.background || "#1A1614",
+          },
+          Card: {
+            colorBgContainer: COLORS?.surface || "#26211E",
+          },
+          Input: {
+            colorBgContainer: "#312A26",
+            colorBorder: `${COLORS?.action || "#A67C52"}40`,
+            colorText: COLORS?.text || "#D9C5B2",
+            colorTextPlaceholder: "rgba(217, 197, 178, 0.55)",
+            activeBorderColor: COLORS?.action || "#A67C52",
+            hoverBorderColor: COLORS?.action || "#A67C52",
+            activeShadow: "0 0 0 2px rgba(166, 124, 82, 0.18)",
+          },
+          Button: {
+            primaryColor: "#F8F3ED",
+            defaultColor: COLORS?.text || "#D9C5B2",
+            defaultBorderColor: `${COLORS?.action || "#A67C52"}40`,
+          },
+          Form: {
+            labelColor: COLORS?.text || "#D9C5B2",
+          },
+          Divider: {
+            colorSplit: "rgba(217, 197, 178, 0.16)",
+          },
+          Modal: {
+            contentBg: COLORS?.surface || "#26211E",
+            headerBg: COLORS?.surface || "#26211E",
+            titleColor: COLORS?.text || "#D9C5B2",
+            colorText: COLORS?.text || "#D9C5B2",
+          },
+          Checkbox: {
+            colorText: COLORS?.text || "#D9C5B2",
+          },
         },
       }}
     >
       <div
         data-barba="wrapper"
         style={{
-          height: "100vh",
+          minHeight: "100vh",
           width: "100vw",
           overflow: "hidden",
           background: COLORS?.background || "#ffffff",

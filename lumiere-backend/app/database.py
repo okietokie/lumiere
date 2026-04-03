@@ -1,14 +1,16 @@
 import os
+from pathlib import Path
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from pymongo.errors import PyMongoError
 from pymongo import ssl_support
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from the repo root .env file
+ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(ROOT_ENV_FILE)
 
 # Get the MongoDB URI from environment or default to localhost
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_URI = os.getenv("MONGO_URI")
 
 # Force PyMongo to use Python's stdlib SSL implementation.
 # In this environment, PyOpenSSL imports successfully but fails later while
@@ -35,3 +37,4 @@ async def ping_database():
         return True
     except PyMongoError:
         return False
+    

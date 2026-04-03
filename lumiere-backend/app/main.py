@@ -1,15 +1,18 @@
 import os
 import time
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from app.routes import auth
+from app.database import ping_database
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-load_dotenv()
+ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(ROOT_ENV_FILE)
 
 
 def get_allowed_origins():
@@ -26,6 +29,11 @@ def get_allowed_origins():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Lumiere Backend is starting up...")
+    success = await ping_database()
+    if success:
+        logger.info("MongoDB connected")
+    else:
+        logger.error("MongoDB connection failed")
     yield
     logger.info("Lumiere Backend is shutting down...")
 
@@ -54,3 +62,5 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 @app.get("/")
 def root():
     return {"status": "Lumiere backend running", "docs": "/docs"}
+
+

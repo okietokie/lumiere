@@ -1,12 +1,14 @@
 import os
 import secrets
 import logging
+import base64
+import hashlib
+import bcrypt
 from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
-from passlib.context import CryptContext
 from bson import ObjectId
 from pymongo.errors import PyMongoError
 
@@ -17,8 +19,19 @@ from app.database import user_collection
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Setup password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def _normalize_password(password: str) -> bytes:
+    digest = hashlib.sha256(password.encode("utf-8")).digest()
+    return base64.b64encode(digest)
+
+
+def hash_password(password: str) -> str:
+    normalized = _normalize_password(password)
+    return bcrypt.hashpw(normalized, bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    normalized = _normalize_password(password)
+    return bcrypt.checkpw(normalized, hashed_password.encode("utf-8"))
 
 def get_mail_config() -> ConnectionConfig:
     required_env = {
@@ -58,7 +71,7 @@ async def register(user: UserCreate):
             )
 
         # 2. Hash the password
-        hashed_password = pwd_context.hash(user.password)
+        hashed_password = hash_password(user.password)
 
         # 3. Prepare Database Document
         user_dict = {
@@ -93,7 +106,7 @@ async def login(user_data: dict):
     try:
         user = await user_collection.find_one({"email": email})
 
-        if not user or not pwd_context.verify(password, user["hashed_password"]):
+        if not user or not verify_password(password, user["hashed_password"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
@@ -183,7 +196,7 @@ async def reset_password_confirm(data: dict):
             raise HTTPException(status_code=400, detail="Invalid or expired token")
 
         # Update password and clear reset fields
-        hashed_password = pwd_context.hash(new_password)
+        hashed_password = hash_password(new_password)
         await user_collection.update_one(
             {"_id": user["_id"]},
             {
