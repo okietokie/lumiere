@@ -1,59 +1,44 @@
 import os
-from fastapi import FastAPI
+import time
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
-# Import routers
 from app.routes import auth
 
-# Get frontend URL from environment
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+load_dotenv()
 
-API_TITLE = "Lumiere API"
-API_VERSION = "1.0.0"
-API_DESCRIPTION = "Backend API for Lumiere Interior Design Platform"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Lumiere Backend is starting up...")
+    yield
+    logger.info("Lumiere Backend is shutting down...")
 
-# FastAPI app initialization
-app = FastAPI(
-    title=API_TITLE,
-    version=API_VERSION,
-    description=API_DESCRIPTION,
-)
+app = FastAPI(title="Lumiere API", version="1.0.0", lifespan=lifespan)
 
-origins = [
-    FRONTEND_URL,
-]
-
-# Add common variations for development
-if FRONTEND_URL == "http://localhost:5173":
-    origins.extend([
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ])
-
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
-# Include Routers
-app.include_router(
-    auth.router,
-    prefix="/api/auth",
-    tags=["Authentication"]
-)
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
+
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 
 @app.get("/")
 def root():
-    return {"status": "Lumiere backend running", "frontend_url": FRONTEND_URL}
-
-@app.get("/test")
-async def test_endpoint():
-    return {"message": "Backend is working"}
+    return {"status": "Lumiere backend running", "docs": "/docs"}
