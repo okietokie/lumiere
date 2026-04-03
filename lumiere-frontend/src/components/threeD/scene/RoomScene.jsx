@@ -14,6 +14,7 @@ import {
   ColumnWidthOutlined,
   BulbOutlined,
   FormatPainterOutlined,
+  FolderOpenOutlined,
   DeleteOutlined,
   LeftOutlined,
   RightOutlined,
@@ -68,6 +69,7 @@ import ScorePanel          from "../ui/ScorePanel";
 import CollisionHighlight  from "../furniture/CollisionHighlight";
 import useSpatialAnalysis  from "../../../hooks/useSpatialAnalysis";
 import SaveModal           from "../ui/SaveModal";
+import SavedProjectsPanel  from "../ui/SavedProjectsPanel";
 import { useToast }        from "../../../ui/ToastNotification";
 import { SlidePanel, BottomNav, MobileTopBar } from "./MobileLayout";
 import RevealActionButton from "./RevealActionButton";
@@ -86,6 +88,7 @@ import TextureRoundedIcon from "@mui/icons-material/TextureRounded";
 import ChairRoundedIcon from "@mui/icons-material/ChairRounded";
 import LightbulbRoundedIcon from "@mui/icons-material/LightbulbRounded";
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
+import FolderCopyRoundedIcon from "@mui/icons-material/FolderCopyRounded";
 
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
@@ -212,6 +215,18 @@ export default function RoomScene() {
     canvasRef: canvasWrapperRef,
     currentProjectId, setCurrentProjectId,
   });
+  const handleCreateNewProject = useCallback(() => {
+    projectSave.createNewProject();
+    setSelectedRoomId(null);
+    setSelectedWallId(null);
+    setSelectedOpening(null);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+    setActiveTool('select');
+    setActiveTab('walls');
+    setMobilePanelOpen(false);
+    setSaveModalOpen(true);
+  }, [projectSave, setSelectedLightId]);
   const recorder = useRecorder({
     canvasWrapperRef,         
     orbitControlsRef,         
@@ -1733,6 +1748,7 @@ export default function RoomScene() {
       { key: 'materials', label: 'Style', icon: TextureRoundedIcon },
       { key: 'lighting', label: 'Light', icon: LightbulbRoundedIcon },
       { key: 'furniture', label: 'Furnish', icon: ChairRoundedIcon },
+      { key: 'projects', label: 'Projects', icon: FolderCopyRoundedIcon },
       { key: 'view', label: 'View', icon: VisibilityRoundedIcon },
     ];
 
@@ -1749,6 +1765,7 @@ export default function RoomScene() {
     activeTab === 'materials' ? 'Style' :
     activeTab === 'lighting' ? 'Light' :
     activeTab === 'furniture' ? 'Furnish' :
+    activeTab === 'projects' ? 'Projects' :
     'View';
 
   const desktopPanelContent = activeTab === 'room' ? (
@@ -1853,6 +1870,15 @@ export default function RoomScene() {
       tint={selectedFurniture?.tint ?? null}
       setTint={setSelectedFurnitureTint}
     />
+  ) : activeTab === 'projects' ? (
+    <SavedProjectsPanel
+      currentProjectId={currentProjectId}
+      currentProjectName={projectSave.projectName}
+      listProjects={projectSave.listProjects}
+      loadProject={projectSave.loadProject}
+      deleteProject={projectSave.deleteProject}
+      createNewProject={handleCreateNewProject}
+    />
   ) : (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: cameraCardBg, borderRadius: 22, border: `1px solid ${COLORS.secondary}50`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 24px rgba(0,0,0,0.18)' }}>
@@ -1944,6 +1970,20 @@ export default function RoomScene() {
           furnitureRefs={furnitureRefs}
           tint={selectedFurniture?.tint ?? null}
           setTint={setSelectedFurnitureTint}
+        />
+      ),
+    },
+    {
+      key: 'projects',
+      label: <span className="room-tab-label"><FolderOpenOutlined /> Projects</span>,
+      children: (
+        <SavedProjectsPanel
+          currentProjectId={currentProjectId}
+          currentProjectName={projectSave.projectName}
+          listProjects={projectSave.listProjects}
+          loadProject={projectSave.loadProject}
+          deleteProject={projectSave.deleteProject}
+          createNewProject={handleCreateNewProject}
         />
       ),
     },
@@ -2445,9 +2485,10 @@ export default function RoomScene() {
               activeTab === 'room'      ? 'Room' :
               activeTab === 'walls'     ? 'Walls' :
               activeTab === 'materials' ? 'Materials & Style' :
-              activeTab === 'lighting'  ? 'Lighting' : 'Furniture'
+              activeTab === 'lighting'  ? 'Lighting' :
+              activeTab === 'projects'  ? 'Projects' : 'Furniture'
             }
-            height={activeTab === 'furniture' ? '82vh' : activeTab === 'room' ? '76vh' : '72vh'}
+            height={activeTab === 'furniture' || activeTab === 'projects' ? '82vh' : activeTab === 'room' ? '76vh' : '72vh'}
           >
             {activeTab === 'room' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -2487,6 +2528,19 @@ export default function RoomScene() {
                 addItem={(model) => { addItem(model); setMobilePanelOpen(false); }}
                 deleteItem={deleteItem} gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
                 furnitureRefs={furnitureRefs} tint={selectedFurniture?.tint ?? null} setTint={setSelectedFurnitureTint}
+              />
+            )}
+            {activeTab === 'projects' && (
+              <SavedProjectsPanel
+                currentProjectId={currentProjectId}
+                currentProjectName={projectSave.projectName}
+                listProjects={projectSave.listProjects}
+                loadProject={async (projectId) => {
+                  await projectSave.loadProject(projectId);
+                  setMobilePanelOpen(false);
+                }}
+                deleteProject={projectSave.deleteProject}
+                createNewProject={handleCreateNewProject}
               />
             )}
           </SlidePanel>

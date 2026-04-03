@@ -42,7 +42,7 @@ async def list_projects_route(current_user: dict = Depends(get_current_user)):
 async def latest_project_route(current_user: dict = Depends(get_current_user)):
     project = await get_latest_project(str(current_user["_id"]))
     if not project:
-        raise HTTPException(status_code=404, detail="No saved projects found")
+        return {}
     return project
 
 

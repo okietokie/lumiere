@@ -5,6 +5,15 @@ import { generateLayoutWalls } from '../utils/roomLayout';
 import { getAccessToken } from '../utils/authStorage';
 
 const AUTOSAVE_MS = 30_000;
+const DEFAULT_PROJECT_NAME = 'Untitled Room';
+const DEFAULT_FLOOR_MATERIAL = { color: '#C8A060', roughness: 0.60, metalness: 0.0, textureId: 'wood_light' };
+const DEFAULT_CEILING_MATERIAL = { color: '#FAFAFA', roughness: 0.90, metalness: 0.0, textureId: null };
+const EMPTY_MODEL_ASSETS = {
+  glb_url: null,
+  usdz_url: null,
+  glb_filename: null,
+  usdz_filename: null,
+};
 
 function buildRoomsFromWalls(walls = []) {
   if (!walls.length) return [createRoomEntity()];
@@ -112,14 +121,9 @@ export default function useProjectSave({
   setCurrentProjectId,
 }) {
   const [saveStatus, setSaveStatus] = useState('idle');
-  const [projectName, setProjectName] = useState('Untitled Room');
+  const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
   const [shareUrl, setShareUrl] = useState('');
-  const [modelAssets, setModelAssets] = useState({
-    glb_url: null,
-    usdz_url: null,
-    glb_filename: null,
-    usdz_filename: null,
-  });
+  const [modelAssets, setModelAssets] = useState(EMPTY_MODEL_ASSETS);
   const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: 'idle', usdz: 'idle' });
   const autosaveTimer = useRef(null);
   const hasAttemptedInitialLoad = useRef(false);
@@ -164,12 +168,7 @@ export default function useProjectSave({
       setCurrentProjectId(data.id);
       setProjectName(data.title || name);
       setShareUrl(data.share_url || '');
-      setModelAssets(data.model_assets || {
-        glb_url: null,
-        usdz_url: null,
-        glb_filename: null,
-        usdz_filename: null,
-      });
+      setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2500);
       return data;
@@ -229,6 +228,8 @@ export default function useProjectSave({
           });
           setProjectName(file.name.replace(/\.(lumiere\.json|json)$/, ''));
           setCurrentProjectId(null);
+          setShareUrl('');
+          setModelAssets(EMPTY_MODEL_ASSETS);
         } catch {
           alert('Invalid project file.');
         }
@@ -256,12 +257,7 @@ export default function useProjectSave({
       setProjectName(data.title || data.name);
       setCurrentProjectId(data.id);
       setShareUrl(data.share_url || '');
-      setModelAssets(data.model_assets || {
-        glb_url: null,
-        usdz_url: null,
-        glb_filename: null,
-        usdz_filename: null,
-      });
+      setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
     }
     return data;
   }, [setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
@@ -280,15 +276,10 @@ export default function useProjectSave({
         setCeiling: setCeilingMaterial,
         lightingState,
       });
-      setProjectName(data.title || data.name || 'Untitled Room');
+      setProjectName(data.title || data.name || DEFAULT_PROJECT_NAME);
       setCurrentProjectId(data.id);
       setShareUrl(data.share_url || '');
-      setModelAssets(data.model_assets || {
-        glb_url: null,
-        usdz_url: null,
-        glb_filename: null,
-        usdz_filename: null,
-      });
+      setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
       return data;
     } catch (error) {
       if (error?.response?.status === 404) return null;
@@ -349,6 +340,59 @@ export default function useProjectSave({
     }
   }, [ensureProject]);
 
+  const createNewProject = useCallback(() => {
+    const nextRooms = [
+      createRoomEntity({
+        name: 'Room 1',
+        type: 'room',
+        x: 0,
+        z: 0,
+        width: 6,
+        depth: 6,
+        height: 3,
+      }),
+    ];
+
+    setRooms(nextRooms);
+    setWalls(generateLayoutWalls(nextRooms), true);
+    setPlacedItems([]);
+    setFloorMaterial(DEFAULT_FLOOR_MATERIAL);
+    setCeilingMaterial(DEFAULT_CEILING_MATERIAL);
+    lightingState.setTimeOfDay(50);
+    lightingState.applyMood('none');
+    lightingState.setPlacedLights([]);
+    lightingState.setSelectedLightId(null);
+    lightingState.setGlobalBrightness(1);
+    lightingState.setPreviewMode(false);
+    setCurrentProjectId(null);
+    setProjectName(DEFAULT_PROJECT_NAME);
+    setShareUrl('');
+    setModelAssets(EMPTY_MODEL_ASSETS);
+    setAssetUploadStatus({ glb: 'idle', usdz: 'idle' });
+    setSaveStatus('idle');
+  }, [
+    lightingState,
+    setCeilingMaterial,
+    setCurrentProjectId,
+    setFloorMaterial,
+    setPlacedItems,
+    setRooms,
+    setWalls,
+  ]);
+
+  const listProjects = useCallback(async () => {
+    const { data } = await axiosClient.get('/api/projects/list');
+    return data;
+  }, []);
+
+  const deleteProject = useCallback(async (projectId) => {
+    await axiosClient.delete(`/api/projects/${projectId}`);
+    if (projectId === currentProjectId) {
+      setCurrentProjectId(null);
+      setShareUrl('');
+    }
+  }, [currentProjectId, setCurrentProjectId]);
+
   const copyShareLink = useCallback(async () => {
     const projectId = await ensureProject({ persistLatest: true });
     const url = shareUrl || `${window.location.origin}/view/${projectId}`;
@@ -389,9 +433,12 @@ export default function useProjectSave({
     exportJSON,
     importJSON,
     loadProject,
+    createNewProject,
     shareUrl,
     modelAssets,
     assetUploadStatus,
+    listProjects,
+    deleteProject,
     uploadModelAsset,
     copyShareLink,
     openSharePage,
