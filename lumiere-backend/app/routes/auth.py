@@ -20,18 +20,31 @@ logger = logging.getLogger(__name__)
 # Setup password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Mail Configuration
-conf = ConnectionConfig(
-    MAIL_USERNAME = os.getenv("MAIL_USERNAME"),
-    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD"),
-    MAIL_FROM = os.getenv("MAIL_FROM"),
-    MAIL_PORT = int(os.getenv("MAIL_PORT", 587)),
-    MAIL_SERVER = os.getenv("MAIL_SERVER"),
-    MAIL_STARTTLS = True,
-    MAIL_SSL_TLS = False,
-    USE_CREDENTIALS = True,
-    VALIDATE_CERTS = True
-)
+def get_mail_config() -> ConnectionConfig:
+    required_env = {
+        "MAIL_USERNAME": os.getenv("MAIL_USERNAME"),
+        "MAIL_PASSWORD": os.getenv("MAIL_PASSWORD"),
+        "MAIL_FROM": os.getenv("MAIL_FROM"),
+        "MAIL_SERVER": os.getenv("MAIL_SERVER"),
+    }
+    missing = [key for key, value in required_env.items() if not value]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email service is not configured."
+        )
+
+    return ConnectionConfig(
+        MAIL_USERNAME=required_env["MAIL_USERNAME"],
+        MAIL_PASSWORD=required_env["MAIL_PASSWORD"],
+        MAIL_FROM=required_env["MAIL_FROM"],
+        MAIL_PORT=int(os.getenv("MAIL_PORT", 587)),
+        MAIL_SERVER=required_env["MAIL_SERVER"],
+        MAIL_STARTTLS=True,
+        MAIL_SSL_TLS=False,
+        USE_CREDENTIALS=True,
+        VALIDATE_CERTS=True,
+    )
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user: UserCreate):
@@ -138,10 +151,12 @@ async def forgot_password(request_data: dict, background_tasks: BackgroundTasks)
             )
 
             # 4. Send email in background
-            fm = FastMail(conf)
+            fm = FastMail(get_mail_config())
             background_tasks.add_task(fm.send_message, message)
 
         return response_msg
+    except HTTPException:
+        raise
     except PyMongoError as e:
         logger.error(f"Forgot Password Error: {e}")
         raise HTTPException(
