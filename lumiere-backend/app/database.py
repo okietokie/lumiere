@@ -10,8 +10,11 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 client = AsyncIOMotorClient(MONGO_URI)
 database = client.lumiere
 
-# Collections
-user_collection = database.users
-design_collection = database.designs
+# ── Collections ────────────────────────────────────────
+user_collection      = database.users
+project_collection   = database.projects
+room_collection      = database.rooms
+activity_collection  = database.activity_logs
+notification_collection = database.notifications
 
-print(f"Connected to MongoDB: {MONGO_URI}")
+print(f"✦ Connected to MongoDB: {MONGO_URI}")

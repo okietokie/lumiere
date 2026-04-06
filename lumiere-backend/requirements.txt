@@ -1,7 +1,8 @@
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
-sqlalchemy
-passlib[bcrypt]
-python-jose[cryptography]
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+motor==3.4.0
+python-dotenv==1.0.1
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+pydantic[email]==2.7.1
+pymongo==4.7.2

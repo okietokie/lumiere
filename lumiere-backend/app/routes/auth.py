@@ -1,48 +1,55 @@
 from fastapi import APIRouter, HTTPException, status, Depends
-from app.models.user import UserCreate, UserResponse
-from app.services.user_service import create_user, get_user_by_email
+from datetime import datetime
+from bson import ObjectId
+
+from app.database import user_collection
+from app.models.schemas import UserCreate, LoginRequest, TokenResponse, UserOut
+from app.utils.auth import hash_password, verify_password, create_token, get_current_user_id
 
 router = APIRouter()
 
-@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def signup(user: UserCreate):
-    # Check if user already exists
-    existing_user = await get_user_by_email(user.email)
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
-        )
-    
-    # Create user
-    try:
-        created_user = await create_user(user.dict())
-        return created_user
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error creating user: {str(e)}"
-        )
 
-@router.post("/login")
-async def login(email: str, password: str):
-    user = await get_user_by_email(email)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
-        )
-    
-    from app.services.user_service import verify_password
-    if not await verify_password(password, user["password"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
-        )
-    
-    return {
-        "message": "Login successful",
-        "user_id": str(user["_id"]),
-        "name": user["name"],
-        "email": user["email"]
+def _user_out(doc: dict) -> dict:
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def register(payload: UserCreate):
+    existing = await user_collection.find_one({"email": payload.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered.")
+
+    doc = {
+        "name":         payload.name,
+        "email":        payload.email,
+        "password":     hash_password(payload.password),
+        "avatar":       None,
+        "storage_used": 0,
+        "created_at":   datetime.utcnow(),
     }
+    result = await user_collection.insert_one(doc)
+    token  = create_token(str(result.inserted_id))
+    return {"access_token": token, "token_type": "bearer", "message": "Registration successful."}
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(payload: LoginRequest):
+    user = await user_collection.find_one({"email": payload.email})
+    if not user or not verify_password(payload.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    return {"access_token": create_token(str(user["_id"])), "token_type": "bearer"}
+
+
+@router.post("/logout")
+async def logout():
+    # JWT is stateless; client drops the token.
+    return {"message": "Logged out successfully."}
+
+
+@router.get("/me")
+async def me(user_id: str = Depends(get_current_user_id)):
+    user = await user_collection.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"data": _user_out(user)}

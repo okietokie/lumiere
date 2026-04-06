@@ -1,8 +1,10 @@
-// colors.js - Professional Black & Brown Dark Palette
+// utils/colors.js - Professional Black & Brown Dark Palette (Improved Contrast)
 export const COLORS = {
-  background: '#1A1614',    // Deep "Off-Black" Coffee
-  surface: '#26211E',       // Slightly lighter chocolate for cards
-  secondary: '#5E4B43',     // Muted earthy brown for borders/icons
-  text: '#D9C5B2',          // Sand/Bone color for high-readability text
-  action: '#A67C52'         // Copper/Oak for CTA buttons 
-};
+    background: '#2C2420',    // Warmer dark brown - more visible
+    surface: '#3A302B',       // Lighter chocolate for cards
+    secondary: '#7A6559',     // Lighter earthy brown for borders/icons
+    text: '#F2E5D5',          // Warmer sand/cream for high-readability
+    action: '#C49A6C',        // Brighter copper for CTA buttons
+    accent: '#8B6B4D',        // Medium brown for accents
+    grid: '#9E8B7F'          // Soft taupe for grid lines
+  };
