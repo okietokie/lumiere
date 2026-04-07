@@ -259,6 +259,14 @@ export default function ProjectViewerPage() {
           color: `${COLORS.text}CC`,
           fontSize: 13,
         }}>
+          <InfoCard title="Room Summary">
+            <div style={{ display: 'grid', gap: 6 }}>
+              <SummaryRow label="Rooms" value={`${projectScene?.rooms?.length || 0}`} />
+              <SummaryRow label="Walls" value={`${projectScene?.walls?.length || 0}`} />
+              <SummaryRow label="Furniture" value={`${projectScene?.furniture?.length || 0}`} />
+              <SummaryRow label="Lights" value={`${projectScene?.lighting?.placedLights?.length || 0}`} />
+            </div>
+          </InfoCard>
           <InfoCard title="Browser viewer">
             Open this page on any phone to inspect the room in real time, orbit, zoom, and review the layout without installing anything.
           </InfoCard>
@@ -317,6 +325,15 @@ function InfoCard({ title, children }) {
         {title}
       </div>
       <div>{children}</div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, strong = false }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+      <span style={{ color: `${COLORS.text}CC`, fontWeight: strong ? 700 : 500 }}>{label}</span>
+      <span style={{ color: strong ? COLORS.action : COLORS.text, fontWeight: 700 }}>{value}</span>
     </div>
   );
 }

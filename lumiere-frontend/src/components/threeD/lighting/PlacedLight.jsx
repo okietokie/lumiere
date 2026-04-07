@@ -74,10 +74,8 @@ export default function PlacedLight({
     spot:    { geo: <coneGeometry     args={[0.12, 0.25, 12]}       />, bodyColor: '#303030' },
   };
   const shape = shapes[light.type] || shapes.ceiling;
-
   return (
     <group position={[x, y, z]}>
-
       {/* Body */}
       <mesh
         onPointerDown={startDrag}

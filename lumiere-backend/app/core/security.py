@@ -7,13 +7,27 @@ import jwt
 from bson import ObjectId
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jwt import InvalidTokenError
 
 from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, JWT_ALGORITHM, JWT_SECRET_KEY
 from app.core.database import users_collection
 from app.utils.helpers import utcnow
 
 security_scheme = HTTPBearer()
+_jwt_handler = getattr(jwt, "JWT", None)
+_jwk_from_dict = getattr(jwt, "jwk_from_dict", None)
+
+try:
+    from jwt import InvalidTokenError as JWTInvalidTokenError
+except ImportError:
+    try:
+        from jwt.exceptions import JWTDecodeError as JWTInvalidTokenError
+    except ImportError:
+        JWTInvalidTokenError = Exception
+
+
+def _shared_secret_jwk() -> dict[str, str]:
+    encoded_secret = base64.urlsafe_b64encode(JWT_SECRET_KEY.encode("utf-8")).rstrip(b"=")
+    return {"kty": "oct", "k": encoded_secret.decode("ascii")}
 
 
 def _normalize_password(password: str) -> bytes:
@@ -32,13 +46,32 @@ def verify_password(password: str, hashed_password: str) -> bool:
 def create_access_token(*, user_id: str, email: str, name: str | None = None) -> str:
     expires_at = utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": user_id, "email": email, "name": name, "exp": expires_at}
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+    if callable(getattr(jwt, "encode", None)):
+        return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+    if _jwt_handler and _jwk_from_dict:
+        signing_key = _jwk_from_dict(_shared_secret_jwk())
+        fallback_payload = {
+            **payload,
+            "exp": int(expires_at.timestamp()),
+        }
+        return _jwt_handler().encode(fallback_payload, signing_key, alg=JWT_ALGORITHM)
+
+    raise RuntimeError("No compatible JWT implementation is installed")
 
 
 def decode_access_token(token: str) -> dict:
     try:
-        return jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-    except InvalidTokenError as exc:
+        if callable(getattr(jwt, "decode", None)):
+            return jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+
+        if _jwt_handler and _jwk_from_dict:
+            verification_key = _jwk_from_dict(_shared_secret_jwk())
+            return _jwt_handler().decode(token, verification_key, algorithms={JWT_ALGORITHM})
+
+        raise RuntimeError("No compatible JWT implementation is installed")
+    except JWTInvalidTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",

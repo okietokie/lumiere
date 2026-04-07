@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, Suspense, useCallback, useMemo } from "rea
 import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Slider } from "antd";
 import {
   EyeOutlined,
+  EyeInvisibleOutlined,
   VerticalLeftOutlined,
   VerticalRightOutlined,
   ApartmentOutlined,
@@ -92,6 +93,8 @@ import FolderCopyRoundedIcon from "@mui/icons-material/FolderCopyRounded";
 
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
+import { clearAuthSession } from "../../../utils/authStorage";
+import { useNavigate } from "react-router-dom";
 
 
 const CAMERA_PRESETS = {
@@ -113,8 +116,18 @@ const ROOM_ACTION_BUTTONS = [
   { key: 'room', icon: HomeWorkRoundedIcon, label: 'Add Room' },
   { key: 'direction', icon: KeyboardDoubleArrowRightRoundedIcon, label: 'Change Side' },
 ];
+const ROOM_CREATION_ROOT_SELECTOR = '[data-room-creation-root="true"]';
+
+function formatMoney(value, currency = 'AED') {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'en-IE' : 'en-AE', {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 0,
+  }).format(value || 0);
+}
 
 export default function RoomScene() {
+  const navigate = useNavigate();
   const [rooms, setRooms] = useState(() => [
     createRoomEntity({
       name: 'Room 1',
@@ -128,6 +141,10 @@ export default function RoomScene() {
   ]);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
   const initialWalls = useMemo(() => generateLayoutWalls(rooms), [rooms]);
+  const handleLogout = useCallback(() => {
+    clearAuthSession();
+    navigate("/login", { replace: true });
+  }, [navigate]);
   const {
     state: walls, set: setWalls,
     undo, redo, canUndo, canRedo,
@@ -155,6 +172,7 @@ export default function RoomScene() {
   const [selectedWallId,      setSelectedWallId]      = useState(null);
   const [selectedOpening,     setSelectedOpening]     = useState(null);
   const [roomWallPlacementSide, setRoomWallPlacementSide] = useState('right');
+  const [sceneRoomActionsVisible, setSceneRoomActionsVisible] = useState(false);
   const [cameraMode,          setCameraMode]          = useState('orbit');
   const [gizmoMode,           setGizmoMode]           = useState('translate');
   const [activeTool,          setActiveTool]          = useState('select');
@@ -167,6 +185,7 @@ export default function RoomScene() {
   const [currentViewPreset,   setCurrentViewPreset]   = useState('perspective');
   const [saveModalOpen,       setSaveModalOpen]       = useState(false);
   const [currentProjectId,    setCurrentProjectId]    = useState(null);
+  const [wallsHidden,         setWallsHidden]         = useState(false);
   const [wallToolbarPinned,   setWallToolbarPinned]   = useState(false);
   const [furnitureToolbarPinned, setFurnitureToolbarPinned] = useState(false);
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
@@ -205,6 +224,8 @@ export default function RoomScene() {
   const sidebarRef = useRef(null);
   const desktopPanelInitRef = useRef(false);
 
+  const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
+
   const projectSave = useProjectSave({
     rooms, setRooms,
     walls, setWalls,
@@ -227,14 +248,22 @@ export default function RoomScene() {
     setMobilePanelOpen(false);
     setSaveModalOpen(true);
   }, [projectSave, setSelectedLightId]);
+  const toggleWallsHidden = useCallback(() => {
+    setWallsHidden((prev) => !prev);
+    setSelectedWallId(null);
+    setSelectedOpening(null);
+    setWallToolbarPinned(false);
+    setWallToolbarPos(null);
+    if (activeTab === 'walls') setActiveTab('furniture');
+    if (activeTool === 'door' || activeTool === 'window' || activeTool === 'build') {
+      setActiveTool('select');
+    }
+  }, [activeTab, activeTool]);
   const recorder = useRecorder({
     canvasWrapperRef,         
     orbitControlsRef,         
     projectId: currentProjectId,
   });
-
-  // Spatial analysis 
-  const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
   const selectedRoom = useMemo(
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null,
     [rooms, selectedRoomId]
@@ -361,7 +390,6 @@ export default function RoomScene() {
     () => roomSurfaceBounds.find((entry) => entry.roomId === selectedRoom?.id) ?? null,
     [roomSurfaceBounds, selectedRoom]
   );
-
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
   const selectedWallDoorCount = selectedWall?.doors?.length ?? 0;
@@ -459,6 +487,17 @@ export default function RoomScene() {
   }, [activeTab, selectedRoom]);
 
   useEffect(() => {
+    setSceneRoomActionsVisible(false);
+  }, [selectedRoomId]);
+
+  useEffect(() => {
+    if (!roomCreation.pendingRoomCreation?.sourceRoomId) return;
+    if (roomCreation.pendingRoomCreation.sourceRoomId === selectedRoomId) {
+      setSceneRoomActionsVisible(true);
+    }
+  }, [roomCreation.pendingRoomCreation, selectedRoomId]);
+
+  useEffect(() => {
     if (isMobile) return;
     if (!desktopPanelInitRef.current) {
       desktopPanelInitRef.current = true;
@@ -488,6 +527,20 @@ export default function RoomScene() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [desktopPanelOpen, isMobile]);
+
+  useEffect(() => {
+    if (!roomCreation.pendingRoomCreation) return undefined;
+
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(ROOM_CREATION_ROOT_SELECTOR)) return;
+      roomCreation.cancelPendingRoomCreation();
+    };
+
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [roomCreation.cancelPendingRoomCreation, roomCreation.pendingRoomCreation]);
 
 
   // Apply ghost opacity to wall meshes
@@ -976,12 +1029,14 @@ export default function RoomScene() {
         flexWrap: compact ? 'wrap' : 'nowrap',
         gap: compact ? 8 : 10,
         overflowX: compact ? 'visible' : 'auto',
+        padding: compact ? 0 : '4px 8px',
       }}>
         {ROOM_ACTION_BUTTONS.filter(({ key }) => !(compact && key === 'room')).map(({ key, icon, label }) => {
           if (!compact && key === 'room' && isPendingRoomForDirection(roomWallPlacementSide)) {
             return (
               <div
                 key={`${room.id}-${key}-input`}
+                data-room-creation-root="true"
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -1276,15 +1331,17 @@ export default function RoomScene() {
         }}>
           {renderRoomQuickActions(selectedRoom, 'panel')}
         </div>
-        <RoomCreationPanel
-          pendingRoomCreation={roomCreation.pendingRoomCreation?.sourceRoomId === selectedRoom.id ? roomCreation.pendingRoomCreation : null}
-          selectedRoom={selectedRoom}
-          isMobileVariant={isMobileVariant}
-          openingFieldCardStyle={openingFieldCardStyle}
-          cancelPendingRoomCreation={roomCreation.cancelPendingRoomCreation}
-          updatePendingRoomCreation={roomCreation.updatePendingRoomCreation}
-          submitPendingRoomCreation={roomCreation.submitPendingRoomCreation}
-        />
+        <div data-room-creation-root="true">
+          <RoomCreationPanel
+            pendingRoomCreation={roomCreation.pendingRoomCreation?.sourceRoomId === selectedRoom.id ? roomCreation.pendingRoomCreation : null}
+            selectedRoom={selectedRoom}
+            isMobileVariant={isMobileVariant}
+            openingFieldCardStyle={openingFieldCardStyle}
+            cancelPendingRoomCreation={roomCreation.cancelPendingRoomCreation}
+            updatePendingRoomCreation={roomCreation.updatePendingRoomCreation}
+            submitPendingRoomCreation={roomCreation.submitPendingRoomCreation}
+          />
+        </div>
       </div>
     );
   };
@@ -2114,6 +2171,8 @@ export default function RoomScene() {
             };
 
             return (
+            (() => {
+              return (
             <group key={room.id}>
               <mesh
                 rotation={[-Math.PI / 2, 0, 0]}
@@ -2129,7 +2188,6 @@ export default function RoomScene() {
                   <SurfaceMaterial mat={floorMaterial} repeat={[Math.max(surfaceBounds.width / 2, 1), Math.max(surfaceBounds.depth / 2, 1)]} />
                 </Suspense>
               </mesh>
-
               <mesh
                 rotation={[Math.PI / 2, 0, 0]}
                 position={[surfaceBounds.centerX, room.height, surfaceBounds.centerZ]}
@@ -2144,7 +2202,6 @@ export default function RoomScene() {
                   <SurfaceMaterial mat={ceilingMaterial} repeat={[Math.max(surfaceBounds.width / 2, 1), Math.max(surfaceBounds.depth / 2, 1)]} />
                 </Suspense>
               </mesh>
-
               {room.id === selectedRoom?.id && (
                 <>
                   <mesh rotation={[-Math.PI / 2, 0, 0]} position={[room.x, 0.02, room.z]}>
@@ -2171,43 +2228,75 @@ export default function RoomScene() {
               )}
 
               {(roomWalls.length > 1 || room.id === selectedRoom?.id) && (
-                <Text
-                  position={[room.x, room.height + (room.id === selectedRoom?.id ? 0.5 : 0.28), room.z]}
-                  fontSize={room.id === selectedRoom?.id ? 0.28 : 0.24}
-                  color={room.id === selectedRoom?.id ? COLORS.action : COLORS.text}
-                  anchorX="center"
-                  anchorY="middle"
-                >
-                  {room.name}
-                </Text>
-              )}
-
-              {room.id === selectedRoom?.id && (
-                <Html position={[room.x, room.height + 0.86, room.z]} center distanceFactor={10}>
-                  <div>
+                room.id === selectedRoom?.id ? (
+                  <Html position={[room.x, room.height + 0.62, room.z]} center distanceFactor={10}>
                     <div
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        flexWrap: 'nowrap',
                         gap: 10,
-                        padding: 0,
-                        borderRadius: 999,
-                        background: 'transparent',
-                        border: 'none',
-                        boxShadow: 'none',
-                        backdropFilter: 'none',
                         pointerEvents: 'auto',
                       }}
                       onPointerDown={(event) => event.stopPropagation()}
                     >
-                      {renderRoomQuickActions(room, 'scene')}
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          minHeight: 44,
+                          padding: '0 14px',
+                          borderRadius: 999,
+                          background: 'rgba(24, 18, 15, 0.92)',
+                          border: `1px solid ${COLORS.action}44`,
+                          boxShadow: '0 14px 28px rgba(0, 0, 0, 0.28)',
+                          color: COLORS.action,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          letterSpacing: '0.01em',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <span>{room.name}</span>
+                        <button
+                          type="button"
+                          aria-label={sceneRoomActionsVisible ? 'Hide room actions' : 'Show room actions'}
+                          onClick={() => setSceneRoomActionsVisible((visible) => !visible)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 30,
+                            height: 30,
+                            borderRadius: '50%',
+                            border: `1px solid ${sceneRoomActionsVisible ? COLORS.action : `${COLORS.secondary}AA`}`,
+                            background: sceneRoomActionsVisible ? COLORS.action : 'rgba(53, 41, 35, 0.92)',
+                            color: sceneRoomActionsVisible ? COLORS.background : COLORS.text,
+                            cursor: 'pointer',
+                            boxShadow: sceneRoomActionsVisible ? '0 8px 18px rgba(196, 154, 108, 0.28)' : 'none',
+                            transition: 'background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease',
+                          }}
+                        >
+                          <AppstoreOutlined style={{ fontSize: 14 }} />
+                        </button>
+                      </div>
+                      {sceneRoomActionsVisible && renderRoomQuickActions(room, 'scene')}
                     </div>
-                  </div>
-                </Html>
+                  </Html>
+                ) : (
+                  <Text
+                    position={[room.x, room.height + 0.28, room.z]}
+                    fontSize={0.24}
+                    color={COLORS.text}
+                    anchorX="center"
+                    anchorY="middle"
+                  >
+                    {room.name}
+                  </Text>
+                )
               )}
 
-              {roomScopedWalls.map((wall) => (
+              {!wallsHidden && roomScopedWalls.map((wall) => (
                 <InteractiveWall
                   key={wall.id}
                   ref={(r) => { if (r) wallRefs.current[wall.id] = r; }}
@@ -2241,6 +2330,8 @@ export default function RoomScene() {
                 />
               ))}
             </group>
+              );
+            })()
           )})}
 
           {pendingScenePreviewRoom && (
@@ -2292,16 +2383,18 @@ export default function RoomScene() {
             </group>
           )}
 
-          <WallGizmo
-            selectedWall={selectedWall}
-            wallRef={{ current: wallRefs.current[selectedWallId] }}
-            gizmoMode={gizmoMode}
-            updateWall={updateWall}
-            setOrbitEnabled={setOrbitEnabled}
-          />
+          {!wallsHidden && (
+            <WallGizmo
+              selectedWall={selectedWall}
+              wallRef={{ current: wallRefs.current[selectedWallId] }}
+              gizmoMode={gizmoMode}
+              updateWall={updateWall}
+              setOrbitEnabled={setOrbitEnabled}
+            />
+          )}
 
           {/* World projectors*/}
-          {selectedWall && (
+          {!wallsHidden && selectedWall && (
             <WorldProjector
               type="wall"
               worldPosition={[
@@ -2428,6 +2521,7 @@ export default function RoomScene() {
             activeTab={activeTab}
             onTabChange={openMobilePanel}
             onSave={() => setSaveModalOpen(true)}
+            onLogout={handleLogout}
             canUndo={canUndo} canRedo={canRedo}
             onUndo={undo} onRedo={redo}
             showRoomTab={Boolean(selectedRoom)}
@@ -2548,22 +2642,35 @@ export default function RoomScene() {
       ) : (
         <>
           {/* Desktop undo / save bar */}
-          <div style={{ position: 'absolute', top: 28, right: 28, zIndex: 1000, background: `${COLORS.background}D9`, padding: '10px 12px', borderRadius: '20px', border: softBorder, backdropFilter: 'blur(20px)', boxShadow: glassShadow }}>
-            <Space>
-              <Tooltip title="Undo (Ctrl+Z)">
-                <Button type="text" disabled={!canUndo} icon={<UndoOutlined />} onClick={undo} className="room-action-button" />
-              </Tooltip>
-              <Tooltip title="Redo (Ctrl+Y)">
-                <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} className="room-action-button" />
-              </Tooltip>
-              <div style={{ width: 1, height: 24, background: 'rgba(201, 171, 146, 0.45)', margin: '0 6px' }} />
-              <Tooltip title="Save / Snapshot">
-                <Button type="text" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)} className="room-action-button room-action-button-accent" />
-              </Tooltip>
-              {projectSave.saveStatus === 'saved' && (
-                <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 600, marginLeft: 2, letterSpacing: '0.04em' }}>Saved</span>
-              )}
-            </Space>
+          <div style={{ position: 'absolute', top: 28, right: 28, zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+            <div style={{ background: `${COLORS.background}D9`, padding: '10px 12px', borderRadius: '20px', border: softBorder, backdropFilter: 'blur(20px)', boxShadow: glassShadow }}>
+              <Space>
+                <Tooltip title="Undo (Ctrl+Z)">
+                  <Button type="text" disabled={!canUndo} icon={<UndoOutlined />} onClick={undo} className="room-action-button" />
+                </Tooltip>
+                <Tooltip title="Redo (Ctrl+Y)">
+                  <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} className="room-action-button" />
+                </Tooltip>
+                <div style={{ width: 1, height: 24, background: 'rgba(201, 171, 146, 0.45)', margin: '0 6px' }} />
+                <Tooltip title="Save / Snapshot">
+                  <Button type="text" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)} className="room-action-button room-action-button-accent" />
+                </Tooltip>
+                <Tooltip title="Logout">
+                  <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout} className="room-action-button" />
+                </Tooltip>
+                {projectSave.saveStatus === 'saved' && (
+                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 600, marginLeft: 2, letterSpacing: '0.04em' }}>Saved</span>
+                )}
+              </Space>
+            </div>
+            <Button
+              type="default"
+              icon={wallsHidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+              onClick={toggleWallsHidden}
+              className="room-standalone-action-button"
+            >
+              {wallsHidden ? 'Show Walls' : 'Hide Walls'}
+            </Button>
           </div>
 
           <div style={{ position: 'relative', height: '100%', padding: 20 }}>
@@ -2785,9 +2892,9 @@ export default function RoomScene() {
         navigateTo={navigateTo}
       />
 
-      {/*  Model preview portal  */}
-      <PreviewPortal />
-
+        {/*  Model preview portal  */}
+        <PreviewPortal />
+  
       {/*  Spatial score panel  */}
       <ScorePanel
         score={spatial.score}
@@ -2916,6 +3023,22 @@ export default function RoomScene() {
           color: ${COLORS.background} !important;
           background: linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%) !important;
           border-color: ${COLORS.action} !important;
+        }
+        .room-standalone-action-button.ant-btn {
+          height: 40px;
+          border-radius: 999px;
+          padding: 0 16px;
+          color: ${COLORS.text};
+          background: ${COLORS.surface}E8;
+          border: 1px solid ${COLORS.secondary}55;
+          box-shadow: ${glassShadow};
+          font-weight: 600;
+          letter-spacing: 0.02em;
+        }
+        .room-standalone-action-button.ant-btn:hover {
+          color: ${COLORS.action} !important;
+          border-color: ${COLORS.action}AA !important;
+          background: ${COLORS.surface} !important;
         }
         .room-floating-rail {
           pointer-events: auto;

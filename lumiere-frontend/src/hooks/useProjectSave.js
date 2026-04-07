@@ -40,7 +40,7 @@ function buildRoomsFromWalls(walls = []) {
 
 export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState }) {
   return {
-    version: '1.2',
+    version: '1.3',
     savedAt: new Date().toISOString(),
     rooms: rooms.map(({ id, name, type, x, z, width, depth, height }) => ({
       id, name, type, x, z, width, depth, height,

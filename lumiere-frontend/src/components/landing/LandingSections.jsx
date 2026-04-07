@@ -21,64 +21,64 @@ const reveal = {
 
 const featureCards = [
   {
-    title: "Precision Layouts",
-    body: "Build rooms with exact dimensions and expand effortlessly.",
+    title: "Cinematic Entrance",
+    body: "A black-screen reveal opens into a staged LM room instead of dropping users into a flat hero.",
   },
   {
-    title: "Live 3D Feedback",
-    body: "Every change updates instantly - no waiting, no guessing.",
+    title: "Touch and Mouse Orbit",
+    body: "Once the room settles to the right, the camera becomes draggable across desktop and mobile.",
   },
   {
-    title: "Interactive Elements",
-    body: "Doors, windows, and objects behave like they should.",
+    title: "Living Watermark",
+    body: "The LM mark keeps rotating softly in the background so the identity stays present without getting loud.",
   },
 ];
 
 const features = [
   {
-    icon: "SB",
-    title: "Smart Room Builder",
-    body: "Create and expand spaces seamlessly - from single rooms to full layouts.",
+    icon: "IN",
+    title: "Intro-Choreographed",
+    body: "Planes, letters, lights, and camera shifts are sequenced so the landing page feels authored, not assembled.",
   },
   {
-    icon: "2D",
-    title: "2D to 3D Sync",
-    body: "Switch between planning and visualization instantly, without losing context.",
+    icon: "RM",
+    title: "Room-First Identity",
+    body: "The brand mark lives inside an architectural moment, tying Lumiere directly to spatial design.",
   },
   {
-    icon: "DW",
-    title: "Dynamic Openings",
-    body: "Add doors and windows that do not just exist - they move, adapt, and respond.",
+    icon: "MX",
+    title: "Mixed Materials",
+    body: "Warm glass, soft ivory walls, metallic accents, and a dark stage keep the room premium without overdecorating it.",
   },
   {
-    icon: "IP",
-    title: "Intelligent Placement",
-    body: "Place furniture naturally with snapping and spacing that makes sense.",
+    icon: "MV",
+    title: "Moveable View",
+    body: "After reveal, the scene stops being passive and invites people to explore it with drag input.",
   },
   {
-    icon: "MF",
-    title: "Materials and Finishes",
-    body: "Experiment with textures, colors, and surfaces - instantly applied.",
+    icon: "GL",
+    title: "Glow Language",
+    body: "Gold light and subtle ambient arcs echo the inspiration image without copying it literally.",
   },
   {
-    icon: "RL",
-    title: "Real-Time Lighting",
-    body: "Control mood, shadows, and ambience with dynamic lighting.",
+    icon: "3D",
+    title: "Real 3D Foundation",
+    body: "The landing hero stays in Three.js, so the experience already feels connected to the product itself.",
   },
 ];
 
 const flowSteps = [
   {
-    title: "Start with a Space",
-    body: "Define your layout with simple inputs or sketches.",
+    title: "Fade Up from Black",
+    body: "The first beat is pure darkness so the reveal has weight.",
   },
   {
-    title: "Shape the Details",
-    body: "Add structure, openings, and elements with precision.",
+    title: "Drop the Room",
+    body: "Three planes and the LM letters fall into place like a staged set.",
   },
   {
-    title: "Bring It to Life",
-    body: "Explore your design in full 3D, in real time.",
+    title: "Hand Over Control",
+    body: "The room shifts right and becomes draggable once the choreography completes.",
   },
 ];
 
@@ -148,6 +148,39 @@ function ShowcaseFrame() {
             />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SceneStoryPanel() {
+  return (
+    <div className="lm-vision-panel">
+      <div className="lm-orbit-card">
+        <span className="lm-status-pill">Sequence</span>
+        <h3>Designed to feel like stepping into a branded miniature set.</h3>
+        <p>
+          The room does the storytelling first, then the interface takes over. That keeps the
+          landing experience cinematic without losing usability.
+        </p>
+      </div>
+
+      <div className="lm-vision-grid">
+        <article>
+          <span>01</span>
+          <strong>Black intro mask</strong>
+          <p>Creates a clean opening beat before any geometry is visible.</p>
+        </article>
+        <article>
+          <span>02</span>
+          <strong>Room planes drop</strong>
+          <p>Left wall, right wall, and floor descend into a warm, staged composition.</p>
+        </article>
+        <article>
+          <span>03</span>
+          <strong>Watermark takeover</strong>
+          <p>The solid letters soften while a slow rotating LM remains in the scene.</p>
+        </article>
       </div>
     </div>
   );
@@ -250,14 +283,14 @@ export default function LandingSections({
         <section className="lm-hero">
           <motion.div className="lm-copy" initial="hidden" animate="show" variants={reveal}>
             <motion.p className="lm-kicker" custom={0} variants={reveal}>
-              Interactive 3D interior platform
+              Cinematic 3D landing experience
             </motion.p>
             <motion.h1 custom={1} variants={reveal}>
-              Shape Your Space in Real Time
+              Let the Brand Enter the Room
             </motion.h1>
             <motion.p className="lm-body-copy lm-hero-copy" custom={2} variants={reveal}>
-              Design, refine, and experience interiors through an interactive 3D environment -
-              built to feel as real as it looks.
+              Lumiere opens in darkness, builds a floating architectural stage, drops the LM mark
+              into place, and then hands the scene over to the user.
             </motion.p>
 
             <motion.div className="lm-hero-actions" custom={3} variants={reveal}>
@@ -283,12 +316,12 @@ export default function LandingSections({
           >
             <SceneComponent pointer={pointer} progress={sceneProgress} mobile={mobile} />
             <div className="lm-stage-panel lm-stage-panel-top">
-              <span>Spatial Mode</span>
-              <strong>Interactive room preview</strong>
+              <span>Hero scene</span>
+              <strong>Animated room reveal</strong>
             </div>
             <div className="lm-stage-panel lm-stage-panel-bottom">
-              <span>Realtime response</span>
-              <strong>Hover, scroll, click</strong>
+              <span>After intro</span>
+              <strong>Drag with mouse or touch</strong>
             </div>
           </motion.div>
         </section>
@@ -324,23 +357,23 @@ export default function LandingSections({
           >
             <p className="lm-kicker">Experience Section</p>
             <h2>
-              Not Just Design -
+              Not Just a Logo -
               <br />
-              Experience It
+              A Whole Entrance
             </h2>
             <p className="lm-body-copy">
-              Step inside your ideas. Move through your space, adjust details in real time, and
-              explore every angle before anything is built.
+              The landing page now works like a short film beat. It starts restrained, reveals the
+              room composition, shifts the staging, and then lets people physically explore it.
             </p>
             <ul className="lm-note-list">
-              <li>Scroll guides the camera deeper into the room.</li>
-              <li>Walls soften into a subtle ghost effect as the scene opens up.</li>
-              <li>Light shifts dynamically to change the emotional read of the space.</li>
+              <li>The initial black mask gives the room reveal more impact.</li>
+              <li>The room slides right to make the layout feel intentional, not centered by default.</li>
+              <li>The fading LM watermark keeps motion alive even after the intro ends.</li>
             </ul>
           </motion.div>
 
           <motion.div className="lm-visual-panel" style={{ y: experienceY }}>
-            <SceneComponent pointer={pointer} progress={sceneProgress} mobile={mobile} />
+            <SceneStoryPanel />
           </motion.div>
         </section>
 
@@ -404,10 +437,10 @@ export default function LandingSections({
         <section className="lm-showcase">
           <div className="lm-text-panel">
             <p className="lm-kicker">Showcase Section</p>
-            <h2>See It Before It Exists</h2>
+            <h2>See the Motion System Before the Product Starts</h2>
             <p className="lm-body-copy">
-              Capture snapshots or record walkthroughs of your designs - whether it is an
-              automated cinematic view or your own guided exploration.
+              The visual language is already doing product work here: warmth, space, controlled
+              motion, and direct manipulation all land before signup.
             </p>
           </div>
           <motion.div

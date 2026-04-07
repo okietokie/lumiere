@@ -110,7 +110,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
     </>
   );
 }
-export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, onUndo, onRedo, showRoomTab = false }) {
+export function BottomNav({ activeTab, onTabChange, onSave, onLogout, canUndo, canRedo, onUndo, onRedo, showRoomTab = false }) {
   const tabs = [
     { key: 'walls',     label: 'Build',     icon: ICONS.walls     },
     ...(showRoomTab ? [{ key: 'room', label: 'Room', icon: ICONS.room }] : []),
@@ -197,6 +197,17 @@ export function BottomNav({ activeTab, onTabChange, onSave, canUndo, canRedo, on
       }}>
         <Icon d={ICONS.save} size={18} color={COLORS.action} />
         <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif', color: COLORS.action }}>Save</span>
+      </button>
+
+      {/* Logout */}
+      <button onClick={onLogout} style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+        padding: '6px 10px', minWidth: 44, minHeight: 48,
+        background: 'transparent', border: 'none', borderRadius: 12,
+        color: COLORS.text, cursor: 'pointer',
+      }}>
+        <Icon d={ICONS.close} size={18} color={COLORS.text} />
+        <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif', color: COLORS.text }}>Logout</span>
       </button>
     </div>
   );

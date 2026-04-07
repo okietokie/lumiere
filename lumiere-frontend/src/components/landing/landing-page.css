@@ -220,6 +220,10 @@ body {
   min-height: 680px;
   padding: 14px;
   isolation: isolate;
+  background:
+    radial-gradient(circle at 20% 22%, rgba(223, 165, 97, 0.1), transparent 20%),
+    radial-gradient(circle at 78% 76%, rgba(125, 88, 55, 0.22), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
 }
 
 .lm-scene-shell,
@@ -232,7 +236,7 @@ body {
   background:
     radial-gradient(circle at 22% 18%, rgba(210, 160, 116, 0.14), transparent 20%),
     radial-gradient(circle at 78% 80%, rgba(143, 93, 63, 0.18), transparent 22%),
-    linear-gradient(180deg, #201713 0%, #130f0d 100%);
+    linear-gradient(180deg, #120d0b 0%, #050505 100%);
 }
 
 .lm-scene-shell::before,
@@ -274,15 +278,74 @@ body {
 }
 
 .lm-scene-glow-a {
-  left: -40px;
-  top: 26px;
-  background: rgba(143, 93, 63, 0.24);
+  left: -70px;
+  top: 36px;
+  width: 280px;
+  height: 280px;
+  background: rgba(196, 138, 70, 0.18);
 }
 
 .lm-scene-glow-b {
-  right: -50px;
-  bottom: 28px;
-  background: rgba(210, 160, 116, 0.18);
+  right: -70px;
+  bottom: 10px;
+  width: 300px;
+  height: 300px;
+  background: rgba(210, 160, 116, 0.14);
+}
+
+.lm-logo-room-shell::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 28%;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.42));
+  pointer-events: none;
+  z-index: 2;
+}
+
+.lm-room-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 48% 42%, transparent 0 28%, rgba(0, 0, 0, 0.18) 56%, rgba(0, 0, 0, 0.56) 100%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.35), transparent 24%, transparent 76%, rgba(0, 0, 0, 0.34));
+}
+
+.lm-scene-intro-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: #000;
+  transition: opacity 180ms linear;
+}
+
+.lm-scene-caption {
+  position: absolute;
+  left: 22px;
+  top: 22px;
+  z-index: 5;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(7, 7, 7, 0.58);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--lm-shadow-soft), var(--lm-inset);
+}
+
+.lm-scene-caption span {
+  display: block;
+  color: var(--lm-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.lm-scene-caption strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.96rem;
 }
 
 .lm-stage-panel {
@@ -367,6 +430,79 @@ body {
   padding: 16px 18px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.lm-vision-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.lm-orbit-card,
+.lm-vision-grid article {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  box-shadow: var(--lm-shadow-soft), var(--lm-inset);
+}
+
+.lm-orbit-card {
+  min-height: 220px;
+  padding: 24px;
+}
+
+.lm-status-pill {
+  display: inline-flex;
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #28180f;
+  background: linear-gradient(180deg, #f0c79a 0%, #d3a072 100%);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lm-orbit-card h3 {
+  margin: 18px 0 12px;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-size: clamp(1.8rem, 2.5vw, 2.5rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.lm-orbit-card p,
+.lm-vision-grid article p {
+  margin: 0;
+  color: var(--lm-muted);
+  line-height: 1.7;
+}
+
+.lm-vision-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.lm-vision-grid article {
+  min-height: 200px;
+  padding: 22px;
+}
+
+.lm-vision-grid article span {
+  display: inline-flex;
+  margin-bottom: 16px;
+  color: #f2c995;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.06em;
+}
+
+.lm-vision-grid article strong {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 1.05rem;
 }
 
 .lm-visual-panel .lm-scene-shell,
@@ -544,6 +680,12 @@ body {
   overflow: hidden;
 }
 
+.lm-fallback-room-angled {
+  background:
+    radial-gradient(circle at 28% 28%, rgba(238, 186, 118, 0.18), transparent 22%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+}
+
 .lm-fallback-wall {
   position: absolute;
   background: rgba(255, 255, 255, 0.08);
@@ -570,6 +712,17 @@ body {
   bottom: 18%;
   width: 18%;
   transform: skewY(-14deg);
+}
+
+.lm-fallback-floor {
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  bottom: 10%;
+  height: 26%;
+  background: rgba(255, 255, 255, 0.08);
+  transform: perspective(400px) rotateX(68deg);
+  transform-origin: center bottom;
 }
 
 .lm-fallback-object {
@@ -647,6 +800,17 @@ body {
   transform-origin: left center;
 }
 
+.lm-fallback-watermark {
+  position: absolute;
+  width: 56%;
+  height: 56%;
+  right: 6%;
+  top: 8%;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 201, 149, 0.16);
+  opacity: 0.4;
+}
+
 .lm-fallback-card {
   position: absolute;
   right: 24px;
@@ -676,7 +840,8 @@ body {
   .lm-final-cta,
   .lm-floating-strip,
   .lm-grid,
-  .lm-flow-track {
+  .lm-flow-track,
+  .lm-vision-grid {
     grid-template-columns: 1fr;
   }
 
@@ -732,6 +897,12 @@ body {
   .lm-scene-shell,
   .lm-scene-fallback {
     min-height: 440px;
+  }
+
+  .lm-scene-caption {
+    left: 18px;
+    top: 18px;
+    right: 18px;
   }
 
   .lm-visual-panel .lm-scene-shell,

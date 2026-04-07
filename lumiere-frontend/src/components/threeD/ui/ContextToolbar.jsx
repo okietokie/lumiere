@@ -232,7 +232,7 @@ export default function ContextToolbar({
           display:        'flex',
           flexDirection:  'column',
           gap:            0,
-          background:     'transparent',
+          background:     'rgb(26, 17, 17)',
           border:         '1px solid rgba(196,154,108,0.3)',
           borderRadius:   12,
           backdropFilter: 'blur(16px)',

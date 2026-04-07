@@ -67,11 +67,12 @@ async def create_project(
     thumbnail: str | None = None,
 ) -> dict:
     now = utcnow()
+    scene_payload = _project_scene(scene_data, scene)
     doc = {
         "user_id": ObjectId(user_id),
         "title": _project_title(title, name),
         "thumbnail_url": _thumbnail_url(thumbnail_url, thumbnail),
-        "scene_data": _project_scene(scene_data, scene),
+        "scene_data": scene_payload,
         "preview_video": None,
         "model_assets": {
             "glb_url": None,
@@ -105,11 +106,13 @@ async def update_project(
     thumbnail_url: str | None = None,
     thumbnail: str | None = None,
 ) -> dict | None:
+    existing = await get_owned_project(project_id, user_id)
     updates = {"updated_at": utcnow()}
     if title is not None or name is not None:
         updates["title"] = _project_title(title, name)
     if scene_data is not None or scene is not None:
-        updates["scene_data"] = _project_scene(scene_data, scene)
+        next_scene = _project_scene(scene_data, scene)
+        updates["scene_data"] = next_scene
     if thumbnail_url is not None or thumbnail is not None:
         updates["thumbnail_url"] = _thumbnail_url(thumbnail_url, thumbnail)
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
+import { Html, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { COLORS } from '../../../utils/colors';
 import SurfaceMaterial from '../materials/SurfaceMaterial';
@@ -310,7 +310,6 @@ const InteractiveWall = React.forwardRef(({
     const fillOpacity = preview ? (opening.valid ? 0.24 : 0.18) : selected ? 0.3 : 0.16;
     const panelOpacity = preview ? (opening.valid ? 0.88 : 0.72) : selected ? 0.92 : 0.58;
     const frameDepth = Math.max(safeThickness + 0.02, 0.12);
-
     if (openingType === 'door') {
       return (
         <group key={`${openingType}-${opening.id}`}>

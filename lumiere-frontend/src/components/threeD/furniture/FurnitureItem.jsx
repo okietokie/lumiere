@@ -206,7 +206,7 @@ const DEFAULT_TARGET = { axis: 'y', size: 1.2 };
 function computeNormAndCentroid(scene, category) {
   try {
     const box = new THREE.Box3().setFromObject(scene);
-    if (box.isEmpty()) return { normScale: 1, centroid: [0, 0, 0] };
+    if (box.isEmpty()) return { normScale: 1, centroid: [0, 0, 0], size: [1, 1, 1] };
     const size   = new THREE.Vector3();
     const centre = new THREE.Vector3();
     box.getSize(size);
@@ -216,9 +216,9 @@ function computeNormAndCentroid(scene, category) {
     const norm    = (!current || !isFinite(current) || current < 0.0001)
       ? 1
       : Math.max(0.01, Math.min(100, target.size / current));
-    return { normScale: norm, centroid: [centre.x, centre.y, centre.z] };
+    return { normScale: norm, centroid: [centre.x, centre.y, centre.z], size: [size.x, size.y, size.z] };
   } catch {
-    return { normScale: 1, centroid: [0, 0, 0] };
+    return { normScale: 1, centroid: [0, 0, 0], size: [1, 1, 1] };
   }
 }
 const FurnitureItem = forwardRef((props, ref) => {
@@ -272,15 +272,19 @@ const FurnitureInner = forwardRef(({
   const outerRef              = useRef();
   const innerRef              = useRef();
 
-  const { clonedScene, normScale, centroid } = useMemo(() => {
+  const { clonedScene, normScale, centroid, normalizedSize } = useMemo(() => {
     const clone = SkeletonUtils.clone(scene);
     clone.traverse((child) => {
       if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
     });
-    const { normScale: ns, centroid: c } = computeNormAndCentroid(scene, item.category);
-    return { clonedScene: clone, normScale: ns, centroid: c };
+    const { normScale: ns, centroid: c, size } = computeNormAndCentroid(scene, item.category);
+    return {
+      clonedScene: clone,
+      normScale: ns,
+      centroid: c,
+      normalizedSize: [size[0] * ns, size[1] * ns, size[2] * ns],
+    };
   }, [scene, item.category]);
-
   useImperativeHandle(ref, () => {
     if (outerRef.current) outerRef.current.__normScale = normScale;
     return outerRef.current;
