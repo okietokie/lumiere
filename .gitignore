@@ -25,6 +25,7 @@ lumiere-frontend/node_modules/
 dist/
 
 # LOGS
+
 *.log
 npm-debug.log*
 yarn-debug.log*
