@@ -1,0 +1,107 @@
+.tips {
+  background: linear-gradient(145deg, rgba(122, 101, 89, 0.12), rgba(58, 48, 43, 1));
+  border: 1px solid rgba(242, 229, 213, 0.04);
+  border-radius: 0;
+  padding: 22px 24px;
+  animation: fadeUp 0.45s ease both;
+  box-shadow: -10px -10px 20px rgba(122, 101, 89, 0.08), 14px 14px 24px rgba(24, 19, 17, 0.46);
+}
+
+.tips__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tips__item {
+  border-radius: 0;
+  overflow: hidden;
+  border: 1px solid rgba(242, 229, 213, 0.04);
+  background: linear-gradient(145deg, rgba(122, 101, 89, 0.08), rgba(58, 48, 43, 0.98));
+  box-shadow: inset 4px 4px 8px rgba(24, 19, 17, 0.18), inset -3px -3px 6px rgba(122, 101, 89, 0.03);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.tips__item--open {
+  border-color: rgba(196, 154, 108, 0.24);
+  background: rgba(242, 229, 213, 0.03);
+}
+
+.tips__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 12px;
+  background: transparent;
+  color: var(--text);
+  border-radius: 0;
+  transition: background var(--transition);
+  text-align: left;
+}
+
+.tips__header:hover,
+.tips__item--open .tips__header {
+  background: rgba(242, 229, 213, 0.04);
+}
+
+.tips__icon {
+  font-size: 16px;
+  color: var(--action);
+  width: 20px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.tips__title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tips__chevron {
+  width: 16px;
+  height: 16px;
+  color: rgba(242, 229, 213, 0.56);
+  flex-shrink: 0;
+  transition: transform var(--transition);
+}
+
+.tips__steps {
+  padding: 12px 14px 14px 42px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background:
+    linear-gradient(180deg, rgba(242, 229, 213, 0.03), rgba(242, 229, 213, 0.01)),
+    rgba(58, 48, 43, 0.24);
+  animation: fadeUp 0.2s ease both;
+  list-style: none;
+  border-top: 1px solid rgba(242, 229, 213, 0.08);
+}
+
+.tips__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  color: rgba(242, 229, 213, 0.7);
+}
+
+.tips__step-num {
+  min-width: 20px;
+  height: 20px;
+  background:
+    linear-gradient(180deg, rgba(196, 154, 108, 0.18), rgba(139, 107, 77, 0.08)),
+    rgba(58, 48, 43, 0.28);
+  color: var(--action);
+  border: 1px solid rgba(196, 154, 108, 0.2);
+  border-radius: 0;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}

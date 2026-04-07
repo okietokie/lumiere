@@ -1,0 +1,112 @@
+.storage {
+  background: linear-gradient(145deg, rgba(122, 101, 89, 0.12), rgba(58, 48, 43, 1));
+  border: 1px solid rgba(242, 229, 213, 0.04);
+  border-radius: 0;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeUp 0.45s ease both;
+  box-shadow: -10px -10px 20px rgba(122, 101, 89, 0.08), 14px 14px 24px rgba(24, 19, 17, 0.46);
+}
+
+.storage__pct-badge {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.storage__bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.storage__bar-track {
+  height: 8px;
+  background: rgba(44, 36, 32, 0.52);
+  border-radius: 0;
+  overflow: hidden;
+  border: 1px solid rgba(242, 229, 213, 0.1);
+}
+
+.storage__bar-fill {
+  height: 100%;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.storage__bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: rgba(242, 229, 213, 0.58);
+}
+
+.storage__metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.storage__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(242, 229, 213, 0.04);
+  background: linear-gradient(145deg, rgba(122, 101, 89, 0.1), rgba(58, 48, 43, 0.98));
+  box-shadow: inset 5px 5px 10px rgba(24, 19, 17, 0.22), inset -4px -4px 8px rgba(122, 101, 89, 0.04);
+}
+
+.storage__metric-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(242, 229, 213, 0.64);
+}
+
+.storage__metric-header svg {
+  width: 13px;
+  height: 13px;
+}
+
+.storage__metric-bar-track {
+  height: 4px;
+  background: rgba(44, 36, 32, 0.56);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.storage__metric-bar-fill {
+  height: 100%;
+  background: var(--action);
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.storage__metric-count {
+  font-size: 12px;
+  color: rgba(242, 229, 213, 0.56);
+}
+
+.storage__warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background:
+    linear-gradient(180deg, rgba(139, 107, 77, 0.18), rgba(122, 101, 89, 0.08)),
+    rgba(58, 48, 43, 0.28);
+  border: 1px solid rgba(196, 154, 108, 0.22);
+  border-radius: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.storage__warning svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--action);
+}

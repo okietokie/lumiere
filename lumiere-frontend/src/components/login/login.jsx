@@ -26,7 +26,7 @@ const Login = () => {
       });
       storeAuthSession(response.data);
       message.success('Login Successful!');
-      navigate('/user/room');
+      navigate('/user/dashboard', { replace: true });
     } catch (error) {
       const errMsg = getApiErrorMessage(error, 'Invalid login details. Please try again.');
       message.error(errMsg);

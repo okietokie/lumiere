@@ -94,7 +94,7 @@ import FolderCopyRoundedIcon from "@mui/icons-material/FolderCopyRounded";
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
 import { clearAuthSession } from "../../../utils/authStorage";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 
 const CAMERA_PRESETS = {
@@ -128,6 +128,8 @@ function formatMoney(value, currency = 'AED') {
 
 export default function RoomScene() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const selectedProjectId = searchParams.get("projectId");
   const [rooms, setRooms] = useState(() => [
     createRoomEntity({
       name: 'Room 1',
@@ -144,6 +146,9 @@ export default function RoomScene() {
   const handleLogout = useCallback(() => {
     clearAuthSession();
     navigate("/login", { replace: true });
+  }, [navigate]);
+  const handleDashboard = useCallback(() => {
+    navigate("/user/dashboard");
   }, [navigate]);
   const {
     state: walls, set: setWalls,
@@ -235,7 +240,15 @@ export default function RoomScene() {
     lightingState,
     canvasRef: canvasWrapperRef,
     currentProjectId, setCurrentProjectId,
+    skipInitialLatestLoad: Boolean(selectedProjectId),
   });
+  const { loadProject } = projectSave;
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    loadProject(selectedProjectId).catch((error) => {
+      console.error("Failed to load selected project", error);
+    });
+  }, [loadProject, selectedProjectId]);
   const handleCreateNewProject = useCallback(() => {
     projectSave.createNewProject();
     setSelectedRoomId(null);
@@ -2521,6 +2534,7 @@ export default function RoomScene() {
             activeTab={activeTab}
             onTabChange={openMobilePanel}
             onSave={() => setSaveModalOpen(true)}
+            onDashboard={handleDashboard}
             onLogout={handleLogout}
             canUndo={canUndo} canRedo={canRedo}
             onUndo={undo} onRedo={redo}
@@ -2654,6 +2668,9 @@ export default function RoomScene() {
                 <div style={{ width: 1, height: 24, background: 'rgba(201, 171, 146, 0.45)', margin: '0 6px' }} />
                 <Tooltip title="Save / Snapshot">
                   <Button type="text" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)} className="room-action-button room-action-button-accent" />
+                </Tooltip>
+                <Tooltip title="Back to Dashboard">
+                  <Button type="text" icon={<AppstoreOutlined />} onClick={handleDashboard} className="room-action-button" />
                 </Tooltip>
                 <Tooltip title="Logout">
                   <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout} className="room-action-button" />

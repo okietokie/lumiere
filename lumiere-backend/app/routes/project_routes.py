@@ -7,6 +7,7 @@ from app.services.project_service import (
     delete_project,
     get_latest_project,
     get_project,
+    get_storage_usage,
     list_projects,
     open_owned_project,
     save_project_asset,
@@ -36,6 +37,11 @@ async def save_project_route(
 @router.get("/list")
 async def list_projects_route(current_user: dict = Depends(get_current_user)):
     return await list_projects(str(current_user["_id"]))
+
+
+@router.get("/storage")
+async def storage_usage_route(current_user: dict = Depends(get_current_user)):
+    return await get_storage_usage(str(current_user["_id"]))
 
 
 @router.get("/me/latest")

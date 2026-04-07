@@ -15,6 +15,7 @@ const ICONS = {
   materials: 'M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37-1.34-1.34a1 1 0 0 0-1.41 0L9 12.25 11.75 15l8.96-8.96a1 1 0 0 0 0-1.41z',
   lighting:  'M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z',
   furniture: 'M7 13c1.66 0 3-1.34 3-3S8.66 7 7 7s-3 1.34-3 3 1.34 3 3 3zm12-6h-8v7H3V5H1v15h2v-3h18v3h2v-9c0-2.21-1.79-4-4-4z',
+  dashboard: 'M3 3h8v8H3zm10 0h8v5h-8zm0 7h8v11h-8zM3 13h8v8H3z',
   projects:  'M10 4H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z',
   save:      'M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z',
   close:     'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
@@ -110,7 +111,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
     </>
   );
 }
-export function BottomNav({ activeTab, onTabChange, onSave, onLogout, canUndo, canRedo, onUndo, onRedo, showRoomTab = false }) {
+export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogout, canUndo, canRedo, onUndo, onRedo, showRoomTab = false }) {
   const tabs = [
     { key: 'walls',     label: 'Build',     icon: ICONS.walls     },
     ...(showRoomTab ? [{ key: 'room', label: 'Room', icon: ICONS.room }] : []),
@@ -197,6 +198,17 @@ export function BottomNav({ activeTab, onTabChange, onSave, onLogout, canUndo, c
       }}>
         <Icon d={ICONS.save} size={18} color={COLORS.action} />
         <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif', color: COLORS.action }}>Save</span>
+      </button>
+
+      {/* Dashboard */}
+      <button onClick={onDashboard} style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+        padding: '6px 10px', minWidth: 44, minHeight: 48,
+        background: 'transparent', border: 'none', borderRadius: 12,
+        color: COLORS.text, cursor: 'pointer',
+      }}>
+        <Icon d={ICONS.dashboard} size={18} color={COLORS.text} />
+        <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif', color: COLORS.text }}>Dashboard</span>
       </button>
 
       {/* Logout */}

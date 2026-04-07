@@ -119,6 +119,7 @@ export default function useProjectSave({
   canvasRef,
   currentProjectId,
   setCurrentProjectId,
+  skipInitialLatestLoad = false,
 }) {
   const [saveStatus, setSaveStatus] = useState('idle');
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
@@ -420,10 +421,11 @@ export default function useProjectSave({
   }, [autosaveEnabled, currentProjectId, saveProject, projectName]);
 
   useEffect(() => {
+    if (skipInitialLatestLoad) return;
     if (hasAttemptedInitialLoad.current) return;
     hasAttemptedInitialLoad.current = true;
     loadLatestProject().catch(() => {});
-  }, [loadLatestProject]);
+  }, [loadLatestProject, skipInitialLatestLoad]);
 
   return {
     projectName, setProjectName,

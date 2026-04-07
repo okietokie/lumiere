@@ -1,5 +1,7 @@
 import logging
 import os
+import json
+from urllib.parse import urlparse
 
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -15,6 +17,10 @@ from app.core.database import projects_collection
 from app.utils.helpers import serialize_document, utcnow
 
 logger = logging.getLogger(__name__)
+
+MAX_STORAGE_MB = 500
+MAX_PROJECTS = 50
+MAX_ROOMS = 200
 
 
 def _project_title(payload_title: str | None, payload_name: str | None) -> str:
@@ -195,6 +201,76 @@ def _sanitize_upload_name(filename: str | None, fallback: str) -> str:
     raw = os.path.basename(filename or "").strip()
     safe = "".join(ch for ch in raw if ch.isalnum() or ch in ("-", "_", "."))
     return safe or fallback
+
+
+def _resolve_local_asset_size(url: str | None, base_dir: str) -> int:
+    if not url:
+        return 0
+
+    parsed = urlparse(url)
+    filename = os.path.basename(parsed.path or "")
+    if not filename:
+        return 0
+
+    path = os.path.join(base_dir, filename)
+    if not os.path.exists(path):
+        return 0
+
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _estimate_project_bytes(doc: dict) -> tuple[int, int]:
+    scene_data = doc.get("scene_data") or doc.get("scene") or {}
+    payload = {
+        "title": doc.get("title"),
+        "thumbnail_url": doc.get("thumbnail_url"),
+        "scene_data": scene_data,
+        "model_assets": doc.get("model_assets") or {},
+        "preview_video": doc.get("preview_video"),
+    }
+
+    scene_bytes = len(json.dumps(payload, default=str).encode("utf-8"))
+    rooms_used = len(scene_data.get("rooms") or [])
+    asset_bytes = 0
+    model_assets = doc.get("model_assets") or {}
+    asset_bytes += _resolve_local_asset_size(doc.get("preview_video"), VIDEOS_DIR)
+    asset_bytes += _resolve_local_asset_size(model_assets.get("glb_url"), PROJECT_ASSETS_DIR)
+    asset_bytes += _resolve_local_asset_size(model_assets.get("usdz_url"), PROJECT_ASSETS_DIR)
+
+    return scene_bytes + asset_bytes, rooms_used
+
+
+async def get_storage_usage(user_id: str) -> dict:
+    cursor = projects_collection.find({"user_id": ObjectId(user_id)})
+
+    total_bytes = 0
+    total_projects = 0
+    total_rooms = 0
+
+    async for doc in cursor:
+        total_projects += 1
+        project_bytes, rooms_used = _estimate_project_bytes(doc)
+        total_bytes += project_bytes
+        total_rooms += rooms_used
+
+    used_mb = round(total_bytes / 1024 / 1024, 2)
+    total_mb = MAX_STORAGE_MB
+
+    return {
+        "used_mb": used_mb,
+        "total_mb": total_mb,
+        "projects": {
+            "used": total_projects,
+            "max": MAX_PROJECTS,
+        },
+        "rooms": {
+            "used": total_rooms,
+            "max": MAX_ROOMS,
+        },
+    }
 
 
 async def save_project_asset(
