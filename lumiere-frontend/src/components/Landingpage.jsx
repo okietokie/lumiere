@@ -33,6 +33,7 @@ import {
   ArrowRightOutlined,
   CheckCircleOutlined
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/auth';
 import { COLORS } from '../utils/colors';
 
@@ -44,6 +45,7 @@ const LandingPage = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
   const [activeStep, setActiveStep] = React.useState(0);
+  const navigate = useNavigate();
 
   const onFinish = async (values) => {
     setLoading(true);
@@ -183,6 +185,7 @@ const LandingPage = () => {
               <Button 
                 type="primary" 
                 size="middle"
+                onClick={() => navigate('/canvas')}
                 style={{
                   background: COLORS.action,
                   borderColor: COLORS.action
@@ -245,11 +248,7 @@ const LandingPage = () => {
                       fontSize: '1rem',
                       fontWeight: 500
                     }}
-                    onClick={() => {
-                      document.getElementById('signup-section').scrollIntoView({ 
-                        behavior: 'smooth' 
-                      });
-                    }}
+                    onClick={() => navigate('/canvas')}
                   >
                     Get Started <ArrowRightOutlined />
                   </Button>
