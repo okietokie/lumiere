@@ -38,17 +38,92 @@ function buildRoomsFromWalls(walls = []) {
   })];
 }
 
+function pointKey(point) {
+  return Array.isArray(point)
+    ? `${Number(point[0]).toFixed(5)},${Number(point[1]).toFixed(5)}`
+    : '';
+}
+
+function buildFootprintFromWalls(roomWalls = []) {
+  if (!Array.isArray(roomWalls) || roomWalls.length < 3) return null;
+
+  const edges = new Map();
+  const points = new Map();
+  roomWalls.forEach((wall) => {
+    if (!Array.isArray(wall?.start) || !Array.isArray(wall?.end)) return;
+    const startKey = pointKey(wall.start);
+    const endKey = pointKey(wall.end);
+    if (!startKey || !endKey || startKey === endKey) return;
+    points.set(startKey, wall.start);
+    points.set(endKey, wall.end);
+    if (!edges.has(startKey)) edges.set(startKey, []);
+    if (!edges.has(endKey)) edges.set(endKey, []);
+    edges.get(startKey).push(endKey);
+    edges.get(endKey).push(startKey);
+  });
+
+  const firstKey = [...points.keys()][0];
+  if (!firstKey) return null;
+
+  const footprint = [firstKey];
+  let previousKey = null;
+  let currentKey = firstKey;
+  let safety = 0;
+
+  while (safety < points.size + roomWalls.length + 4) {
+    safety += 1;
+    const nextKey = (edges.get(currentKey) ?? []).find((key) => key !== previousKey);
+    if (!nextKey) break;
+    if (nextKey === firstKey) {
+      return footprint.length >= 3 ? footprint.map((key) => points.get(key)) : null;
+    }
+    if (footprint.includes(nextKey)) break;
+    footprint.push(nextKey);
+    previousKey = currentKey;
+    currentKey = nextKey;
+  }
+
+  return null;
+}
+
+function normalizeLoadedRooms(sceneData) {
+  const sourceRooms = sceneData?.rooms?.length ? sceneData.rooms : buildRoomsFromWalls(sceneData?.walls);
+  const walls = Array.isArray(sceneData?.walls) ? sceneData.walls : [];
+
+  return sourceRooms.map((room) => {
+    if (Array.isArray(room?.footprint) && room.footprint.length >= 3) {
+      return room;
+    }
+
+    const roomWalls = walls.filter((wall) => wall?.roomId === room?.id);
+    const footprint = buildFootprintFromWalls(roomWalls);
+    if (!footprint?.length) return room;
+
+    const xs = footprint.map(([x]) => x);
+    const zs = footprint.map(([, z]) => z);
+    return {
+      ...room,
+      x: (Math.min(...xs) + Math.max(...xs)) / 2,
+      z: (Math.min(...zs) + Math.max(...zs)) / 2,
+      width: Math.max(Math.max(...xs) - Math.min(...xs), 1),
+      depth: Math.max(Math.max(...zs) - Math.min(...zs), 1),
+      footprint,
+      isCustomShape: true,
+    };
+  });
+}
+
 export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState }) {
   return {
     version: '1.3',
     savedAt: new Date().toISOString(),
-    rooms: rooms.map(({ id, name, type, x, z, width, depth, height }) => ({
-      id, name, type, x, z, width, depth, height,
+    rooms: rooms.map(({ id, name, type, x, z, width, depth, height, footprint, isCustomShape }) => ({
+      id, name, type, x, z, width, depth, height, footprint, isCustomShape,
     })),
-    walls: walls.map(({ id, roomId, start, end, height, thickness, color, roughness, metalness, textureId }) => ({
-      id, roomId, start, end, height, thickness, color, roughness, metalness, textureId,
+    walls: walls.map(({ id, roomId, start, end, height, thickness, color, roughness, metalness, textureId, doors, windows }) => ({
+      id, roomId, start, end, height, thickness, color, roughness, metalness, textureId, doors, windows,
     })),
-    furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale }) => ({
+    furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale, tint }) => ({
       id,
       filename,
       name,
@@ -57,6 +132,7 @@ export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceili
       position,
       rotation,
       scale,
+      tint,
     })),
     materials: {
       floor: floorMaterial,
@@ -75,16 +151,21 @@ export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceili
 
 export function applySceneData(sceneData, { setRooms, setWalls, setPlacedItems, setFloor, setCeiling, lightingState }) {
   if (!sceneData) return;
-  const rooms = sceneData.rooms?.length ? sceneData.rooms : buildRoomsFromWalls(sceneData.walls);
+  const rooms = normalizeLoadedRooms(sceneData);
   setRooms(rooms);
-  if (rooms.length) {
+  if (rooms.some((room) => room?.isCustomShape || (Array.isArray(room?.footprint) && room.footprint.length >= 3))) {
+    setWalls(sceneData.walls ?? []);
+  } else if (rooms.length) {
     setWalls(generateLayoutWalls(rooms, sceneData.walls ?? []));
   } else if (sceneData.walls) {
     setWalls(sceneData.walls);
   }
-  if (sceneData.furniture) setPlacedItems(sceneData.furniture);
-  if (sceneData.materials?.floor) setFloor(sceneData.materials.floor);
-  if (sceneData.materials?.ceiling) setCeiling(sceneData.materials.ceiling);
+  const furniture = sceneData.furniture ?? sceneData.placedItems ?? [];
+  setPlacedItems(Array.isArray(furniture) ? furniture : []);
+  const floor = sceneData.materials?.floor ?? sceneData.floorMaterial;
+  const ceiling = sceneData.materials?.ceiling ?? sceneData.ceilingMaterial;
+  if (floor) setFloor(floor);
+  if (ceiling) setCeiling(ceiling);
   if (sceneData.lighting) {
     const lighting = sceneData.lighting;
     if (lighting.timeOfDay !== undefined) lightingState.setTimeOfDay(lighting.timeOfDay);
@@ -117,9 +198,11 @@ export default function useProjectSave({
   ceilingMaterial, setCeilingMaterial,
   lightingState,
   canvasRef,
+  snapshotApiRef,
   currentProjectId,
   setCurrentProjectId,
   skipInitialLatestLoad = false,
+  localMutationVersionRef = null,
 }) {
   const [saveStatus, setSaveStatus] = useState('idle');
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
@@ -138,20 +221,37 @@ export default function useProjectSave({
     return document.querySelector('canvas')?.parentElement ?? document.querySelector('canvas');
   }, [canvasRef]);
 
-  const saveProject = useCallback(async (name = projectName, withThumbnail = true) => {
+  // Read the ref live inside async load guards; it must not be captured from render.
+  /* eslint-disable react-hooks/preserve-manual-memoization */
+  const getLocalMutationVersion = useCallback(
+    () => localMutationVersionRef?.current ?? 0,
+    [localMutationVersionRef],
+  );
+  /* eslint-enable react-hooks/preserve-manual-memoization */
+
+  const captureSnapshot = useCallback(() => {
+    const snapshotApi = snapshotApiRef?.current;
+    if (snapshotApi?.capture) {
+      const captured = snapshotApi.capture();
+      if (captured && captured !== 'data:,') return captured;
+    }
+    return takeSnapshot(getCanvas());
+  }, [getCanvas, snapshotApiRef]);
+
+  const saveProject = useCallback(async (name = projectName, withThumbnail = true, options = {}) => {
     setSaveStatus('saving');
     try {
       const scene = getSceneData();
       const thumbnail = await new Promise((resolve) => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            resolve(withThumbnail ? takeSnapshot(getCanvas()) : null);
+            resolve(withThumbnail ? captureSnapshot() : null);
           });
         });
       });
 
       let response;
-      if (currentProjectId) {
+      if (currentProjectId && !options.createNew) {
         response = await axiosClient.put(`/api/projects/${currentProjectId}`, {
           title: name,
           scene_data: scene,
@@ -178,13 +278,12 @@ export default function useProjectSave({
       setTimeout(() => setSaveStatus('idle'), 3000);
       throw e;
     }
-  }, [projectName, currentProjectId, getSceneData, getCanvas, setCurrentProjectId]);
+  }, [projectName, currentProjectId, getSceneData, captureSnapshot, setCurrentProjectId]);
 
   const downloadSnapshot = useCallback(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const canvas = getCanvas();
-        const url = takeSnapshot(canvas);
+        const url = captureSnapshot();
         if (!url) {
           alert('Snapshot failed - make sure the 3D scene is visible.');
           return;
@@ -195,7 +294,7 @@ export default function useProjectSave({
         link.click();
       });
     });
-  }, [getCanvas, projectName]);
+  }, [captureSnapshot, projectName]);
 
   const exportJSON = useCallback(() => {
     const scene = getSceneData();
@@ -240,11 +339,15 @@ export default function useProjectSave({
     input.click();
   }, [setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
-  const loadProject = useCallback(async (projectId) => {
+  const loadProject = useCallback(async (projectId, options = {}) => {
+    const startMutationVersion = getLocalMutationVersion();
     const endpoint = getAccessToken()
       ? `/api/projects/me/open/${projectId}`
       : `/api/projects/${projectId}`;
     const { data } = await axiosClient.get(endpoint);
+    if (options.skipIfLocalChanged && getLocalMutationVersion() !== startMutationVersion) {
+      return data;
+    }
     const sceneData = data.scene_data || data.scene;
     if (sceneData) {
       applySceneData(sceneData, {
@@ -261,12 +364,16 @@ export default function useProjectSave({
       setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
     }
     return data;
-  }, [setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
+  }, [getLocalMutationVersion, setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
   const loadLatestProject = useCallback(async () => {
     if (!getAccessToken() || currentProjectId) return null;
+    const startMutationVersion = getLocalMutationVersion();
     try {
       const { data } = await axiosClient.get('/api/projects/me/latest');
+      if (getLocalMutationVersion() !== startMutationVersion) {
+        return data;
+      }
       const sceneData = data.scene_data || data.scene;
       if (!sceneData) return null;
       applySceneData(sceneData, {
@@ -288,6 +395,7 @@ export default function useProjectSave({
     }
   }, [
     currentProjectId,
+    getLocalMutationVersion,
     lightingState,
     setCeilingMaterial,
     setCurrentProjectId,
@@ -424,7 +532,10 @@ export default function useProjectSave({
     if (skipInitialLatestLoad) return;
     if (hasAttemptedInitialLoad.current) return;
     hasAttemptedInitialLoad.current = true;
-    loadLatestProject().catch(() => {});
+    const timeoutId = window.setTimeout(() => {
+      loadLatestProject().catch(() => {});
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [loadLatestProject, skipInitialLatestLoad]);
 
   return {

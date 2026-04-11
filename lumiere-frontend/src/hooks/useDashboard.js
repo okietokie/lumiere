@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { projectsAPI, activityAPI, storageAPI } from '../utils/api';
+import { projectsAPI, storageAPI } from '../utils/api';
 
 /**
  * useDashboard — central data hook for the Dashboard page.
@@ -18,24 +18,31 @@ const useDashboard = () => {
     setLoading(true);
     setError(null);
     try {
-      const [projectsRes, activityRes, storageRes] = await Promise.all([
-        projectsAPI.getAll(),
-        activityAPI.getRecent(),
-        storageAPI.getUsage(),
-      ]);
+      const projectsRes = await projectsAPI.getAll();
+      const projects = projectsRes.data ?? [];
 
-      setProjects(projectsRes.data ?? []);
+      setProjects(projects);
       setStats({
-        projects: projectsRes.data?.length ?? 0,
+        projects: projects.length,
         rooms:    projectsRes.total_rooms ?? 0,
         assets:   projectsRes.total_assets ?? 0,
       });
       setLastProject(projectsRes.last_modified ?? null);
-      setActivities(activityRes.data ?? []);
-      setStorage(storageRes.data ?? null);
+      setActivities(projects.slice(0, 8).map((project) => ({
+        id: project.id ?? project._id,
+        type: 'edited',
+        action: 'Updated project',
+        target: project.name,
+        project_name: project.name,
+        timestamp: project.last_modified,
+      })));
+      setLoading(false);
+
+      storageAPI.getUsage()
+        .then((storageRes) => setStorage(storageRes.data ?? null))
+        .catch(() => setStorage(null));
     } catch (err) {
       setError(err.message ?? 'Failed to load dashboard data.');
-    } finally {
       setLoading(false);
     }
   }, []);

@@ -9,6 +9,7 @@ import BasicWindow from '../scene/windows/BasicWindow';
 
 const FADE_START = 1.8;
 const FADE_END   = 0.5;
+const WALL_EDGE_LINK_COLOR = '#ff9f1c';
 const _ray   = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _hit   = new THREE.Vector3();
@@ -17,11 +18,14 @@ const InteractiveWall = React.forwardRef(({
   wall, isSelected, onSelect, updateWall, setOrbitEnabled, cameraMode,
   selectedOpening, openingPreview, activeOpeningTool,
   onOpeningPreviewMove, onOpeningCommit, onOpeningSelect, updateOpening,
+  edgeLinkStart, onEdgeLinkPoint,
 }, ref) => {
   const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
+  const [hoveredEdge, setHoveredEdge] = useState(null);
   const dragState = useRef(null);   // { type, origin, initStart, initEnd }
   const openingDragState = useRef(null);
+  const openingCommittedOnPointerDown = useRef(false);
   const meshRef   = useRef();
 
   const {
@@ -151,11 +155,53 @@ const InteractiveWall = React.forwardRef(({
     const maxOffset = Math.max(length - 0.2 - halfWidth, minOffset);
     return THREE.MathUtils.clamp(offset, minOffset, maxOffset);
   }, [length]);
+
+  const releaseOrbitOnPointerUp = useCallback(() => {
+    setOrbitEnabled(true);
+  }, [setOrbitEnabled]);
+
+  const pauseOrbitUntilPointerUp = useCallback(() => {
+    setOrbitEnabled(false);
+    window.addEventListener('pointerup', releaseOrbitOnPointerUp, { once: true });
+    window.addEventListener('pointercancel', releaseOrbitOnPointerUp, { once: true });
+  }, [releaseOrbitOnPointerUp, setOrbitEnabled]);
+
+  const handleWallPointerMove = useCallback((e) => {
+    if (!activeOpeningTool) return;
+    e.stopPropagation();
+    onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
+  }, [activeOpeningTool, onOpeningPreviewMove]);
+
+  const handleWallClick = useCallback((e) => {
+    e.stopPropagation();
+    if (activeOpeningTool) {
+      if (openingCommittedOnPointerDown.current) {
+        openingCommittedOnPointerDown.current = false;
+        return;
+      }
+      onOpeningCommit?.([e.point.x, e.point.z]);
+      return;
+    }
+    onSelect?.();
+  }, [activeOpeningTool, onOpeningCommit, onSelect]);
+
+  const handleWallPointerDown = useCallback((e) => {
+    e.stopPropagation();
+    pauseOrbitUntilPointerUp();
+    if (activeOpeningTool) {
+      onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
+      openingCommittedOnPointerDown.current = Boolean(onOpeningCommit?.([e.point.x, e.point.z]));
+      return;
+    }
+    openingCommittedOnPointerDown.current = false;
+    onSelect?.();
+  }, [activeOpeningTool, onOpeningCommit, onOpeningPreviewMove, onSelect, pauseOrbitUntilPointerUp]);
+
   const startDrag = useCallback((e, dragType) => {
     e.stopPropagation();
     // Capture pointer so drag continues even outside the mesh
     if (e.pointerId != null) {
-      try { gl.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+      try { gl.domElement.setPointerCapture(e.pointerId); } catch { /* pointer capture can fail after gesture cancellation */ }
     }
     setOrbitEnabled(false);
 
@@ -210,7 +256,7 @@ const InteractiveWall = React.forwardRef(({
       dragState.current = null;
       setOrbitEnabled(true);
       if (ev?.pointerId != null) {
-        try { gl.domElement.releasePointerCapture(ev.pointerId); } catch (_) {}
+        try { gl.domElement.releasePointerCapture(ev.pointerId); } catch { /* pointer capture can already be released */ }
       }
       gl.domElement.removeEventListener('pointermove', onMove);
       gl.domElement.removeEventListener('pointerup',   onUp);
@@ -225,7 +271,7 @@ const InteractiveWall = React.forwardRef(({
   const startOpeningDrag = useCallback((e, openingType, opening, handle) => {
     e.stopPropagation();
     if (e.pointerId != null) {
-      try { gl.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+      try { gl.domElement.setPointerCapture(e.pointerId); } catch { /* pointer capture can fail after gesture cancellation */ }
     }
     setOrbitEnabled(false);
 
@@ -279,7 +325,7 @@ const InteractiveWall = React.forwardRef(({
       openingDragState.current = null;
       setOrbitEnabled(true);
       if (ev?.pointerId != null) {
-        try { gl.domElement.releasePointerCapture(ev.pointerId); } catch (_) {}
+        try { gl.domElement.releasePointerCapture(ev.pointerId); } catch { /* pointer capture can already be released */ }
       }
       gl.domElement.removeEventListener('pointermove', onMove);
       gl.domElement.removeEventListener('pointerup', onUp);
@@ -295,6 +341,47 @@ const InteractiveWall = React.forwardRef(({
     ? { transparent: true, opacity: 0.15, depthWrite: false }
     : { transparent: false, opacity: 1,   depthWrite: true  };
 
+  const isLinkStartEdge = useCallback((edge) => (
+    edgeLinkStart?.wallId === id && edgeLinkStart?.edge === edge
+  ), [edgeLinkStart, id]);
+
+  const renderEdgeLinkHandle = (edge) => {
+    const isStartEdge = edge === 'start';
+    const active = isLinkStartEdge(edge);
+    const hoveredThisEdge = hoveredEdge === edge;
+
+    return (
+      <mesh
+        key={`edge-link-${edge}`}
+        position={[isStartEdge ? -length / 2 : length / 2, 0, 0]}
+        renderOrder={8}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onEdgeLinkPoint?.(wall, edge, e);
+        }}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHoveredEdge(edge);
+          document.body.style.cursor = 'crosshair';
+        }}
+        onPointerOut={(e) => {
+          e.stopPropagation();
+          setHoveredEdge((current) => (current === edge ? null : current));
+          document.body.style.cursor = 'auto';
+        }}
+      >
+        <boxGeometry args={[0.18, Math.max(height, 0.4), Math.max(safeThickness + 0.1, 0.24)]} />
+        <meshBasicMaterial
+          color={WALL_EDGE_LINK_COLOR}
+          transparent
+          opacity={active ? 0.92 : hoveredThisEdge ? 0.72 : 0.015}
+          depthTest={!active && !hoveredThisEdge}
+          depthWrite={false}
+        />
+      </mesh>
+    );
+  };
+
   const renderOpening = (openingType, opening, preview = false) => {
     const offset = THREE.MathUtils.clamp(opening.offsetAlongWall ?? length / 2, 0, length);
     const localX = offset - (length / 2);
@@ -303,18 +390,47 @@ const InteractiveWall = React.forwardRef(({
     const openingHeight = Math.min(opening.height ?? (isWindow ? 1.2 : 2.1), Math.max(height - 0.2, 0.6));
     const bottomOffset = Math.min(opening.bottomOffset ?? (isWindow ? 0.9 : 0), Math.max(height - openingHeight - 0.1, 0));
     const centerY = bottomOffset + (openingHeight / 2);
+    const localBottomY = bottomOffset - (height / 2);
+    const localCenterY = centerY - (height / 2);
     const selected = !preview && selectedOpening?.id === opening.id && selectedOpening?.type === openingType;
     const tint = preview
       ? (opening.valid ? COLORS.action : '#ff8b7c')
       : selected ? COLORS.action : COLORS.accent;
-    const fillOpacity = preview ? (opening.valid ? 0.24 : 0.18) : selected ? 0.3 : 0.16;
-    const panelOpacity = preview ? (opening.valid ? 0.88 : 0.72) : selected ? 0.92 : 0.58;
     const frameDepth = Math.max(safeThickness + 0.02, 0.12);
+    if (preview) {
+      return (
+        <group key={`${openingType}-${opening.id}-preview`}>
+          <mesh
+            position={[localX, localCenterY, (frameDepth / 2) + 0.04]}
+            renderOrder={6}
+            raycast={() => null}
+          >
+            <planeGeometry args={[Math.max(openingWidth + 0.08, 0.24), Math.max(openingHeight + 0.08, 0.32)]} />
+            <meshBasicMaterial
+              color={tint}
+              transparent
+              opacity={opening.valid ? 0.18 : 0.24}
+              depthWrite={false}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          <lineSegments
+            position={[localX, localCenterY, (frameDepth / 2) + 0.045]}
+            renderOrder={7}
+            raycast={() => null}
+          >
+            <edgesGeometry args={[new THREE.BoxGeometry(Math.max(openingWidth + 0.08, 0.24), Math.max(openingHeight + 0.08, 0.32), 0.01)]} />
+            <lineBasicMaterial color={tint} transparent opacity={0.9} depthTest={false} />
+          </lineSegments>
+        </group>
+      );
+    }
+
     if (openingType === 'door') {
       return (
         <group key={`${openingType}-${opening.id}`}>
           <BasicDoor
-            position={[localX, bottomOffset, 0]}
+            position={[localX, localBottomY, 0]}
             width={openingWidth}
             height={openingHeight}
             doorStyle={opening.doorStyle ?? 'hinged'}
@@ -339,45 +455,39 @@ const InteractiveWall = React.forwardRef(({
               onOpeningSelect?.({ id: opening.id, type: openingType });
             }}
           />
-          {preview && (
-            <mesh position={[localX, centerY, (frameDepth / 2) + 0.04]} renderOrder={6}>
-              <planeGeometry args={[Math.max(openingWidth + 0.08, 0.24), Math.max(openingHeight + 0.08, 0.32)]} />
-              <meshBasicMaterial color={tint} transparent opacity={opening.valid ? 0.12 : 0.18} />
-            </mesh>
-          )}
-          {!preview && selected && (
+          {selected && (
             <>
-              <mesh position={[localX, centerY, (frameDepth / 2) + 0.05]} renderOrder={6}>
+              <mesh position={[localX, localCenterY, (frameDepth / 2) + 0.05]} renderOrder={6}>
                 <ringGeometry args={[Math.max(openingWidth / 2, 0.32), Math.max(openingWidth / 2, 0.32) + 0.02, 48]} />
                 <meshBasicMaterial color={COLORS.action} transparent opacity={0.65} side={THREE.DoubleSide} />
               </mesh>
-              <mesh position={[0, centerY, (frameDepth / 2) + 0.025]} renderOrder={6}>
+              <mesh position={[0, localCenterY, (frameDepth / 2) + 0.025]} renderOrder={6}>
                 <planeGeometry args={[length, 0.015]} />
                 <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
               </mesh>
               <mesh
-                position={[localX, centerY, (frameDepth / 2) + 0.08]}
+                position={[localX, localCenterY, (frameDepth / 2) + 0.08]}
                 onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
               >
                 <coneGeometry args={[0.08, 0.18, 18]} />
                 <meshBasicMaterial color={COLORS.action} depthTest={false} />
               </mesh>
               <mesh
-                position={[localX, centerY, (frameDepth / 2) + 0.17]}
+                position={[localX, localCenterY, (frameDepth / 2) + 0.17]}
                 rotation={[Math.PI / 2, 0, 0]}
               >
                 <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
                 <meshBasicMaterial color={COLORS.action} depthTest={false} />
               </mesh>
               <mesh
-                position={[localX - (openingWidth / 2), centerY, (frameDepth / 2) + 0.08]}
+                position={[localX - (openingWidth / 2), localCenterY, (frameDepth / 2) + 0.08]}
                 onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'start')}
               >
                 <boxGeometry args={[0.09, 0.09, 0.09]} />
                 <meshBasicMaterial color="#ffd86c" depthTest={false} />
               </mesh>
               <mesh
-                position={[localX + (openingWidth / 2), centerY, (frameDepth / 2) + 0.08]}
+                position={[localX + (openingWidth / 2), localCenterY, (frameDepth / 2) + 0.08]}
                 onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'end')}
               >
                 <boxGeometry args={[0.09, 0.09, 0.09]} />
@@ -392,7 +502,7 @@ const InteractiveWall = React.forwardRef(({
     return (
       <group key={`${openingType}-${opening.id}`}>
         <BasicWindow
-          position={[localX, bottomOffset, 0]}
+          position={[localX, localBottomY, 0]}
           width={openingWidth}
           height={openingHeight}
           depth={Math.max(safeThickness * 0.5, 0.03)}
@@ -411,45 +521,39 @@ const InteractiveWall = React.forwardRef(({
             onOpeningSelect?.({ id: opening.id, type: openingType });
           }}
         />
-        {preview && (
-          <mesh position={[localX, centerY, (frameDepth / 2) + 0.03]} renderOrder={5}>
-            <planeGeometry args={[Math.max(openingWidth + 0.08, 0.24), Math.max(openingHeight + 0.08, 0.32)]} />
-            <meshBasicMaterial color={tint} transparent opacity={opening.valid ? 0.12 : 0.18} />
-          </mesh>
-        )}
-        {!preview && selected && (
+        {selected && (
           <>
-            <mesh position={[localX, centerY, (safeThickness / 2) + 0.025]} renderOrder={6}>
+            <mesh position={[localX, localCenterY, (safeThickness / 2) + 0.025]} renderOrder={6}>
               <ringGeometry args={[Math.max(openingWidth / 2, 0.32), Math.max(openingWidth / 2, 0.32) + 0.02, 48]} />
               <meshBasicMaterial color={COLORS.action} transparent opacity={0.65} side={THREE.DoubleSide} />
             </mesh>
-            <mesh position={[0, centerY, (safeThickness / 2) + 0.018]} renderOrder={6}>
+            <mesh position={[0, localCenterY, (safeThickness / 2) + 0.018]} renderOrder={6}>
               <planeGeometry args={[length, 0.015]} />
               <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
             </mesh>
             <mesh
-              position={[localX, centerY, (safeThickness / 2) + 0.04]}
+              position={[localX, localCenterY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
             >
               <coneGeometry args={[0.08, 0.18, 18]} />
               <meshBasicMaterial color={COLORS.action} depthTest={false} />
             </mesh>
             <mesh
-              position={[localX, centerY, (safeThickness / 2) + 0.13]}
+              position={[localX, localCenterY, (safeThickness / 2) + 0.13]}
               rotation={[Math.PI / 2, 0, 0]}
             >
               <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
               <meshBasicMaterial color={COLORS.action} depthTest={false} />
             </mesh>
             <mesh
-              position={[localX - (openingWidth / 2), centerY, (safeThickness / 2) + 0.04]}
+              position={[localX - (openingWidth / 2), localCenterY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'start')}
             >
               <boxGeometry args={[0.09, 0.09, 0.09]} />
               <meshBasicMaterial color="#ffd86c" depthTest={false} />
             </mesh>
             <mesh
-              position={[localX + (openingWidth / 2), centerY, (safeThickness / 2) + 0.04]}
+              position={[localX + (openingWidth / 2), localCenterY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'end')}
             >
               <boxGeometry args={[0.09, 0.09, 0.09]} />
@@ -462,39 +566,23 @@ const InteractiveWall = React.forwardRef(({
   };
 
   return (
-    <group>
-      <group position={[centerX, 0, centerZ]} rotation={[0, -angle, 0]}>
+    <group
+      ref={ref}
+      position={[centerX, height / 2, centerZ]}
+      rotation={[0, -angle, 0]}
+    >
+      <group>
         <mesh
-          ref={(r) => {
-            meshRef.current = r;
-            if (typeof ref === 'function') ref(r);
-            else if (ref) ref.current = r;
-          }}
-          position={[0, height / 2, 0]}
-          castShadow={!ghost}
+          ref={meshRef}
+          geometry={wallShapeGeometry}
+          castShadow
           receiveShadow
-          onClick={(e)        => {
-            e.stopPropagation();
-            if (activeOpeningTool) {
-              onSelect();
-              onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
-              onOpeningCommit?.();
-              return;
-            }
-            onSelect();
-          }}
-          onPointerDown={(e)  => { if (isSelected && !activeOpeningTool) startDrag(e, 'body'); }}
-          onPointerMove={(e)  => {
-            if (!activeOpeningTool) return;
-            e.stopPropagation();
-            onSelect();
-            onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
-          }}
-          onPointerOver={(e)  => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = activeOpeningTool ? 'copy' : isSelected ? 'grab' : 'pointer'; }}
-          onPointerOut={()    => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
+          onClick={handleWallClick}
+          onPointerDown={handleWallPointerDown}
+          onPointerMove={handleWallPointerMove}
+          onPointerOver={() => setHovered(true)}
+          onPointerOut={() => setHovered(false)}
         >
-          <primitive object={wallShapeGeometry} attach="geometry" />
-
           {isSelected || hovered ? (
             <meshStandardMaterial
               color={isSelected ? COLORS.action : COLORS.accent}
@@ -511,19 +599,25 @@ const InteractiveWall = React.forwardRef(({
           )}
         </mesh>
 
-        {doors.map((door) => renderOpening('door', door))}
-        {windows.map((opening) => renderOpening('window', opening))}
+        {doors.map((door) => renderOpening("door", door))}
+        {windows.map((opening) => renderOpening("window", opening))}
         {openingPreview && renderOpening(activeOpeningTool ?? openingPreview.type, openingPreview, true)}
+        {!activeOpeningTool && (
+          <>
+            {renderEdgeLinkHandle('start')}
+            {renderEdgeLinkHandle('end')}
+          </>
+        )}
       </group>
 
       {isSelected && (
         <>
           {/* Start handle */}
           <mesh
-            position={[start[0], height / 2, start[1]]}
-            onPointerDown={(e) => startDrag(e, 'start')}
-            onPointerOver={() => { document.body.style.cursor = 'ew-resize'; }}
-            onPointerOut={()  => { document.body.style.cursor = 'auto'; }}
+            position={[-length / 2, 0, 0]}
+            onPointerDown={(e) => startDrag(e, "start")}
+            onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+            onPointerOut={() => { document.body.style.cursor = "auto"; }}
           >
             <sphereGeometry args={[0.18, 16, 16]} />
             <meshBasicMaterial color="#FFD700" depthTest={false} />
@@ -531,35 +625,40 @@ const InteractiveWall = React.forwardRef(({
 
           {/* End handle */}
           <mesh
-            position={[end[0], height / 2, end[1]]}
-            onPointerDown={(e) => startDrag(e, 'end')}
-            onPointerOver={() => { document.body.style.cursor = 'ew-resize'; }}
-            onPointerOut={()  => { document.body.style.cursor = 'auto'; }}
+            position={[length / 2, 0, 0]}
+            onPointerDown={(e) => startDrag(e, "end")}
+            onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+            onPointerOut={() => { document.body.style.cursor = "auto"; }}
           >
             <sphereGeometry args={[0.18, 16, 16]} />
             <meshBasicMaterial color="#FFD700" depthTest={false} />
           </mesh>
 
           {/* Centre dot */}
-          <mesh position={[centerX, height / 2, centerZ]}>
+          <mesh
+            position={[0, 0, 0]}
+            onPointerDown={(e) => startDrag(e, "body")}
+            onPointerOver={() => { document.body.style.cursor = "grab"; }}
+            onPointerOut={() => { document.body.style.cursor = "auto"; }}
+          >
             <sphereGeometry args={[0.1, 12, 12]} />
             <meshBasicMaterial color={COLORS.action} depthTest={false} />
           </mesh>
 
           {/* Length label */}
           <Html
-            position={[centerX, height + 0.4, centerZ]}
+            position={[0, (height / 2) + 0.4, 0]}
             center
             distanceFactor={8}
-            style={{ pointerEvents: 'none' }}
+            style={{ pointerEvents: "none" }}
           >
             <div style={{
-              background: 'rgba(0,0,0,0.72)', color: '#FFD700',
-              fontSize: 12, fontFamily: 'Inter, sans-serif', fontWeight: 600,
-              padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap',
-              border: '1px solid rgba(255,215,0,0.4)', backdropFilter: 'blur(4px)',
+              background: "rgba(0,0,0,0.72)", color: "#FFD700",
+              fontSize: 12, fontFamily: "Inter, sans-serif", fontWeight: 600,
+              padding: "3px 8px", borderRadius: 6, whiteSpace: "nowrap",
+              border: "1px solid rgba(255,215,0,0.4)", backdropFilter: "blur(4px)",
             }}>
-              {length.toFixed(2)} m {ghost ? '👁' : ''}
+              {length.toFixed(2)} m {ghost ? "👁" : ""}
             </div>
           </Html>
         </>

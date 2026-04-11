@@ -123,6 +123,10 @@ export default function PendingRoomNameInput({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
+              if (showDimensions) {
+                onSubmit?.();
+                return;
+              }
               onNameEnter?.();
             }
           }}

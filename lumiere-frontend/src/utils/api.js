@@ -43,6 +43,20 @@ const normalizeProject = (project) => {
   };
 };
 
+const countProjectAssets = (project) => {
+  const modelAssets = project?.model_assets ?? {};
+  const scene = project?.scene_data ?? project?.scene ?? {};
+  const uploadedAssets = Object.entries(modelAssets).filter(
+    ([key, value]) => key.endsWith("_url") && Boolean(value)
+  ).length;
+  const sceneAssets =
+    (Array.isArray(scene.assets) ? scene.assets.length : 0) +
+    (Array.isArray(scene.furniture) ? scene.furniture.length : 0) +
+    (Array.isArray(scene.materials) ? scene.materials.length : 0);
+
+  return uploadedAssets + sceneAssets;
+};
+
 const listProjects = async () => {
   const data = await request("GET", "/projects/list");
   const projects = Array.isArray(data) ? data.map(normalizeProject) : [];
@@ -50,7 +64,7 @@ const listProjects = async () => {
   return {
     data: projects,
     total_rooms: projects.reduce((sum, project) => sum + (project.rooms_count ?? 0), 0),
-    total_assets: 0,
+    total_assets: projects.reduce((sum, project) => sum + countProjectAssets(project), 0),
     last_modified: projects[0] ?? null,
   };
 };

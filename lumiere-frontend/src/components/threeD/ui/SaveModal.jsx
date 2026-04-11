@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Modal, Input, Switch, Segmented } from 'antd';
+import { useEffect, useState, useRef } from 'react';
+import { Modal, Input, Switch } from 'antd';
 import {
   SaveOutlined, CameraOutlined, ExportOutlined,
   ImportOutlined, ClockCircleOutlined, CheckCircleOutlined,
@@ -44,6 +44,7 @@ const STATUS_BG = {
 
 export default function SaveModal({
   open, onClose,
+  currentProjectId,
   projectName, setProjectName,
   saveStatus, saveProject,
   downloadSnapshot, exportJSON, importJSON,
@@ -53,21 +54,40 @@ export default function SaveModal({
   recorderProps,
 }) {
   const [localName, setLocalName] = useState(projectName);
-  const [snapshotMode, setSnapshotMode] = useState('current');
+  const [renameChoiceOpen, setRenameChoiceOpen] = useState(false);
   const btnRef = useRef(null);
   const glbInputRef = useRef(null);
   const usdzInputRef = useRef(null);
 
-  const prevOpen = useRef(false);
-  if (open && !prevOpen.current) setLocalName(projectName);
-  prevOpen.current = open;
+  useEffect(() => {
+    if (open) setLocalName(projectName || 'Untitled Room');
+    else setRenameChoiceOpen(false);
+  }, [open, projectName]);
 
-  const handleSave = async () => {
+  const existingName = (projectName || 'Untitled Room').trim();
+  const nextName = localName.trim() || 'Untitled Room';
+  const isRenamingSavedProject = Boolean(currentProjectId) && nextName !== existingName;
+
+  const performSave = async ({ createNew = false } = {}) => {
     if (btnRef.current) {
       gsap.fromTo(btnRef.current, { scale: 0.95 }, { scale: 1, duration: 0.22, ease: 'back.out(2)' });
     }
-    await saveProject(localName.trim() || 'Untitled Room', true);
-    setProjectName(localName.trim() || 'Untitled Room');
+    try {
+      await saveProject(nextName, true, { createNew });
+      setProjectName(nextName);
+      setRenameChoiceOpen(false);
+    } catch (error) {
+      alert(error?.response?.data?.detail || error?.message || 'Failed to save project.');
+    }
+  };
+
+  const handleSave = async () => {
+    if (isRenamingSavedProject) {
+      setRenameChoiceOpen(true);
+      return;
+    }
+
+    await performSave();
   };
 
   const handleAssetPick = async (kind, event) => {
@@ -126,17 +146,6 @@ export default function SaveModal({
           border-color: ${C.action} !important;
           box-shadow: 0 0 0 2px ${C.action}25 !important;
         }
-        .lumiere-save-modal .ant-segmented {
-          background: ${C.bgDeep} !important;
-          border-radius: 8px !important;
-          padding: 3px !important;
-        }
-        .lumiere-save-modal .ant-segmented-item-label { color: ${C.subtext} !important; font-size: 12px; }
-        .lumiere-save-modal .ant-segmented-item-selected .ant-segmented-item-label { color: ${C.text} !important; }
-        .lumiere-save-modal .ant-segmented-item-selected {
-          background: ${C.bg} !important;
-          border-radius: 6px !important;
-        }
         .lumiere-save-modal .ant-switch { background: ${COLORS.accent} !important; }
         .lumiere-save-modal .ant-switch-checked { background: ${C.action} !important; }
         .lumiere-save-modal .ant-modal-close { color: ${C.subtext} !important; }
@@ -146,6 +155,11 @@ export default function SaveModal({
       <div className="lumiere-save-modal" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <div>
           <Label>Project Name</Label>
+          {currentProjectId && (
+            <div style={{ color: C.subtext, fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+              Saved as {existingName}
+            </div>
+          )}
           <Input
             value={localName}
             onChange={(e) => setLocalName(e.target.value)}
@@ -187,18 +201,7 @@ export default function SaveModal({
 
         <div>
           <Label>Snapshot</Label>
-          <Segmented
-            options={[
-              { label: 'Current', value: 'current' },
-              { label: 'Top Down', value: 'top' },
-              { label: 'Front', value: 'front' },
-            ]}
-            value={snapshotMode}
-            onChange={setSnapshotMode}
-            block
-            style={{ marginBottom: 10 }}
-          />
-          <GhostButton icon={<CameraOutlined />} onClick={() => downloadSnapshot(snapshotMode)}>
+          <GhostButton icon={<CameraOutlined />} onClick={downloadSnapshot}>
             Download Snapshot (.png)
           </GhostButton>
         </div>
@@ -308,6 +311,39 @@ export default function SaveModal({
           <Switch checked={autosaveEnabled} onChange={setAutosaveEnabled} />
         </div>
       </div>
+
+      <Modal
+        open={renameChoiceOpen}
+        onCancel={() => setRenameChoiceOpen(false)}
+        footer={null}
+        width={420}
+        title="Save renamed project"
+        styles={{
+          content: {
+            background: C.bg,
+            border: `1px solid ${C.border}`,
+            borderRadius: 16,
+          },
+          header: {
+            background: C.bg,
+            borderBottom: `1px solid ${C.border}`,
+          },
+          body: { paddingTop: 16 },
+          mask: { backdropFilter: 'blur(6px)', background: 'rgba(0,0,0,0.55)' },
+        }}
+      >
+        <div style={{ color: C.text, fontSize: 13, lineHeight: 1.65, marginBottom: 16 }}>
+          This project is already saved as <strong>{existingName}</strong>. Save it as <strong>{nextName}</strong> by replacing the old project, or create a separate project with the new name.
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <ChoiceButton onClick={() => performSave({ createNew: false })} disabled={saveStatus === 'saving'}>
+            Replace old project
+          </ChoiceButton>
+          <ChoiceButton onClick={() => performSave({ createNew: true })} disabled={saveStatus === 'saving'} primary>
+            Create new project
+          </ChoiceButton>
+        </div>
+      </Modal>
     </Modal>
   );
 }
@@ -362,6 +398,30 @@ function GhostButton({ icon, onClick, children }) {
       }}
     >
       {icon}
+      {children}
+    </button>
+  );
+}
+
+function ChoiceButton({ onClick, disabled, primary = false, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        flex: 1,
+        minHeight: 40,
+        borderRadius: 8,
+        border: `1px solid ${primary ? COLORS.action : `${COLORS.secondary}60`}`,
+        background: primary ? COLORS.action : 'transparent',
+        color: primary ? '#1A1008' : COLORS.text,
+        fontSize: 12,
+        fontWeight: 600,
+        fontFamily: 'Inter, sans-serif',
+        cursor: disabled ? 'wait' : 'pointer',
+      }}
+    >
       {children}
     </button>
   );

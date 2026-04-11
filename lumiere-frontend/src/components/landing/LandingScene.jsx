@@ -293,8 +293,6 @@ export default function LandingScene({ pointer, progress = 0, mobile = false }) 
   return (
     <div className="lm-scene-shell">
       <Canvas dpr={[1, 1.6]} shadows>
-        <color attach="background" args={["#17100d"]} />
-        <fog attach="fog" args={["#17100d", 8, 18]} />
         <PerspectiveCamera makeDefault position={[0, 2.38, 8.4]} fov={32} />
         <CameraRig pointer={pointer} progress={progress} />
 

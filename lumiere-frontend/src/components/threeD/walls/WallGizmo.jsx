@@ -1,16 +1,16 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TransformControls } from '@react-three/drei';
 
 export default function WallGizmo({
-  selectedWall, wallRef, gizmoMode, updateWall, setOrbitEnabled,
+  selectedWall, wallRefs, gizmoMode, updateWall, setOrbitEnabled,
 }) {
-  if (!selectedWall || !wallRef?.current) return null;
+  if (!selectedWall) return null;
 
   return (
     <WallGizmoInner
       key={selectedWall.id}
       selectedWall={selectedWall}
-      wallRef={wallRef}
+      wallRefs={wallRefs}
       gizmoMode={gizmoMode}
       updateWall={updateWall}
       setOrbitEnabled={setOrbitEnabled}
@@ -18,13 +18,37 @@ export default function WallGizmo({
   );
 }
 
-function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbitEnabled }) {
+function WallGizmoInner({ selectedWall, wallRefs, gizmoMode, updateWall, setOrbitEnabled }) {
   const snapshotRef = useRef(null);
   const controlsRef = useRef(null);
   const draggingRef = useRef(false);
   const liveHeightRef = useRef(null);
+  const [target, setTarget] = useState(null);
 
-  const getTarget = () => wallRef.current?.parent ?? wallRef.current;
+  useEffect(() => {
+    let frameId = null;
+    let cancelled = false;
+
+    const syncTarget = () => {
+      if (cancelled) return;
+      const obj = wallRefs.current[selectedWall.id];
+      if (obj?.parent) {
+        setTarget((current) => (current === obj ? current : obj));
+        return;
+      }
+      setTarget((current) => (current === null ? current : null));
+      frameId = window.requestAnimationFrame(syncTarget);
+    };
+
+    frameId = window.requestAnimationFrame(syncTarget);
+
+    return () => {
+      cancelled = true;
+      if (frameId != null) window.cancelAnimationFrame(frameId);
+    };
+  }, [selectedWall.id, wallRefs]);
+
+  const getTarget = () => target;
 
   useEffect(() => {
     if (controlsRef.current) controlsRef.current.setMode(gizmoMode);
@@ -41,7 +65,7 @@ function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbit
     const centerZ = (start[1] + end[1]) / 2;
     const angle = Math.atan2(end[1] - start[1], end[0] - start[0]);
 
-    obj.position.set(centerX, 0, centerZ);
+    obj.position.set(centerX, selectedWall.height / 2, centerZ);
     obj.rotation.set(0, -angle, 0);
     obj.scale.set(1, 1, 1);
   });
@@ -65,7 +89,7 @@ function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbit
     };
     liveHeightRef.current = height;
 
-    obj.position.set(centerX, 0, centerZ);
+    obj.position.set(centerX, height / 2, centerZ);
     obj.rotation.set(0, -angle, 0);
     obj.scale.set(1, 1, 1);
   };
@@ -109,7 +133,7 @@ function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbit
     const newStart = [cx - halfX, cz - halfZ];
     const newEnd = [cx + halfX, cz + halfZ];
 
-    obj.position.set(cx, 0, cz);
+    obj.position.set(cx, newHeight / 2, cz);
     obj.rotation.set(0, -newAngle, 0);
     obj.scale.set(1, 1, 1);
 
@@ -124,7 +148,6 @@ function WallGizmoInner({ selectedWall, wallRef, gizmoMode, updateWall, setOrbit
     liveHeightRef.current = null;
   };
 
-  const target = getTarget();
   if (!target) return null;
 
   return (

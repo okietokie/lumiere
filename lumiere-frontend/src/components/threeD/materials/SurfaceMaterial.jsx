@@ -200,8 +200,8 @@ function buildTexture(textureId, color) {
     default:                return generatePlain(color, 8);
   }
 }
-export default function SurfaceMaterial({ mat, repeat = [4, 4], transparent = false, opacity = 1, depthWrite = true }) {
-    const texture = useMemo(() => {
+export default function SurfaceMaterial({ mat, repeat = [4, 4], transparent = false, opacity = 1, depthWrite = true, side = THREE.FrontSide }) {
+  const texture = useMemo(() => {
     if (!mat?.textureId) return null;
     try {
       const canvas = buildTexture(mat.textureId, mat.color);
@@ -225,6 +225,7 @@ export default function SurfaceMaterial({ mat, repeat = [4, 4], transparent = fa
       transparent={transparent}
       opacity={opacity}
       depthWrite={depthWrite}
+      side={side}
       envMapIntensity={0}
     />
   );

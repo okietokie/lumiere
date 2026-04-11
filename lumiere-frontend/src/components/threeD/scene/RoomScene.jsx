@@ -1,4 +1,4 @@
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport, Html, Text } from "@react-three/drei";
 import { useState, useEffect, useRef, Suspense, useCallback, useMemo } from "react";
 import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Slider } from "antd";
@@ -25,6 +25,7 @@ import {
   LogoutOutlined,
   CheckOutlined,
   CloseOutlined,
+  LoadingOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
@@ -33,8 +34,6 @@ import {
   generateLayoutWalls,
   getLayoutBounds,
   ROOM_DIRECTION_ORDER,
-  addRoomAdjacent,
-  hasRoomOverlap,
 } from "../../../utils/roomLayout";
 import {
   createRoomEntity,
@@ -53,7 +52,6 @@ import useLighting  from "../../../hooks/useLighting";
 import FirstPersonControls from "../camera/FirstPersonControls";
 import WalkHUD             from "../camera/WalkHUD";
 import InteractiveWall from "../walls/InteractiveWall";
-import WallGizmo       from "../walls/WallGizmo";
 import WallEditorPanel from "../walls/WallEditor";
 import FurnitureItem   from "../furniture/FurnitureItem";
 import FurnitureGizmo  from "../furniture/FurnitureGizmo";
@@ -77,7 +75,7 @@ import RevealActionButton from "./RevealActionButton";
 import useProjectSave      from "../../../hooks/useProjectSave";
 import RoomCreationPanel from "../rooms/RoomCreationPanel";
 import PendingRoomNameInput from "../rooms/PendingRoomNameInput";
-import useRoomCreation from "../rooms/useRoomCreation";
+import useRoomCreation, { buildAdjacentRoomFromBoundary } from "../rooms/useRoomCreation";
 import SpaceDashboardRoundedIcon from "@mui/icons-material/SpaceDashboardRounded";
 import KeyboardDoubleArrowLeftRoundedIcon from "@mui/icons-material/KeyboardDoubleArrowLeftRounded";
 import KeyboardDoubleArrowRightRoundedIcon from "@mui/icons-material/KeyboardDoubleArrowRightRounded";
@@ -94,17 +92,20 @@ import FolderCopyRoundedIcon from "@mui/icons-material/FolderCopyRounded";
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
 import { clearAuthSession } from "../../../utils/authStorage";
+import { saveLive3DSceneSnapshot } from "../../../utils/editorSceneBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 
 const CAMERA_PRESETS = {
-  perspective: { position: [7, 4, 9],    target: [0, 1.5, 0] },
-  top:         { position: [0, 10, 0.1], target: [0, 1.5, 0] },
-  front:       { position: [0, 1.5, 10], target: [0, 1.5, 0] },
-  side:        { position: [10, 1.5, 0], target: [0, 1.5, 0] },
+  perspective: 'perspective',
+  top: 'top',
+  front: 'front',
+  side: 'side',
 };
 
 const OPENING_STEP = 0.05;
+const WALL_EDGE_CONNECT_MIN_LENGTH = 0.25;
+const WALL_EDGE_CONNECT_EPSILON = 0.0001;
 const DOOR_STYLE_OPTIONS = [
   { key: 'hinged', label: 'Single Hinged Door' },
   { key: 'sliding', label: 'Single Sliding Door' },
@@ -115,6 +116,7 @@ const ROOM_ACTION_BUTTONS = [
   { key: 'wall', icon: SpaceDashboardRoundedIcon, label: 'Add Wall' },
   { key: 'room', icon: HomeWorkRoundedIcon, label: 'Add Room' },
   { key: 'direction', icon: KeyboardDoubleArrowRightRoundedIcon, label: 'Change Side' },
+  { key: 'delete', icon: DeleteOutlined, label: 'Delete Room' },
 ];
 const ROOM_CREATION_ROOT_SELECTOR = '[data-room-creation-root="true"]';
 
@@ -126,23 +128,338 @@ function formatMoney(value, currency = 'AED') {
   }).format(value || 0);
 }
 
-export default function RoomScene() {
+function getRoomFootprint(room, surfaceBounds = null) {
+  if (Array.isArray(room?.footprint) && room.footprint.length >= 3) {
+    return room.footprint;
+  }
+
+  if (surfaceBounds) {
+    const halfWidth = surfaceBounds.width / 2;
+    const halfDepth = surfaceBounds.depth / 2;
+    return [
+      [surfaceBounds.centerX - halfWidth, surfaceBounds.centerZ - halfDepth],
+      [surfaceBounds.centerX + halfWidth, surfaceBounds.centerZ - halfDepth],
+      [surfaceBounds.centerX + halfWidth, surfaceBounds.centerZ + halfDepth],
+      [surfaceBounds.centerX - halfWidth, surfaceBounds.centerZ + halfDepth],
+    ];
+  }
+
+  return [
+    [room.x - room.width / 2, room.z - room.depth / 2],
+    [room.x + room.width / 2, room.z - room.depth / 2],
+    [room.x + room.width / 2, room.z + room.depth / 2],
+    [room.x - room.width / 2, room.z + room.depth / 2],
+  ];
+}
+
+function getFootprintBounds(points) {
+  return {
+    minX: Math.min(...points.map(([x]) => x)),
+    maxX: Math.max(...points.map(([x]) => x)),
+    minZ: Math.min(...points.map(([, z]) => z)),
+    maxZ: Math.max(...points.map(([, z]) => z)),
+  };
+}
+
+function getWallEdgePoint(wall, edge) {
+  const point = edge === 'end' ? wall?.end : wall?.start;
+  if (!Array.isArray(point) || point.length < 2) return null;
+  const [x, z] = point;
+  return Number.isFinite(x) && Number.isFinite(z) ? [x, z] : null;
+}
+
+function pointsAlmostEqual(a, b, epsilon = WALL_EDGE_CONNECT_EPSILON) {
+  return Array.isArray(a)
+    && Array.isArray(b)
+    && Math.abs(a[0] - b[0]) <= epsilon
+    && Math.abs(a[1] - b[1]) <= epsilon;
+}
+
+function wallsShareSegment(wall, start, end) {
+  return (
+    pointsAlmostEqual(wall?.start, start)
+    && pointsAlmostEqual(wall?.end, end)
+  ) || (
+    pointsAlmostEqual(wall?.start, end)
+    && pointsAlmostEqual(wall?.end, start)
+  );
+}
+
+function isPointInsideFootprint(point, footprint = []) {
+  if (!Array.isArray(point) || footprint.length < 3) return false;
+
+  const [px, pz] = point;
+  let inside = false;
+
+  for (let i = 0, j = footprint.length - 1; i < footprint.length; j = i++) {
+    const [xi, zi] = footprint[i];
+    const [xj, zj] = footprint[j];
+    const intersects = ((zi > pz) !== (zj > pz))
+      && (px < ((xj - xi) * (pz - zi)) / ((zj - zi) || Number.EPSILON) + xi);
+
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+}
+
+function roundFootprintCoord(value) {
+  return Number(value.toFixed(5));
+}
+
+function makeFootprintKey(x, z) {
+  return `${roundFootprintCoord(x)},${roundFootprintCoord(z)}`;
+}
+
+function getSurfaceShapePoint([x, z], flip = false) {
+  return [x, flip ? z : -z];
+}
+
+function createHorizontalShape(points, flip = false) {
+  const nextShape = new THREE.Shape();
+  if (!points?.length) return nextShape;
+
+  const [startX, startZ] = getSurfaceShapePoint(points[0], flip);
+  nextShape.moveTo(startX, startZ);
+  for (let i = 1; i < points.length; i += 1) {
+    const [x, z] = getSurfaceShapePoint(points[i], flip);
+    nextShape.lineTo(x, z);
+  }
+  nextShape.lineTo(startX, startZ);
+  return nextShape;
+}
+
+function buildFootprintFromWalls(roomWalls = []) {
+  if (!Array.isArray(roomWalls) || roomWalls.length < 3) return null;
+
+  const edgeMap = new Map();
+  const pointMap = new Map();
+
+  roomWalls.forEach((wall, index) => {
+    const start = wall?.start;
+    const end = wall?.end;
+    if (!Array.isArray(start) || !Array.isArray(end)) return;
+    if (![start[0], start[1], end[0], end[1]].every(Number.isFinite)) return;
+
+    const startKey = makeFootprintKey(start[0], start[1]);
+    const endKey = makeFootprintKey(end[0], end[1]);
+    if (startKey === endKey) return;
+
+    pointMap.set(startKey, [start[0], start[1]]);
+    pointMap.set(endKey, [end[0], end[1]]);
+
+    const edge = {
+      id: wall?.id ?? `wall-${index}`,
+      startKey,
+      endKey,
+    };
+
+    if (!edgeMap.has(startKey)) edgeMap.set(startKey, []);
+    if (!edgeMap.has(endKey)) edgeMap.set(endKey, []);
+    edgeMap.get(startKey).push(edge);
+    edgeMap.get(endKey).push(edge);
+  });
+
+  if (pointMap.size < 3) return null;
+
+  const startKey = [...pointMap.entries()]
+    .sort((a, b) => {
+      if (a[1][1] !== b[1][1]) return a[1][1] - b[1][1];
+      return a[1][0] - b[1][0];
+    })[0]?.[0];
+
+  if (!startKey) return null;
+
+  const polygonKeys = [startKey];
+  let currentKey = startKey;
+  let previousKey = null;
+  let safety = 0;
+
+  while (safety < pointMap.size + roomWalls.length + 8) {
+    safety += 1;
+    const options = (edgeMap.get(currentKey) ?? [])
+      .map((edge) => (edge.startKey === currentKey ? edge.endKey : edge.startKey))
+      .filter((nextKey) => nextKey !== previousKey);
+
+    if (!options.length) break;
+
+    const currentPoint = pointMap.get(currentKey);
+    const prevPoint = previousKey ? pointMap.get(previousKey) : null;
+    const incomingAngle = prevPoint
+      ? Math.atan2(currentPoint[1] - prevPoint[1], currentPoint[0] - prevPoint[0])
+      : -Math.PI / 2;
+
+    const nextKey = options
+      .map((candidateKey) => {
+        const candidatePoint = pointMap.get(candidateKey);
+        let turn = Math.atan2(candidatePoint[1] - currentPoint[1], candidatePoint[0] - currentPoint[0]) - incomingAngle;
+        while (turn <= 0) turn += Math.PI * 2;
+        return { candidateKey, turn };
+      })
+      .sort((a, b) => a.turn - b.turn)[0]?.candidateKey;
+
+    if (!nextKey) break;
+    if (nextKey === startKey) {
+      if (polygonKeys.length >= 3) {
+        return polygonKeys.map((key) => pointMap.get(key));
+      }
+      break;
+    }
+    if (polygonKeys.includes(nextKey)) break;
+
+    polygonKeys.push(nextKey);
+    previousKey = currentKey;
+    currentKey = nextKey;
+  }
+
+  return null;
+}
+
+function getUpdatedRoomFromFootprint(room, footprint) {
+  if (!room || !Array.isArray(footprint) || footprint.length < 3) return room;
+  const xs = footprint.map(([x]) => x);
+  const zs = footprint.map(([, z]) => z);
+  return {
+    ...room,
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    z: (Math.min(...zs) + Math.max(...zs)) / 2,
+    width: Math.max(Math.max(...xs) - Math.min(...xs), 1),
+    depth: Math.max(Math.max(...zs) - Math.min(...zs), 1),
+    footprint,
+    isCustomShape: true,
+    updatedAt: Date.now(),
+  };
+}
+
+function PolygonSurface({
+  points,
+  y,
+  material,
+  fallbackColor,
+  onClick,
+  flip = false,
+  hidden = false,
+  transparent = false,
+  opacity = 1,
+  interactive = true,
+}) {
+  const shape = useMemo(() => createHorizontalShape(points, flip), [flip, points]);
+
+  const bounds = useMemo(() => getFootprintBounds(points), [points]);
+
+  return (
+    <mesh
+      visible={!hidden}
+      rotation={[flip ? Math.PI / 2 : -Math.PI / 2, 0, 0]}
+      position={[0, y, 0]}
+      receiveShadow
+      onClick={interactive ? onClick : undefined}
+      raycast={interactive ? undefined : () => null}
+    >
+      <shapeGeometry args={[shape]} />
+      <Suspense fallback={<meshStandardMaterial color={fallbackColor} roughness={material.roughness} metalness={material.metalness} transparent={transparent} opacity={opacity} />}>
+        <SurfaceMaterial
+          mat={material}
+          repeat={[
+            Math.max((bounds.maxX - bounds.minX) / 2, 1),
+            Math.max((bounds.maxZ - bounds.minZ) / 2, 1),
+          ]}
+          side={THREE.DoubleSide}
+          transparent={transparent}
+          opacity={opacity}
+        />
+      </Suspense>
+    </mesh>
+  );
+}
+
+function getRenderableRoomFootprint(room, roomScopedWalls, surfaceBounds = null) {
+  const wallFootprint = buildFootprintFromWalls(roomScopedWalls);
+  if (wallFootprint?.length >= 3) {
+    return wallFootprint;
+  }
+
+  if (Array.isArray(room?.footprint) && room.footprint.length >= 3) {
+    return room.footprint;
+  }
+
+  return getRoomFootprint(room, surfaceBounds);
+}
+
+function FootprintOutline({ points, y = 0.03, color = COLORS.action }) {
+  const positions = useMemo(() => {
+    const closed = [...points, points[0]];
+    return new Float32Array(closed.flatMap(([x, z]) => [x, y, z]));
+  }, [points, y]);
+
+  return (
+    <line>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+      </bufferGeometry>
+      <lineBasicMaterial color={color} transparent opacity={0.95} />
+    </line>
+  );
+}
+
+function SnapshotBridge({ snapshotApiRef }) {
+  const { gl, scene, camera } = useThree();
+
+  useEffect(() => {
+    if (!snapshotApiRef) return undefined;
+    snapshotApiRef.current = {
+      capture: () => {
+        try {
+          gl.render(scene, camera);
+          const dataUrl = gl.domElement.toDataURL('image/png');
+          return dataUrl === 'data:,' ? null : dataUrl;
+        } catch (error) {
+          console.warn('Snapshot capture failed:', error);
+          return null;
+        }
+      },
+    };
+
+    return () => {
+      if (snapshotApiRef.current?.capture) {
+        snapshotApiRef.current = null;
+      }
+    };
+  }, [camera, gl, scene, snapshotApiRef]);
+
+  return null;
+}
+
+export default function RoomScene({ initialScene = null }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
-  const [rooms, setRooms] = useState(() => [
-    createRoomEntity({
-      name: 'Room 1',
-      type: 'room',
-      x: 0,
-      z: 0,
-      width: 6,
-      depth: 6,
-      height: 3,
-    }),
-  ]);
-  const [selectedRoomId, setSelectedRoomId] = useState(null);
-  const initialWalls = useMemo(() => generateLayoutWalls(rooms), [rooms]);
+  const shouldPreferLiveSnapshot = searchParams.get("live") === "1";
+  const shouldLoadSelectedProject = Boolean(selectedProjectId && !(shouldPreferLiveSnapshot && initialScene));
+  const switchTo2DUrl = useMemo(() => {
+    const nextSearch = new URLSearchParams(searchParams);
+    nextSearch.set("live", "1");
+    const query = nextSearch.toString();
+    return query ? `/user/room-2d?${query}` : '/user/room-2d';
+  }, [searchParams]);
+  const defaultRoom = useMemo(() => createRoomEntity({
+    name: 'Room 1',
+    type: 'room',
+    x: 0,
+    z: 0,
+    width: 6,
+    depth: 6,
+    height: 3,
+  }), []);
+  const [rooms, setRooms] = useState(() => {
+    if (initialScene?.rooms?.length) return initialScene.rooms;
+    return shouldLoadSelectedProject ? [] : [defaultRoom];
+  });
+  const [selectedRoomId, setSelectedRoomId] = useState(() => initialScene?.rooms?.[0]?.id ?? null);
+  const initialWalls = useMemo(
+    () => (initialScene?.walls?.length ? initialScene.walls : generateLayoutWalls(rooms)),
+    [initialScene, rooms]
+  );
   const handleLogout = useCallback(() => {
     clearAuthSession();
     navigate("/login", { replace: true });
@@ -168,8 +485,26 @@ export default function RoomScene() {
     previewMode,
   } = lightingState;
 
+  useEffect(() => {
+    if (!initialScene) return;
+    if (initialScene.floorMaterial) setFloorMaterial(initialScene.floorMaterial);
+    if (initialScene.ceilingMaterial) setCeilingMaterial(initialScene.ceilingMaterial);
+    if (initialScene.lighting?.timeOfDay !== undefined) lightingState.setTimeOfDay(initialScene.lighting.timeOfDay);
+    if (initialScene.lighting?.activeMood) lightingState.applyMood(initialScene.lighting.activeMood);
+    if (initialScene.lighting?.globalBrightness !== undefined) lightingState.setGlobalBrightness(initialScene.lighting.globalBrightness);
+    if (Array.isArray(initialScene.lighting?.placedLights)) lightingState.setPlacedLights(initialScene.lighting.placedLights);
+  }, [
+    initialScene,
+    lightingState.applyMood,
+    lightingState.setGlobalBrightness,
+    lightingState.setPlacedLights,
+    lightingState.setTimeOfDay,
+    setCeilingMaterial,
+    setFloorMaterial,
+  ]);
+
   // Furniture 
-  const [placedItems,         setPlacedItems]         = useState([]);
+  const [placedItems,         setPlacedItems]         = useState(() => initialScene?.placedItems ?? []);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState(null);
   const furnitureRefs = useRef({});
 
@@ -182,6 +517,7 @@ export default function RoomScene() {
   const [gizmoMode,           setGizmoMode]           = useState('translate');
   const [activeTool,          setActiveTool]          = useState('select');
   const [openingPreview,      setOpeningPreview]      = useState(null);
+  const [wallEdgeLinkStart,   setWallEdgeLinkStart]   = useState(null);
   const [isPointerLocked,     setIsPointerLocked]     = useState(false);
   const [orbitEnabled,        setOrbitEnabled]        = useState(true);
   const [teleportTarget,      setTeleportTarget]      = useState(null);
@@ -189,8 +525,11 @@ export default function RoomScene() {
   const [desktopPanelOpen,    setDesktopPanelOpen]    = useState(false);
   const [currentViewPreset,   setCurrentViewPreset]   = useState('perspective');
   const [saveModalOpen,       setSaveModalOpen]       = useState(false);
-  const [currentProjectId,    setCurrentProjectId]    = useState(null);
+  const [currentProjectId,    setCurrentProjectId]    = useState(() => selectedProjectId ?? null);
+  const [projectLoading,      setProjectLoading]      = useState(shouldLoadSelectedProject);
+  const [projectLoadError,    setProjectLoadError]    = useState('');
   const [wallsHidden,         setWallsHidden]         = useState(false);
+  const [ceilingHidden,       setCeilingHidden]       = useState(false);
   const [wallToolbarPinned,   setWallToolbarPinned]   = useState(false);
   const [furnitureToolbarPinned, setFurnitureToolbarPinned] = useState(false);
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
@@ -200,7 +539,12 @@ export default function RoomScene() {
   const orbitControlsRef = useRef(null);
   const sceneRef         = useRef(null);
   const canvasWrapperRef = useRef(null);
+  const snapshotApiRef   = useRef(null);
   const wallRefs         = useRef({});
+  const localMutationVersionRef = useRef(0);
+  const pendingOpeningSaveRef = useRef(false);
+  const loadingProjectIdRef = useRef(null);
+  const loadProjectRef = useRef(null);
   const desktopFloatingRef = useRef(null);
 
   const screens = Grid.useBreakpoint();
@@ -214,6 +558,11 @@ export default function RoomScene() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [mobileDoorEditorSection, setMobileDoorEditorSection] = useState(null);
+  const isTypingTarget = useCallback((target) => {
+    if (!target) return false;
+    const tagName = target.tagName?.toLowerCase();
+    return tagName === 'input' || tagName === 'textarea' || target.isContentEditable;
+  }, []);
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handler);
@@ -239,16 +588,86 @@ export default function RoomScene() {
     ceilingMaterial, setCeilingMaterial,
     lightingState,
     canvasRef: canvasWrapperRef,
+    snapshotApiRef,
     currentProjectId, setCurrentProjectId,
-    skipInitialLatestLoad: Boolean(selectedProjectId),
+    skipInitialLatestLoad: Boolean(selectedProjectId || initialScene),
+    localMutationVersionRef,
   });
-  const { loadProject } = projectSave;
+  const { loadProject, saveProject, projectName } = projectSave;
+  const isSaving = projectSave.saveStatus === 'saving';
+
   useEffect(() => {
-    if (!selectedProjectId) return;
-    loadProject(selectedProjectId).catch((error) => {
-      console.error("Failed to load selected project", error);
+    loadProjectRef.current = loadProject;
+  }, [loadProject]);
+
+  useEffect(() => {
+    saveLive3DSceneSnapshot({
+      rooms,
+      walls,
+      placedItems,
+      floorMaterial,
+      ceilingMaterial,
+      lighting: {
+        timeOfDay: lightingState.timeOfDay,
+        activeMood: lightingState.activeMood,
+        globalBrightness: lightingState.globalBrightness,
+      },
     });
-  }, [loadProject, selectedProjectId]);
+  }, [
+    rooms,
+    walls,
+    placedItems,
+    floorMaterial,
+    ceilingMaterial,
+    lightingState.timeOfDay,
+    lightingState.activeMood,
+    lightingState.globalBrightness,
+  ]);
+  useEffect(() => {
+    if (!shouldLoadSelectedProject) {
+      loadingProjectIdRef.current = null;
+      setProjectLoading(false);
+      return;
+    }
+
+    if (loadingProjectIdRef.current === selectedProjectId) {
+      return;
+    }
+
+    loadingProjectIdRef.current = selectedProjectId;
+    let cancelled = false;
+    const loadTimeout = window.setTimeout(() => {
+      if (cancelled) return;
+      loadingProjectIdRef.current = null;
+      setProjectLoading(false);
+      setProjectLoadError('Project loading timed out. Check that the backend is running, then try opening it again.');
+    }, 18000);
+
+    setProjectLoading(true);
+    setProjectLoadError('');
+    setCurrentProjectId(selectedProjectId);
+    const openProjectPromise = loadProjectRef.current
+      ? loadProjectRef.current(selectedProjectId)
+      : Promise.reject(new Error('Project loader is not ready.'));
+
+    openProjectPromise.catch((error) => {
+      console.error("Failed to load selected project", error);
+      if (!cancelled) {
+        loadingProjectIdRef.current = null;
+        setProjectLoadError(error?.response?.data?.detail || error?.message || 'Failed to open project.');
+      }
+    }).finally(() => {
+      window.clearTimeout(loadTimeout);
+      if (!cancelled) {
+        setProjectLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(loadTimeout);
+    };
+  }, [selectedProjectId, shouldLoadSelectedProject]);
   const handleCreateNewProject = useCallback(() => {
     projectSave.createNewProject();
     setSelectedRoomId(null);
@@ -256,6 +675,7 @@ export default function RoomScene() {
     setSelectedOpening(null);
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
+    setWallEdgeLinkStart(null);
     setActiveTool('select');
     setActiveTab('walls');
     setMobilePanelOpen(false);
@@ -267,11 +687,15 @@ export default function RoomScene() {
     setSelectedOpening(null);
     setWallToolbarPinned(false);
     setWallToolbarPos(null);
+    setWallEdgeLinkStart(null);
     if (activeTab === 'walls') setActiveTab('furniture');
     if (activeTool === 'door' || activeTool === 'window' || activeTool === 'build') {
       setActiveTool('select');
     }
   }, [activeTab, activeTool]);
+  const toggleCeilingHidden = useCallback(() => {
+    setCeilingHidden((prev) => !prev);
+  }, []);
   const recorder = useRecorder({
     canvasWrapperRef,         
     orbitControlsRef,         
@@ -315,20 +739,27 @@ export default function RoomScene() {
       return null;
     }
 
-    const previewRoom = addRoomAdjacent(sourceRoom, pending.direction, {
-      id: 'pending-room-preview',
-      name: pending.name?.trim() || 'New room',
-      type: pending.type ?? 'room',
-      width,
-      depth,
-      height,
+    const preview = buildAdjacentRoomFromBoundary(sourceRoom, pending.direction, width, depth, {
+      walls,
+      room: {
+        id: 'pending-room-preview',
+        name: pending.name?.trim() || 'New room',
+        type: pending.type ?? 'room',
+        width,
+        depth,
+        height,
+      },
     });
+    if (!preview) return null;
 
     return {
-      ...previewRoom,
-      overlapsExisting: hasRoomOverlap(previewRoom, rooms),
+      ...preview.room,
+      overlapsExisting: rooms.some((room) => (
+        room.id !== sourceRoom.id
+        && isPointInsideFootprint([preview.room.x, preview.room.z], getRoomFootprint(room))
+      )),
     };
-  }, [roomCreation.pendingRoomCreation, rooms]);
+  }, [roomCreation.pendingRoomCreation, rooms, walls]);
 
   const boardFootprint = useMemo(() => {
     const layoutBounds = getLayoutBounds(rooms);
@@ -403,6 +834,67 @@ export default function RoomScene() {
     () => roomSurfaceBounds.find((entry) => entry.roomId === selectedRoom?.id) ?? null,
     [roomSurfaceBounds, selectedRoom]
   );
+
+  useEffect(() => {
+    const updates = new Map();
+    rooms.forEach((room) => {
+      const scopedWalls = walls.filter((wall) => wall?.roomId === room.id);
+      const nextFootprint = buildFootprintFromWalls(scopedWalls);
+      if (!nextFootprint?.length) return;
+      const current = Array.isArray(room?.footprint) ? room.footprint : [];
+      const changed = current.length !== nextFootprint.length
+        || current.some((point, index) => (
+          Math.abs((point?.[0] ?? 0) - nextFootprint[index][0]) > 0.0001
+          || Math.abs((point?.[1] ?? 0) - nextFootprint[index][1]) > 0.0001
+        ));
+      if (changed) {
+        updates.set(room.id, getUpdatedRoomFromFootprint(room, nextFootprint));
+      }
+    });
+
+    if (!updates.size) return;
+    setRooms((prev) => prev.map((room) => updates.get(room.id) ?? room));
+  }, [rooms, walls]);
+
+  const maxRoomHeight = useMemo(
+    () => Math.max(...rooms.map((room) => room?.height ?? 3), 3),
+    [rooms]
+  );
+  const getCameraPresetConfig = useCallback((preset) => {
+    const centerX = boardFootprint.centerX ?? 0;
+    const centerZ = boardFootprint.centerZ ?? 0;
+    const span = Math.max(boardFootprint.width ?? 20, boardFootprint.depth ?? 20, 8);
+    const targetY = Math.max(maxRoomHeight * 0.45, 1.2);
+
+    switch (preset) {
+      case 'top':
+        return {
+          position: [centerX, Math.max(span * 1.2, maxRoomHeight + 6), centerZ + 0.001],
+          target: [centerX, 0, centerZ],
+        };
+      case 'front':
+        return {
+          position: [centerX, targetY, centerZ + span * 0.95],
+          target: [centerX, targetY, centerZ],
+        };
+      case 'side':
+        return {
+          position: [centerX + span * 0.95, targetY, centerZ],
+          target: [centerX, targetY, centerZ],
+        };
+      case 'perspective':
+      default:
+        return {
+          position: [centerX + span * 0.55, Math.max(maxRoomHeight + span * 0.18, 4), centerZ + span * 0.72],
+          target: [centerX, targetY, centerZ],
+        };
+    }
+  }, [boardFootprint.centerX, boardFootprint.centerZ, boardFootprint.depth, boardFootprint.width, maxRoomHeight]);
+  const orbitCameraConfig = useMemo(
+    () => getCameraPresetConfig(currentViewPreset),
+    [currentViewPreset, getCameraPresetConfig]
+  );
+  const isTopDownView = cameraMode === 'orbit' && currentViewPreset === 'top';
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
   const selectedWallDoorCount = selectedWall?.doors?.length ?? 0;
@@ -590,10 +1082,18 @@ export default function RoomScene() {
   }, []);
 
   // Wall helpers
-  const updateWall = (id, updates) =>
+  const markSceneMutation = useCallback(({ saveOpening = false } = {}) => {
+    localMutationVersionRef.current += 1;
+    if (saveOpening) pendingOpeningSaveRef.current = true;
+  }, []);
+
+  const updateWall = (id, updates) => {
+    markSceneMutation();
     setWalls((p) => p.map((w) => w.id === id ? { ...w, ...updates } : w));
+  };
 
   const updateWallOpening = useCallback((wallId, openingType, openingId, updates) => {
+    markSceneMutation({ saveOpening: true });
     setWalls((prev) => prev.map((wall) => {
       if (wall.id !== wallId) return wall;
       const key = openingType === 'door' ? 'doors' : 'windows';
@@ -607,9 +1107,10 @@ export default function RoomScene() {
       });
       return { ...wall, [key]: nextItems, updatedAt: Date.now() };
     }));
-  }, [setWalls]);
+  }, [markSceneMutation, setWalls]);
 
   const removeWallOpening = useCallback((wallId, openingType, openingId) => {
+    markSceneMutation({ saveOpening: true });
     setWalls((prev) => prev.map((wall) => {
       if (wall.id !== wallId) return wall;
       const key = openingType === 'door' ? 'doors' : 'windows';
@@ -620,7 +1121,7 @@ export default function RoomScene() {
       };
     }));
     setSelectedOpening((prev) => (prev?.id === openingId ? null : prev));
-  }, [setWalls]);
+  }, [markSceneMutation, setWalls]);
 
   const updateOpeningNumericField = useCallback((field, rawValue) => {
     if (!selectedOpening || !selectedOpeningEntity) return;
@@ -671,17 +1172,19 @@ export default function RoomScene() {
             </span>
             <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
           </div>
-          <InputNumber
-            min={getOpeningBounds(selectedOpening.type).width.min}
-            max={getOpeningBounds(selectedOpening.type).width.max}
-            step={OPENING_STEP}
-            precision={2}
-            controls
-            value={selectedOpeningEntity.width}
-            onChange={(value) => updateOpeningNumericField('width', value)}
-            style={{ width: '100%' }}
-            addonAfter="m"
-          />
+          <Space.Compact style={{ width: '100%' }}>
+            <InputNumber
+              min={getOpeningBounds(selectedOpening.type).width.min}
+              max={getOpeningBounds(selectedOpening.type).width.max}
+              step={OPENING_STEP}
+              precision={2}
+              controls
+              value={selectedOpeningEntity.width}
+              onChange={(value) => updateOpeningNumericField('width', value)}
+              style={{ width: '100%' }}
+            />
+            <span className="room-input-unit">m</span>
+          </Space.Compact>
         </div>
         <div style={openingFieldCardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -691,17 +1194,19 @@ export default function RoomScene() {
             </span>
             <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
           </div>
-          <InputNumber
-            min={getOpeningBounds(selectedOpening.type).height.min}
-            max={getOpeningBounds(selectedOpening.type).height.max}
-            step={OPENING_STEP}
-            precision={2}
-            controls
-            value={selectedOpeningEntity.height}
-            onChange={(value) => updateOpeningNumericField('height', value)}
-            style={{ width: '100%' }}
-            addonAfter="m"
-          />
+          <Space.Compact style={{ width: '100%' }}>
+            <InputNumber
+              min={getOpeningBounds(selectedOpening.type).height.min}
+              max={getOpeningBounds(selectedOpening.type).height.max}
+              step={OPENING_STEP}
+              precision={2}
+              controls
+              value={selectedOpeningEntity.height}
+              onChange={(value) => updateOpeningNumericField('height', value)}
+              style={{ width: '100%' }}
+            />
+            <span className="room-input-unit">m</span>
+          </Space.Compact>
         </div>
       </div>
     );
@@ -945,6 +1450,65 @@ export default function RoomScene() {
     return [...layoutWalls, ...manualWalls];
   }, [walls]);
 
+  const deleteRoomById = useCallback((roomId) => {
+    const room = rooms.find((entry) => entry.id === roomId);
+    if (!room) return;
+
+    const roomName = room.name?.trim() || 'this room';
+    const confirmed = typeof window === 'undefined'
+      ? true
+      : window.confirm(`Delete "${roomName}" and remove the items inside it?`);
+
+    if (!confirmed) return;
+
+    const nextRooms = rooms.filter((entry) => entry.id !== roomId);
+    const roomBounds = roomSurfaceBounds.find((entry) => entry.roomId === roomId) ?? null;
+    const roomFootprint = getRoomFootprint(room, roomBounds);
+    const nextWalls = rebuildResolvedWalls(nextRooms, walls.filter((wall) => wall?.roomId !== roomId));
+    const nextPlacedItems = placedItems.filter((item) => !isPointInsideFootprint([item?.position?.[0], item?.position?.[2]], roomFootprint));
+    const nextPlacedLights = placedLights.filter((light) => !isPointInsideFootprint([light?.position?.[0], light?.position?.[2]], roomFootprint));
+    const removedFurnitureCount = placedItems.length - nextPlacedItems.length;
+    const removedLightCount = placedLights.length - nextPlacedLights.length;
+    const removedAssetCount = removedFurnitureCount + removedLightCount;
+
+    setRooms(nextRooms);
+    setWalls(nextWalls);
+    setPlacedItems(nextPlacedItems);
+    lightingState.setPlacedLights(nextPlacedLights);
+
+    setSelectedRoomId((prev) => (prev === roomId ? (nextRooms[0]?.id ?? null) : prev));
+    setSelectedWallId(null);
+    setSelectedOpening(null);
+    setSelectedFurnitureId(null);
+    setSelectedLightId((prev) => (
+      prev && nextPlacedLights.some((light) => light.id === prev) ? prev : null
+    ));
+    setSceneRoomActionsVisible(false);
+    setWallToolbarPinned(false);
+    setFurnitureToolbarPinned(false);
+    setWallToolbarPos(null);
+    setFurnitureToolbarPos(null);
+    roomCreation.cancelPendingRoomCreation();
+
+    toast.success(
+      removedAssetCount > 0
+        ? `Deleted ${roomName} and removed ${removedAssetCount} scene item${removedAssetCount === 1 ? '' : 's'}.`
+        : `Deleted ${roomName}.`
+    );
+  }, [
+    lightingState,
+    placedItems,
+    placedLights,
+    rebuildResolvedWalls,
+    roomCreation,
+    roomSurfaceBounds,
+    rooms,
+    setSelectedLightId,
+    setWalls,
+    toast,
+    walls,
+  ]);
+
   const addWallOnRoomEdge = useCallback((roomId, side) => {
     const room = rooms.find((entry) => entry.id === roomId);
     if (!room) {
@@ -1022,6 +1586,93 @@ export default function RoomScene() {
     toast.success(`Wall added on the ${side} edge.`);
   }, [roomSurfaceBounds, rooms, setWalls, toast, walls]);
 
+  const handleWallEdgeLinkPoint = useCallback((wall, edge, event) => {
+    const point = getWallEdgePoint(wall, edge);
+    if (!point) {
+      toast.error('Wall connector failed because this edge has invalid coordinates.');
+      return;
+    }
+
+    const shouldCompleteLink = Boolean(
+      event?.ctrlKey
+      || event?.metaKey
+      || event?.nativeEvent?.ctrlKey
+      || event?.nativeEvent?.metaKey
+    );
+    const nextEdge = {
+      wallId: wall.id,
+      edge,
+      point,
+    };
+
+    if (!wallEdgeLinkStart || !shouldCompleteLink) {
+      setWallEdgeLinkStart(nextEdge);
+      setSelectedWallId(wall.id);
+      setSelectedOpening(null);
+      setSelectedFurnitureId(null);
+      setSelectedLightId(null);
+      setActiveTab('walls');
+      toast.info('Wall edge selected. Ctrl/Cmd-click another wall edge to connect it.');
+      return;
+    }
+
+    if (wallEdgeLinkStart.wallId === wall.id && wallEdgeLinkStart.edge === edge) {
+      toast.info('Choose a different wall edge to create a connector wall.');
+      return;
+    }
+
+    const start = wallEdgeLinkStart.point;
+    const end = point;
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+
+    if (length < WALL_EDGE_CONNECT_MIN_LENGTH) {
+      toast.info('Choose two wall edges with some space between them.');
+      return;
+    }
+
+    const existingWall = walls.find((candidate) => wallsShareSegment(candidate, start, end));
+    if (existingWall) {
+      setSelectedWallId(existingWall.id);
+      setWallEdgeLinkStart(null);
+      setActiveTab('walls');
+      toast.info('A wall already connects those two edges.');
+      return;
+    }
+
+    const sourceWall = walls.find((candidate) => candidate.id === wallEdgeLinkStart.wallId) ?? wall;
+    const newWall = createWallEntity({
+      roomId: sourceWall?.roomId ?? wall?.roomId ?? selectedRoom?.id ?? null,
+      start,
+      end,
+      height: sourceWall?.height ?? wall?.height ?? selectedRoom?.height ?? 3,
+      thickness: sourceWall?.thickness ?? wall?.thickness,
+      color: sourceWall?.color ?? wall?.color,
+      roughness: sourceWall?.roughness ?? wall?.roughness,
+      metalness: sourceWall?.metalness ?? wall?.metalness,
+      textureUrl: sourceWall?.textureUrl ?? wall?.textureUrl,
+      source: 'manual',
+      boundaryType: 'interior',
+    });
+
+    markSceneMutation();
+    setWalls((prev) => [...prev, newWall]);
+    setSelectedWallId(newWall.id);
+    setSelectedOpening(null);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+    setWallEdgeLinkStart(null);
+    setActiveTab('walls');
+    toast.success('Connector wall created between the selected edges.');
+  }, [
+    markSceneMutation,
+    selectedRoom,
+    setSelectedLightId,
+    setWalls,
+    toast,
+    wallEdgeLinkStart,
+    walls,
+  ]);
+
   const cycleRoomWallPlacementSide = useCallback(() => {
     setRoomWallPlacementSide((prev) => {
       const index = ROOM_DIRECTION_ORDER.indexOf(prev);
@@ -1044,7 +1695,7 @@ export default function RoomScene() {
         overflowX: compact ? 'visible' : 'auto',
         padding: compact ? 0 : '4px 8px',
       }}>
-        {ROOM_ACTION_BUTTONS.filter(({ key }) => !(compact && key === 'room')).map(({ key, icon, label }) => {
+        {ROOM_ACTION_BUTTONS.map(({ key, icon, label }) => {
           if (!compact && key === 'room' && isPendingRoomForDirection(roomWallPlacementSide)) {
             return (
               <div
@@ -1235,6 +1886,10 @@ export default function RoomScene() {
                   roomCreation.queueRoomAdd(roomWallPlacementSide, room);
                   return;
                 }
+                if (key === 'delete') {
+                  deleteRoomById(room.id);
+                  return;
+                }
                 cycleRoomWallPlacementSide();
               }}
               variant={compact ? 'pill' : 'reveal'}
@@ -1243,7 +1898,7 @@ export default function RoomScene() {
         })}
       </div>
     );
-  }, [activeTab, addWallOnRoomEdge, cycleRoomWallPlacementSide, roomCreation, roomWallPlacementSide, selectedRoom]);
+  }, [activeTab, addWallOnRoomEdge, cycleRoomWallPlacementSide, deleteRoomById, roomCreation, roomWallPlacementSide, selectedRoom]);
 
   const renderRoomSidebarCards = useCallback(() => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1427,17 +2082,19 @@ export default function RoomScene() {
               </span>
               <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.width).toFixed(2)} m</span>
             </div>
-            <InputNumber
-              min={getOpeningBounds('door').width.min}
-              max={getOpeningBounds('door').width.max}
-              step={OPENING_STEP}
-              precision={2}
-              controls
-              value={selectedOpeningEntity.width}
-              onChange={(value) => updateOpeningNumericField('width', value)}
-              style={{ width: '100%' }}
-              addonAfter="m"
-            />
+            <Space.Compact style={{ width: '100%' }}>
+              <InputNumber
+                min={getOpeningBounds('door').width.min}
+                max={getOpeningBounds('door').width.max}
+                step={OPENING_STEP}
+                precision={2}
+                controls
+                value={selectedOpeningEntity.width}
+                onChange={(value) => updateOpeningNumericField('width', value)}
+                style={{ width: '100%' }}
+              />
+              <span className="room-input-unit">m</span>
+            </Space.Compact>
           </div>
         ),
       },
@@ -1454,17 +2111,19 @@ export default function RoomScene() {
               </span>
               <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>{Number(selectedOpeningEntity.height).toFixed(2)} m</span>
             </div>
-            <InputNumber
-              min={getOpeningBounds('door').height.min}
-              max={getOpeningBounds('door').height.max}
-              step={OPENING_STEP}
-              precision={2}
-              controls
-              value={selectedOpeningEntity.height}
-              onChange={(value) => updateOpeningNumericField('height', value)}
-              style={{ width: '100%' }}
-              addonAfter="m"
-            />
+            <Space.Compact style={{ width: '100%' }}>
+              <InputNumber
+                min={getOpeningBounds('door').height.min}
+                max={getOpeningBounds('door').height.max}
+                step={OPENING_STEP}
+                precision={2}
+                controls
+                value={selectedOpeningEntity.height}
+                onChange={(value) => updateOpeningNumericField('height', value)}
+                style={{ width: '100%' }}
+              />
+              <span className="room-input-unit">m</span>
+            </Space.Compact>
           </div>
         ),
       },
@@ -1635,6 +2294,7 @@ export default function RoomScene() {
     if (selectedWallId === id) setSelectedWallId(null);
     if (selectedOpening?.wallId === id) setSelectedOpening(null);
     if (openingPreview?.wallId === id) setOpeningPreview(null);
+    if (wallEdgeLinkStart?.wallId === id) setWallEdgeLinkStart(null);
   };
 
   const addWall = () => {
@@ -1677,14 +2337,16 @@ export default function RoomScene() {
     setOpeningPreview(buildOpeningPreview(wall, openingType, point));
   }, [activeTool, buildOpeningPreview]);
 
-  const commitOpeningPreview = useCallback((wall) => {
-    if (!wall || !openingPreview || openingPreview.wallId !== wall.id || !openingPreview.valid) return false;
-    const openingType = openingPreview.type === 'window' ? 'window' : 'door';
+  const commitOpeningPreview = useCallback((wall, point) => {
+    const previewToUse = (point && activeTool) ? buildOpeningPreview(wall, activeTool, point) : openingPreview;
+    if (!wall || !previewToUse || previewToUse.wallId !== wall.id || !previewToUse.valid) return false;
+    const openingType = previewToUse.type === 'window' ? 'window' : 'door';
     const key = openingType === 'door' ? 'doors' : 'windows';
-    const openingToStore = { ...openingPreview, id: uuidv4() };
+    const openingToStore = { ...previewToUse, id: uuidv4() };
     delete openingToStore.valid;
     delete openingToStore.reason;
 
+    markSceneMutation({ saveOpening: true });
     setWalls((prev) => prev.map((item) => (
       item.id === wall.id
         ? { ...item, [key]: [...(item[key] ?? []), openingToStore], updatedAt: Date.now() }
@@ -1695,10 +2357,31 @@ export default function RoomScene() {
     setActiveTool('select');
     toast.success(`${openingType === 'door' ? 'Door' : 'Window'} added to wall.`);
     return true;
-  }, [openingPreview, setWalls, toast]);
+  }, [activeTool, buildOpeningPreview, markSceneMutation, openingPreview, setWalls, toast]);
+
+  useEffect(() => {
+    if (!pendingOpeningSaveRef.current) return;
+    if (!currentProjectId || isSaving) return;
+
+    pendingOpeningSaveRef.current = false;
+    saveProject(projectName, false).catch((error) => {
+      pendingOpeningSaveRef.current = true;
+      console.error('Failed to save wall opening:', error);
+    });
+  }, [currentProjectId, isSaving, projectName, saveProject, walls]);
 
   useEffect(() => {
     const onKey = (e) => {
+      if (isSaving) {
+        if (e.ctrlKey || e.metaKey) e.preventDefault();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (isTypingTarget(e.target)) return;
+        if (currentProjectId) projectSave.saveProject(projectSave.projectName, true).catch(() => {});
+        else setSaveModalOpen(true);
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
       if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
       if (e.key === 'Escape') {
@@ -1717,7 +2400,7 @@ export default function RoomScene() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, selectedFurnitureId, selectedOpening, removeWallOpening]);
+  }, [undo, redo, selectedFurnitureId, selectedOpening, removeWallOpening, currentProjectId, projectSave, isTypingTarget, isSaving]);
 
   // Furniture helpers
   const addItem = (modelMeta) => {
@@ -1781,12 +2464,12 @@ export default function RoomScene() {
   // Camera helpers 
   const applyCameraPreset = (preset) => {
     setCurrentViewPreset(preset);
+    const { position, target } = getCameraPresetConfig(preset);
     if (cameraMode === 'orbit' && orbitControlsRef.current) {
-      const { position, target } = CAMERA_PRESETS[preset];
       gsap.to(orbitControlsRef.current.target, { x: target[0], y: target[1], z: target[2], duration: 1, ease: "power2.inOut" });
       gsap.to(orbitControlsRef.current.object.position, { x: position[0], y: position[1], z: position[2], duration: 1, ease: "power2.inOut", onUpdate: () => orbitControlsRef.current.update() });
     } else if (cameraMode === 'firstPerson') {
-      setTeleportTarget([CAMERA_PRESETS[preset].position[0], 1.6, CAMERA_PRESETS[preset].position[2]]);
+      setTeleportTarget([position[0], 1.6, position[2]]);
     }
   };
 
@@ -1797,6 +2480,7 @@ export default function RoomScene() {
     setSelectedLightId(null);
     setSelectedOpening(null);
     setOpeningPreview(null);
+    setWallEdgeLinkStart(null);
     setActiveTool('select');
     setFurnitureToolbarPos(null);
     setLightToolbarPos(null);
@@ -2122,15 +2806,17 @@ export default function RoomScene() {
         <Canvas
           camera={cameraMode === 'firstPerson'
             ? { position: [0, 1.6, 0], fov: 70, near: 0.1, far: 1000 }
-            : { position: [7, 4, 9],   fov: 50, near: 0.1, far: 1000 }
+            : { position: orbitCameraConfig.position, fov: 50, near: 0.1, far: 1000 }
           }
           style={{ background: lighting.skyColor }}
-          shadows
+          shadows={{ type: THREE.PCFShadowMap }}
           frameloop={cameraMode === 'firstPerson' ? 'always' : 'demand'}
           performance={{ min: 0.5 }}
           gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.85, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
           onPointerMissed={handlePointerMissed}
         >
+          <SnapshotBridge snapshotApiRef={snapshotApiRef} />
+
           {/* Lighting */}
           <SceneLighting
             lighting={lighting}
@@ -2144,11 +2830,13 @@ export default function RoomScene() {
             <OrbitControls
               ref={orbitControlsRef}
               enableDamping dampingFactor={0.06}
-              maxPolarAngle={Math.PI / 2.4}
+              target={orbitCameraConfig.target}
+              enablePan={false}
+              maxPolarAngle={isTopDownView ? Math.PI - 0.01 : Math.PI / 2.4}
               enabled={orbitEnabled && !mobileOpeningPlacementLocked}
               touches={mobileOpeningPlacementLocked
                 ? { ONE: THREE.TOUCH.NONE, TWO: THREE.TOUCH.NONE }
-                : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+                : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE }}
               onTouchStart={(e) => { if (e?.touches?.length < 2) return; }}
             />
           ) : (
@@ -2182,61 +2870,45 @@ export default function RoomScene() {
               width: room.width,
               depth: room.depth,
             };
+            const footprint = getRenderableRoomFootprint(room, roomScopedWalls, surfaceBounds);
 
             return (
             (() => {
               return (
             <group key={room.id}>
-              <mesh
-                rotation={[-Math.PI / 2, 0, 0]}
-                position={[surfaceBounds.centerX, 0, surfaceBounds.centerZ]}
-                receiveShadow
+              <PolygonSurface
+                points={footprint}
+                y={0}
+                material={floorMaterial}
+                fallbackColor={floorMaterial.color}
                 onClick={(event) => {
                   event.stopPropagation();
                   selectRoom(room.id, 'walls');
                 }}
-              >
-                <planeGeometry args={[surfaceBounds.width, surfaceBounds.depth]} />
-                <Suspense fallback={<meshStandardMaterial color={floorMaterial.color} roughness={floorMaterial.roughness} metalness={floorMaterial.metalness} />}>
-                  <SurfaceMaterial mat={floorMaterial} repeat={[Math.max(surfaceBounds.width / 2, 1), Math.max(surfaceBounds.depth / 2, 1)]} />
-                </Suspense>
-              </mesh>
-              <mesh
-                rotation={[Math.PI / 2, 0, 0]}
-                position={[surfaceBounds.centerX, room.height, surfaceBounds.centerZ]}
-                receiveShadow
-                onClick={(event) => {
-                  event.stopPropagation();
-                  selectRoom(room.id, 'walls');
-                }}
-              >
-                <planeGeometry args={[surfaceBounds.width, surfaceBounds.depth]} />
-                <Suspense fallback={<meshStandardMaterial color={ceilingMaterial.color} roughness={ceilingMaterial.roughness} metalness={ceilingMaterial.metalness} />}>
-                  <SurfaceMaterial mat={ceilingMaterial} repeat={[Math.max(surfaceBounds.width / 2, 1), Math.max(surfaceBounds.depth / 2, 1)]} />
-                </Suspense>
-              </mesh>
+              />
+              {!ceilingHidden && (
+                <PolygonSurface
+                  points={footprint}
+                  y={room.height}
+                  material={ceilingMaterial}
+                  fallbackColor={ceilingMaterial.color}
+                  flip
+                  transparent={isTopDownView}
+                  opacity={isTopDownView ? 0.14 : 1}
+                  interactive={!isTopDownView}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    selectRoom(room.id, 'walls');
+                  }}
+                />
+              )}
               {room.id === selectedRoom?.id && (
                 <>
-                  <mesh rotation={[-Math.PI / 2, 0, 0]} position={[room.x, 0.02, room.z]}>
-                    <planeGeometry args={[room.width + 0.2, room.depth + 0.2]} />
+                  <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+                    <shapeGeometry args={[createHorizontalShape(footprint)]} />
                     <meshBasicMaterial color={COLORS.action} transparent opacity={0.12} />
                   </mesh>
-                  <mesh position={[room.x, 0.04, room.z - (room.depth / 2) - 0.04]}>
-                    <boxGeometry args={[room.width + 0.14, 0.05, 0.06]} />
-                    <meshBasicMaterial color={COLORS.action} />
-                  </mesh>
-                  <mesh position={[room.x, 0.04, room.z + (room.depth / 2) + 0.04]}>
-                    <boxGeometry args={[room.width + 0.14, 0.05, 0.06]} />
-                    <meshBasicMaterial color={COLORS.action} />
-                  </mesh>
-                  <mesh position={[room.x - (room.width / 2) - 0.04, 0.04, room.z]}>
-                    <boxGeometry args={[0.06, 0.05, room.depth + 0.14]} />
-                    <meshBasicMaterial color={COLORS.action} />
-                  </mesh>
-                  <mesh position={[room.x + (room.width / 2) + 0.04, 0.04, room.z]}>
-                    <boxGeometry args={[0.06, 0.05, room.depth + 0.14]} />
-                    <meshBasicMaterial color={COLORS.action} />
-                  </mesh>
+                  <FootprintOutline points={footprint} />
                 </>
               )}
 
@@ -2312,7 +2984,10 @@ export default function RoomScene() {
               {!wallsHidden && roomScopedWalls.map((wall) => (
                 <InteractiveWall
                   key={wall.id}
-                  ref={(r) => { if (r) wallRefs.current[wall.id] = r; }}
+                  ref={(r) => {
+                    if (r) wallRefs.current[wall.id] = r;
+                    else delete wallRefs.current[wall.id];
+                  }}
                   wall={wall}
                   isSelected={wall.id === selectedWallId}
                   selectedOpening={selectedOpening?.wallId === wall.id ? selectedOpening : null}
@@ -2327,7 +3002,7 @@ export default function RoomScene() {
                     if (activeTool === 'build') setActiveTool('select');
                   }}
                   onOpeningPreviewMove={(type, point) => updateOpeningPreview(wall, type, point)}
-                  onOpeningCommit={() => commitOpeningPreview(wall)}
+                  onOpeningCommit={(point) => commitOpeningPreview(wall, point)}
                   onOpeningSelect={(opening) => {
                     setSelectedRoomId(room.id);
                     setSelectedWallId(wall.id);
@@ -2338,6 +3013,8 @@ export default function RoomScene() {
                   }}
                   updateOpening={(type, openingId, updates) => updateWallOpening(wall.id, type, openingId, updates)}
                   updateWall={updateWall}
+                  edgeLinkStart={wallEdgeLinkStart}
+                  onEdgeLinkPoint={handleWallEdgeLinkPoint}
                   setOrbitEnabled={setOrbitEnabled}
                   cameraMode={cameraMode}
                 />
@@ -2350,40 +3027,28 @@ export default function RoomScene() {
           {pendingScenePreviewRoom && (
             <group>
               <mesh
-                position={[pendingScenePreviewRoom.x, pendingScenePreviewRoom.height / 2, pendingScenePreviewRoom.z]}
-                renderOrder={2}
-              >
-                <boxGeometry args={[pendingScenePreviewRoom.width, pendingScenePreviewRoom.height, pendingScenePreviewRoom.depth]} />
-                <meshStandardMaterial
-                  color={pendingScenePreviewRoom.overlapsExisting ? '#e58d73' : COLORS.action}
-                  transparent
-                  opacity={pendingScenePreviewRoom.overlapsExisting ? 0.18 : 0.12}
-                  depthWrite={false}
-                />
-              </mesh>
-              <lineSegments
-                position={[pendingScenePreviewRoom.x, pendingScenePreviewRoom.height / 2, pendingScenePreviewRoom.z]}
-                renderOrder={3}
-              >
-                <edgesGeometry args={[new THREE.BoxGeometry(pendingScenePreviewRoom.width, pendingScenePreviewRoom.height, pendingScenePreviewRoom.depth)]} />
-                <lineBasicMaterial
-                  color={pendingScenePreviewRoom.overlapsExisting ? '#f2b29d' : '#f3d0a9'}
-                  transparent
-                  opacity={0.9}
-                />
-              </lineSegments>
-              <mesh
                 rotation={[-Math.PI / 2, 0, 0]}
-                position={[pendingScenePreviewRoom.x, 0.03, pendingScenePreviewRoom.z]}
+                position={[0, 0.03, 0]}
                 renderOrder={1}
               >
-                <planeGeometry args={[pendingScenePreviewRoom.width, pendingScenePreviewRoom.depth]} />
+                <shapeGeometry args={[createHorizontalShape(pendingScenePreviewRoom.footprint ?? getRoomFootprint(pendingScenePreviewRoom))]} />
                 <meshBasicMaterial
                   color={pendingScenePreviewRoom.overlapsExisting ? '#e58d73' : COLORS.action}
                   transparent
                   opacity={pendingScenePreviewRoom.overlapsExisting ? 0.16 : 0.22}
+                  side={THREE.DoubleSide}
                 />
               </mesh>
+              <FootprintOutline
+                points={pendingScenePreviewRoom.footprint ?? getRoomFootprint(pendingScenePreviewRoom)}
+                y={0.08}
+                color={pendingScenePreviewRoom.overlapsExisting ? '#f2b29d' : COLORS.action}
+              />
+              <FootprintOutline
+                points={pendingScenePreviewRoom.footprint ?? getRoomFootprint(pendingScenePreviewRoom)}
+                y={pendingScenePreviewRoom.height}
+                color={pendingScenePreviewRoom.overlapsExisting ? '#f2b29d' : '#f3d0a9'}
+              />
               <Text
                 position={[pendingScenePreviewRoom.x, pendingScenePreviewRoom.height + 0.36, pendingScenePreviewRoom.z]}
                 fontSize={0.24}
@@ -2394,16 +3059,6 @@ export default function RoomScene() {
                 {`${pendingScenePreviewRoom.name} Preview`}
               </Text>
             </group>
-          )}
-
-          {!wallsHidden && (
-            <WallGizmo
-              selectedWall={selectedWall}
-              wallRef={{ current: wallRefs.current[selectedWallId] }}
-              gizmoMode={gizmoMode}
-              updateWall={updateWall}
-              setOrbitEnabled={setOrbitEnabled}
-            />
           )}
 
           {/* World projectors*/}
@@ -2523,6 +3178,7 @@ export default function RoomScene() {
             projectName={projectSave.projectName}
             cameraMode={cameraMode}
             onCameraToggle={() => {
+              if (isSaving) return;
               if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }
               else { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }
             }}
@@ -2532,12 +3188,13 @@ export default function RoomScene() {
           </div>
           <BottomNav
             activeTab={activeTab}
-            onTabChange={openMobilePanel}
-            onSave={() => setSaveModalOpen(true)}
-            onDashboard={handleDashboard}
-            onLogout={handleLogout}
-            canUndo={canUndo} canRedo={canRedo}
-            onUndo={undo} onRedo={redo}
+            onTabChange={(tab) => { if (!isSaving) openMobilePanel(tab); }}
+            onSave={() => { if (!isSaving) setSaveModalOpen(true); }}
+            onDashboard={() => { if (!isSaving) handleDashboard(); }}
+            onLogout={() => { if (!isSaving) handleLogout(); }}
+            canUndo={canUndo && !isSaving} canRedo={canRedo && !isSaving}
+            onUndo={() => { if (!isSaving) undo(); }}
+            onRedo={() => { if (!isSaving) redo(); }}
             showRoomTab={Boolean(selectedRoom)}
           />
           {selectedOpeningEntity && (
@@ -2660,33 +3317,60 @@ export default function RoomScene() {
             <div style={{ background: `${COLORS.background}D9`, padding: '10px 12px', borderRadius: '20px', border: softBorder, backdropFilter: 'blur(20px)', boxShadow: glassShadow }}>
               <Space>
                 <Tooltip title="Undo (Ctrl+Z)">
-                  <Button type="text" disabled={!canUndo} icon={<UndoOutlined />} onClick={undo} className="room-action-button" />
+                  <Button type="text" disabled={!canUndo || isSaving} icon={<UndoOutlined />} onClick={undo} className="room-action-button" />
                 </Tooltip>
                 <Tooltip title="Redo (Ctrl+Y)">
-                  <Button type="text" disabled={!canRedo} icon={<RedoOutlined />} onClick={redo} className="room-action-button" />
+                  <Button type="text" disabled={!canRedo || isSaving} icon={<RedoOutlined />} onClick={redo} className="room-action-button" />
                 </Tooltip>
                 <div style={{ width: 1, height: 24, background: 'rgba(201, 171, 146, 0.45)', margin: '0 6px' }} />
-                <Tooltip title="Save / Snapshot">
-                  <Button type="text" icon={<SaveOutlined />} onClick={() => setSaveModalOpen(true)} className="room-action-button room-action-button-accent" />
+                <Tooltip title={isSaving ? 'Saving project' : 'Save / Snapshot'}>
+                  <Button
+                    type="text"
+                    disabled={isSaving}
+                    icon={isSaving ? <LoadingOutlined spin /> : projectSave.saveStatus === 'saved' ? <CheckOutlined /> : <SaveOutlined />}
+                    onClick={() => setSaveModalOpen(true)}
+                    className="room-action-button room-action-button-accent"
+                    style={{ minWidth: 128, justifyContent: 'center' }}
+                  >
+                    {isSaving ? 'Saving...' : projectSave.saveStatus === 'saved' ? 'Saved' : 'Save'}
+                  </Button>
                 </Tooltip>
                 <Tooltip title="Back to Dashboard">
-                  <Button type="text" icon={<AppstoreOutlined />} onClick={handleDashboard} className="room-action-button" />
+                  <Button type="text" disabled={isSaving} icon={<AppstoreOutlined />} onClick={handleDashboard} className="room-action-button" />
                 </Tooltip>
                 <Tooltip title="Logout">
-                  <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout} className="room-action-button" />
+                  <Button type="text" disabled={isSaving} icon={<LogoutOutlined />} onClick={handleLogout} className="room-action-button" />
                 </Tooltip>
-                {projectSave.saveStatus === 'saved' && (
+                {projectSave.saveStatus === 'saved' && !isSaving && (
                   <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 600, marginLeft: 2, letterSpacing: '0.04em' }}>Saved</span>
                 )}
               </Space>
             </div>
             <Button
               type="default"
+              disabled={isSaving}
+              onClick={() => navigate(switchTo2DUrl)}
+              className="room-standalone-action-button"
+            >
+              Switch to 2D View
+            </Button>
+            <Button
+              type="default"
+              disabled={isSaving}
               icon={wallsHidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
               onClick={toggleWallsHidden}
               className="room-standalone-action-button"
             >
               {wallsHidden ? 'Show Walls' : 'Hide Walls'}
+            </Button>
+            <Button
+              type="default"
+              disabled={isSaving}
+              icon={ceilingHidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+              onClick={toggleCeilingHidden}
+              className="room-standalone-action-button"
+            >
+              {ceilingHidden ? 'Show Ceiling' : 'Hide Ceiling'}
             </Button>
           </div>
 
@@ -2709,7 +3393,7 @@ export default function RoomScene() {
                           label={label}
                           icon={Icon}
                           active={isActive}
-                          onClick={() => toggleDesktopPanel(key)}
+                          onClick={() => { if (!isSaving) toggleDesktopPanel(key); }}
                           variant="sidebar"
                         />
                       );
@@ -2724,7 +3408,7 @@ export default function RoomScene() {
                         <div className="room-floating-kicker">Context</div>
                         <div className="room-floating-title">{desktopPanelTitle}</div>
                       </div>
-                      <button type="button" className="room-floating-close" onClick={() => setDesktopPanelOpen(false)}>
+                      <button type="button" className="room-floating-close" onClick={() => { if (!isSaving) setDesktopPanelOpen(false); }} disabled={isSaving}>
                         Collapse
                       </button>
                     </div>
@@ -2851,7 +3535,7 @@ export default function RoomScene() {
                     </div>
                   )}
                   <div style={{ flex: 1, minHeight: 0, borderRadius: 28, background: `linear-gradient(180deg, ${COLORS.surface}E8 0%, ${COLORS.background}EE 100%)`, border: `1px solid ${COLORS.secondary}50`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)', overflow: 'hidden', position: 'relative', zIndex: 1 }}>
-                    <Tabs className="room-tabs" activeKey={activeTab} onChange={setActiveTab} items={tabItems} style={{ height: '100%', padding: '10px 14px 16px' }} />
+                    <Tabs className="room-tabs" activeKey={activeTab} onChange={(key) => { if (!isSaving) setActiveTab(key); }} items={tabItems} style={{ height: '100%', padding: '10px 14px 16px' }} />
                   </div>
                 </div>
               </Splitter.Panel>
@@ -2922,7 +3606,8 @@ export default function RoomScene() {
       {/*  Save modal  */}
       <SaveModal
         open={saveModalOpen}
-        onClose={() => setSaveModalOpen(false)}
+        onClose={() => { if (!isSaving) setSaveModalOpen(false); }}
+        currentProjectId={currentProjectId}
         projectName={projectSave.projectName}
         setProjectName={projectSave.setProjectName}
         saveStatus={projectSave.saveStatus}
@@ -2940,6 +3625,157 @@ export default function RoomScene() {
         setAutosaveEnabled={projectSave.setAutosaveEnabled}
         recorderProps={recorder}
       />
+
+      {projectLoading && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1590,
+            background: 'rgba(17, 13, 10, 0.78)',
+            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'auto',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '16px 20px',
+              borderRadius: 16,
+              background: `${COLORS.background}F2`,
+              border: `1px solid ${COLORS.secondary}66`,
+              boxShadow: '0 18px 48px rgba(0,0,0,0.28)',
+              color: COLORS.text,
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            <LoadingOutlined spin style={{ color: COLORS.action, fontSize: 18 }} />
+            Opening project...
+          </div>
+        </div>
+      )}
+
+      {projectLoadError && !projectLoading && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1590,
+            background: 'rgba(17, 13, 10, 0.72)',
+            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'auto',
+          }}
+        >
+          <div
+            style={{
+              width: 'min(420px, calc(100vw - 32px))',
+              padding: 20,
+              borderRadius: 16,
+              background: `${COLORS.background}F5`,
+              border: `1px solid ${COLORS.secondary}66`,
+              boxShadow: '0 18px 48px rgba(0,0,0,0.28)',
+              color: COLORS.text,
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>
+              Could not open project
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: COLORS.secondary, marginBottom: 16 }}>
+              {projectLoadError}
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  loadingProjectIdRef.current = null;
+                  setProjectLoadError('');
+                  setProjectLoading(true);
+                  const retryPromise = loadProjectRef.current
+                    ? loadProjectRef.current(selectedProjectId)
+                    : Promise.reject(new Error('Project loader is not ready.'));
+                  retryPromise.catch((error) => {
+                    setProjectLoadError(error?.response?.data?.detail || error?.message || 'Failed to open project.');
+                  }).finally(() => setProjectLoading(false));
+                }}
+                style={{
+                  flex: 1,
+                  height: 40,
+                  borderRadius: 8,
+                  border: 'none',
+                  background: COLORS.action,
+                  color: '#1A1008',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Try again
+              </button>
+              <button
+                type="button"
+                onClick={handleDashboard}
+                style={{
+                  flex: 1,
+                  height: 40,
+                  borderRadius: 8,
+                  border: `1px solid ${COLORS.secondary}66`,
+                  background: 'transparent',
+                  color: COLORS.text,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSaving && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1600,
+            background: 'rgba(17, 13, 10, 0.42)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'auto',
+            cursor: 'wait',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '16px 20px',
+              borderRadius: 18,
+              background: `${COLORS.background}F2`,
+              border: `1px solid ${COLORS.secondary}66`,
+              boxShadow: '0 18px 48px rgba(0,0,0,0.28)',
+              color: COLORS.text,
+              fontSize: 14,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+            }}
+          >
+            <LoadingOutlined spin style={{ color: COLORS.action, fontSize: 18 }} />
+            Saving project...
+          </div>
+        </div>
+      )}
 
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -3365,6 +4201,21 @@ export default function RoomScene() {
         .room-secondary-chip.is-danger:hover {
           border-color: rgba(255, 107, 107, 0.8);
           color: #ff8d8d;
+        }
+        .room-input-unit {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 36px;
+          padding: 0 10px;
+          border: 1px solid rgba(201, 171, 146, 0.22);
+          border-left: 0;
+          border-radius: 0 8px 8px 0;
+          background: rgba(255, 255, 255, 0.06);
+          color: ${COLORS.action};
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 30px;
         }
         .room-creation-panel {
           position: relative;

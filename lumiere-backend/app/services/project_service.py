@@ -131,12 +131,30 @@ async def update_project(
 
 
 async def list_projects(user_id: str) -> list[dict]:
-    cursor = projects_collection.find({"user_id": ObjectId(user_id)}).sort(
-        [("last_opened_at", -1), ("updated_at", -1)]
-    )
+    cursor = projects_collection.find(
+        {"user_id": ObjectId(user_id)},
+        {
+            "scene_data.walls": 0,
+            "scene_data.furniture": 0,
+            "scene_data.placedItems": 0,
+            "scene_data.materials": 0,
+            "scene_data.floorMaterial": 0,
+            "scene_data.ceilingMaterial": 0,
+            "scene_data.lighting": 0,
+            "scene.walls": 0,
+            "scene.furniture": 0,
+            "scene.placedItems": 0,
+            "scene.materials": 0,
+            "scene.floorMaterial": 0,
+            "scene.ceilingMaterial": 0,
+            "scene.lighting": 0,
+        },
+    ).sort([("last_opened_at", -1), ("updated_at", -1)])
     items: list[dict] = []
     async for doc in cursor:
         serialized = _serialize_project(doc)
+        scene_data = serialized.get("scene_data") or {}
+        serialized["rooms_count"] = len(scene_data.get("rooms") or [])
         serialized.pop("scene_data", None)
         serialized.pop("scene", None)
         items.append(serialized)
@@ -244,7 +262,16 @@ def _estimate_project_bytes(doc: dict) -> tuple[int, int]:
 
 
 async def get_storage_usage(user_id: str) -> dict:
-    cursor = projects_collection.find({"user_id": ObjectId(user_id)})
+    cursor = projects_collection.find(
+        {"user_id": ObjectId(user_id)},
+        {
+            "title": 1,
+            "thumbnail_url": 1,
+            "scene_data.rooms": 1,
+            "model_assets": 1,
+            "preview_video": 1,
+        },
+    )
 
     total_bytes = 0
     total_projects = 0

@@ -1,0 +1,59 @@
+.hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.hero-text h1 {
+  margin: 0;
+}
+
+.hero-text-rotator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.slide {
+  position: relative;
+  display: inline-flex;
+  height: 1.25em;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  animation: hero-tagline-slide 3s ease-in-out infinite;
+}
+
+.wrapper > span {
+  display: flex;
+  align-items: center;
+  height: 1.25em;
+}
+
+@keyframes hero-tagline-slide {
+  0%,
+  20% {
+    transform: translateY(0);
+  }
+
+  33.333%,
+  53.333% {
+    transform: translateY(-1.25em);
+  }
+
+  66.666%,
+  86.666% {
+    transform: translateY(-2.5em);
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}

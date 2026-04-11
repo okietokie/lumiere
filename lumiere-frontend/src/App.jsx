@@ -1,20 +1,33 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { App as AntApp, ConfigProvider } from "antd";
 import gsap from "gsap";
 import barba from "@barba/core";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import LandingPage from "./components/Landingpage";
 import Login from "./components/login/login.jsx";
 import Register from "./components/login/Register.jsx";
 import ResetPassword from "./components/login/ResetPassword.jsx";
 import Dashboard from "./components/userDashboard/Dashboard/Dashboard.jsx";
 import RoomScene from "./components/threeD/scene/RoomScene";
+import RoomCanvas from "./components/2d/RoomCanvas.jsx";
 import ModelPreviewStudio from "./components/admin/ModelPreviewStudio";
 import ProjectViewerPage from "./components/viewer/ProjectViewerPage";
 import { COLORS } from "./utils/colors";
 import { clearAuthSession, getAccessToken, getStoredUser } from "./utils/authStorage.js";
+import {
+  convert2DPlanTo3DScene,
+  convert3DSceneTo2DPlan,
+  getLatestLiveEditorSnapshot,
+} from "./utils/editorSceneBridge";
 import { ToastProvider } from "./ui/ToastNotification";
 import useModelPrefetch from "./hooks/useModelPrefetch";
+import { fetchModelManifest } from "./hooks/useModelPrefetch";
 
 function RequireAuth({ children }) {
   return getAccessToken() ? children : <Navigate to="/login" replace />;
@@ -24,9 +37,73 @@ function RedirectAuthenticated({ children }) {
   return getAccessToken() ? <Navigate to="/user/dashboard" replace /> : children;
 }
 
+function EditorRoute({ children }) {
+  return <>{children}</>;
+}
+
+function LiveRoomCanvasRoute() {
+  const initialPlan = useMemo(() => {
+    const latest = getLatestLiveEditorSnapshot();
+    if (!latest) return null;
+    return latest.type === "2d" ? latest.data : convert3DSceneTo2DPlan(latest.data);
+  }, []);
+  return <RoomCanvas initialPlan={initialPlan} />;
+}
+
+function LiveRoomSceneRoute() {
+  const [initialScene, setInitialScene] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      const latest = getLatestLiveEditorSnapshot();
+      if (!latest) {
+        if (!cancelled) setInitialScene(null);
+        return;
+      }
+
+      if (latest.type === "3d") {
+        if (!cancelled) setInitialScene(latest.data);
+        return;
+      }
+
+      let manifest = [];
+      try {
+        manifest = await fetchModelManifest();
+      } catch {
+        manifest = [];
+      }
+
+      if (!cancelled) {
+        setInitialScene(convert2DPlanTo3DScene(latest.data, { manifest }));
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return <RoomScene initialScene={initialScene} />;
+}
+
 function RouteShell() {
   const location = useLocation();
-  const isFullscreenRoute = location.pathname === "/user/room";
+  const isFullscreenRoute = ["/user/room", "/user/room-2d", "/canvas"].includes(location.pathname);
+  const routeNamespace =
+    location.pathname === "/"
+      ? "landing"
+      : location.pathname === "/login"
+        ? "login"
+        : location.pathname === "/register"
+          ? "register"
+          : location.pathname === "/user/dashboard"
+            ? "dashboard"
+            : location.pathname.startsWith("/user/room")
+              ? "editor"
+              : "app";
   const storedUser = getStoredUser();
   const shellRef = useRef(null);
   const veilRef = useRef(null);
@@ -50,9 +127,10 @@ function RouteShell() {
       trigger: "react-router",
     };
 
-    const waitForTimeline = (timeline) => new Promise((resolve) => {
-      timeline.eventCallback("onComplete", resolve);
-    });
+    const waitForTimeline = (timeline) =>
+      new Promise((resolve) => {
+        timeline.eventCallback("onComplete", resolve);
+      });
 
     const run = async () => {
       await barba.hooks.do("before", data);
@@ -119,6 +197,8 @@ function RouteShell() {
       />
       <div
         ref={shellRef}
+        data-barba="container"
+        data-barba-namespace={routeNamespace}
         data-route-shell
         style={{
           minHeight: "100vh",
@@ -130,52 +210,65 @@ function RouteShell() {
           color: COLORS.text,
         }}
       >
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route
-          path="/login"
-          element={
-            <RedirectAuthenticated>
-              <Login />
-            </RedirectAuthenticated>
-          }
-        />
-        <Route
-          path="/register"
-          element={
-            <RedirectAuthenticated>
-              <Register />
-            </RedirectAuthenticated>
-          }
-        />
-        <Route
-          path="/reset-password"
-          element={
-            <RedirectAuthenticated>
-              <ResetPassword />
-            </RedirectAuthenticated>
-          }
-        />
-        <Route
-          path="/user/dashboard"
-          element={
-            <RequireAuth>
-              <Dashboard user={storedUser} onLogout={handleLogout} />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/user/room"
-          element={
-            <RequireAuth>
-              <RoomScene />
-            </RequireAuth>
-          }
-        />
-        <Route path="/view/:projectId" element={<ProjectViewerPage />} />
-        <Route path="/admin/model-previews" element={<ModelPreviewStudio />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route
+            path="/login"
+            element={
+              <RedirectAuthenticated>
+                <Login />
+              </RedirectAuthenticated>
+            }
+          />
+          <Route
+            path="/register"
+            element={
+              <RedirectAuthenticated>
+                <Register />
+              </RedirectAuthenticated>
+            }
+          />
+          <Route
+            path="/reset-password"
+            element={
+              <RedirectAuthenticated>
+                <ResetPassword />
+              </RedirectAuthenticated>
+            }
+          />
+          <Route
+            path="/user/dashboard"
+            element={
+              <RequireAuth>
+                <Dashboard user={storedUser} onLogout={handleLogout} />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/user/room"
+            element={
+              <RequireAuth>
+                <EditorRoute mode="3d">
+                  <LiveRoomSceneRoute />
+                </EditorRoute>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/user/room-2d"
+            element={
+              <RequireAuth>
+                <EditorRoute mode="2d">
+                  <LiveRoomCanvasRoute />
+                </EditorRoute>
+              </RequireAuth>
+            }
+          />
+          <Route path="/canvas" element={<Navigate to="/user/room-2d" replace />} />
+          <Route path="/view/:projectId" element={<ProjectViewerPage />} />
+          <Route path="/admin/model-previews" element={<ModelPreviewStudio />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </div>
     </>
   );
@@ -185,11 +278,7 @@ function App() {
   useModelPrefetch({ autostart: true, delay: 1200 });
 
   useEffect(() => {
-    gsap.fromTo(
-      "body",
-      { opacity: 0 },
-      { opacity: 1, duration: 0.8, ease: "power3.out" }
-    );
+    gsap.fromTo("body", { opacity: 0 }, { opacity: 1, duration: 0.8, ease: "power3.out" });
   }, []);
 
   return (
@@ -248,7 +337,7 @@ function App() {
     >
       <AntApp>
         <ToastProvider>
-          <BrowserRouter>
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
             <RouteShell />
           </BrowserRouter>
         </ToastProvider>
@@ -258,4 +347,3 @@ function App() {
 }
 
 export default App;
-

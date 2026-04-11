@@ -246,6 +246,13 @@ export default function LandingSections({
   const sceneRotateY = useTransform(springX, [-0.5, 0.5], [-7, 7]);
   const experienceY = useTransform(experienceScroll, [0, 1], [26, -18]);
   const [sceneProgress, setSceneProgress] = useState(0);
+  const [heroIntroProgress, setHeroIntroProgress] = useState(mobile ? 1 : 0);
+
+  useEffect(() => {
+    setHeroIntroProgress(mobile ? 1 : 0);
+  }, [mobile]);
+
+  const heroIntroActive = !mobile && heroIntroProgress < 0.86;
 
   useEffect(() => {
     const unsub = experienceScroll.on("change", (value) => setSceneProgress(value));
@@ -260,7 +267,7 @@ export default function LandingSections({
     <div className="lm-page" ref={shellRef}>
       <motion.div className="lm-backdrop" style={{ y: backdropY }} />
 
-      <header className="lm-nav">
+      <header className={`lm-nav${heroIntroActive ? " lm-nav-hidden" : ""}`}>
         <div>
           <p className="lm-brand">Lumiere Maison</p>
           <span className="lm-nav-sub">Immersive interior design platform</span>
@@ -280,8 +287,13 @@ export default function LandingSections({
       </header>
 
       <main className="lm-main">
-        <section className="lm-hero">
-          <motion.div className="lm-copy" initial="hidden" animate="show" variants={reveal}>
+        <section className={`lm-hero${heroIntroActive ? " lm-hero-intro-active" : ""}`}>
+          <motion.div
+            className={`lm-copy${heroIntroActive ? " lm-copy-hidden" : ""}`}
+            initial="hidden"
+            animate="show"
+            variants={reveal}
+          >
             <motion.p className="lm-kicker" custom={0} variants={reveal}>
               Cinematic 3D landing experience
             </motion.p>
@@ -308,21 +320,48 @@ export default function LandingSections({
           </motion.div>
 
           <motion.div
-            className="lm-hero-stage"
-            initial={{ opacity: 0, y: 28, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ type: "spring", stiffness: 90, damping: 18, delay: 0.15 }}
-            style={{ rotateX: sceneRotateX, rotateY: sceneRotateY }}
+            className="lm-hero-stage-wrap"
+            initial={false}
+            animate={
+              mobile
+                ? { width: "100%", height: 520, top: 0, y: 0 }
+                : heroIntroActive
+                  ? { width: "100%", height: "calc(100vh - 132px)", top: 0, left: 0, y: 0 }
+                  : { width: "56%", height: 680, top: "50%", left: 0, y: "-50%" }
+            }
+            transition={{
+              type: "spring",
+              stiffness: heroIntroActive ? 72 : 88,
+              damping: 18,
+              mass: 0.95,
+            }}
           >
-            <SceneComponent pointer={pointer} progress={sceneProgress} mobile={mobile} />
-            <div className="lm-stage-panel lm-stage-panel-top">
-              <span>Hero scene</span>
-              <strong>Animated room reveal</strong>
-            </div>
-            <div className="lm-stage-panel lm-stage-panel-bottom">
-              <span>After intro</span>
-              <strong>Drag with mouse or touch</strong>
-            </div>
+            <motion.div
+              className="lm-hero-stage"
+              initial={{ opacity: 0, y: 28, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ type: "spring", stiffness: 90, damping: 18, delay: 0.15 }}
+              style={{ rotateX: sceneRotateX, rotateY: sceneRotateY }}
+            >
+              <SceneComponent
+                pointer={pointer}
+                progress={sceneProgress}
+                mobile={mobile}
+                onIntroProgress={setHeroIntroProgress}
+              />
+              {!heroIntroActive && (
+                <>
+                  <div className="lm-stage-panel lm-stage-panel-top">
+                    <span>Hero scene</span>
+                    <strong>Animated room reveal</strong>
+                  </div>
+                  <div className="lm-stage-panel lm-stage-panel-bottom">
+                    <span>After intro</span>
+                    <strong>Drag with mouse or touch</strong>
+                  </div>
+                </>
+              )}
+            </motion.div>
           </motion.div>
         </section>
 

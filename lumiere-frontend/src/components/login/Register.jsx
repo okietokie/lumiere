@@ -1,13 +1,11 @@
-import React, { useState } from 'react';
-import { Layout, Card, Form, Input, Button, Typography, App, Row, Col, Divider } from 'antd';
-import { UserOutlined, MailOutlined, LockOutlined, ArrowLeftOutlined } from '@ant-design/icons';
-import { useNavigate, Link } from 'react-router-dom';
-import { COLORS } from '../../utils/colors.js';
-import { authApi } from '../../api/auth.js';
-import { getApiErrorMessage } from '../../utils/apiError.js';
-
-const { Title, Text } = Typography;
-const { Content } = Layout;
+import React, { useState } from "react";
+import { App, Checkbox, Form, Input } from "antd";
+import { ArrowLeftOutlined } from "@ant-design/icons";
+import { Link, useNavigate } from "react-router-dom";
+import { authApi } from "../../api/auth.js";
+import { getApiErrorMessage } from "../../utils/apiError.js";
+import landingBg from "../../assets/landing-page-bg.jpg";
+import "./register.css";
 
 const Register = () => {
   const navigate = useNavigate();
@@ -22,100 +20,148 @@ const Register = () => {
         email: values.email,
         password: values.password,
       });
-      message.success('Account created successfully!');
-      setTimeout(() => navigate('/login'), 1500);
+      message.success("Account created successfully!");
+      setTimeout(() => navigate("/login"), 1200);
     } catch (error) {
-      const errMsg = getApiErrorMessage(error, 'Registration failed. Please try again.');
-      message.error(errMsg);
+      message.error(getApiErrorMessage(error, "Registration failed. Please try again."));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Layout style={{ minHeight: '100vh', background: COLORS.background }}>
-      <Content style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
-        <Button
-          icon={<ArrowLeftOutlined />}
-          type="link"
-          onClick={() => navigate('/')}
-          style={{ position: 'absolute', top: 40, left: 40, color: COLORS.text }}
-        >
-          Back to Home
-        </Button>
+    <div className="lm-register-page">
+      <header className="lm-register-header">
+        <button className="lm-register-back" type="button" onClick={() => navigate("/")}>
+          <ArrowLeftOutlined />
+          <span>Back Home</span>
+        </button>
+        <div className="lm-register-wordmark">Lumiere Maison</div>
+        <div className="lm-register-header-note">Spatial Design Studio</div>
+      </header>
 
-        <Row justify="center" style={{ width: '100%' }}>
-          <Col xs={24} sm={20} md={14} lg={10} xl={8}>
-            <Card style={{ borderRadius: '20px', background: COLORS.surface, border: `1px solid ${COLORS.action}30` }}>
-              <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-                <Title level={2} style={{ color: COLORS.text }}>Join Lumiere</Title>
-              </div>
+      <main className="lm-register-shell">
+        <section className="lm-register-visual" aria-hidden="true">
+          <div
+            className="lm-register-visual-image"
+            style={{ backgroundImage: `url(${landingBg})` }}
+          />
+          <div className="lm-register-visual-overlay" />
+          <div className="lm-register-visual-grid" />
+          <div className="lm-register-visual-copy">
+            <span className="lm-register-kicker">Early Access</span>
+            <h1>
+              Build interiors with
+              <br />
+              cinematic clarity.
+            </h1>
+            <p>
+              Join Lumiere Maison to design, curate, and present spatial concepts with the same
+              elevated atmosphere as your landing experience.
+            </p>
+          </div>
+          <div className="lm-register-visual-line" />
+        </section>
 
-              <Form layout="vertical" onFinish={onFinish} size="large">
+        <section className="lm-register-panel">
+          <div className="lm-register-panel-inner">
+            <div className="lm-register-intro">
+              <span className="lm-register-intro-accent" />
+              <p className="lm-register-eyebrow">Create Your Account</p>
+              <h2>Enter the Studio</h2>
+              <p className="lm-register-subcopy">
+                Create your profile and start shaping presentation-ready spaces.
+              </p>
+            </div>
+
+            <Form className="lm-register-form" layout="vertical" onFinish={onFinish} requiredMark={false}>
+              <Form.Item
+                label="Full Name"
+                name="fullname"
+                rules={[{ required: true, message: "Please enter your full name." }]}
+              >
+                <Input placeholder="Julianne Thorne" autoComplete="name" />
+              </Form.Item>
+
+              <Form.Item
+                label="Email Address"
+                name="email"
+                rules={[
+                  { required: true, message: "Please enter your email address." },
+                  { type: "email", message: "Please enter a valid email address." },
+                ]}
+              >
+                <Input placeholder="curator@lumieremaison.com" autoComplete="email" />
+              </Form.Item>
+
+              <div className="lm-register-form-row">
                 <Form.Item
-                  name="fullname"
-                  label={<span style={{ color: COLORS.text }}>Full Name</span>}
-                  rules={[{ required: true, message: 'Please enter your full name.' }]}
-                >
-                  <Input prefix={<UserOutlined />} placeholder="Full Name" />
-                </Form.Item>
-
-                <Form.Item
-                  name="email"
-                  label={<span style={{ color: COLORS.text }}>Email</span>}
-                  rules={[{ required: true, type: 'email', message: 'Please enter a valid email.' }]}
-                >
-                  <Input prefix={<MailOutlined />} placeholder="Email" />
-                </Form.Item>
-
-                <Form.Item
+                  label="Password"
                   name="password"
-                  label={<span style={{ color: COLORS.text }}>Password</span>}
-                  rules={[{ required: true, min: 6, message: 'Password must be at least 6 characters.' }]}
+                  rules={[
+                    { required: true, message: "Please enter a password." },
+                    { min: 6, message: "Password must be at least 6 characters." },
+                  ]}
                 >
-                  <Input.Password prefix={<LockOutlined />} placeholder="Password" />
+                  <Input.Password placeholder="••••••••" autoComplete="new-password" />
                 </Form.Item>
 
                 <Form.Item
+                  label="Confirm Password"
                   name="confirm"
-                  label={<span style={{ color: COLORS.text }}>Confirm Password</span>}
-                  dependencies={['password']}
+                  dependencies={["password"]}
                   rules={[
-                    { required: true, message: 'Please confirm your password.' },
+                    { required: true, message: "Please confirm your password." },
                     ({ getFieldValue }) => ({
                       validator(_, value) {
-                        if (!value || getFieldValue('password') === value) {
+                        if (!value || getFieldValue("password") === value) {
                           return Promise.resolve();
                         }
-                        return Promise.reject(new Error('Passwords do not match!'));
+                        return Promise.reject(new Error("Passwords do not match."));
                       },
                     }),
                   ]}
                 >
-                  <Input.Password prefix={<LockOutlined />} placeholder="Confirm Password" />
+                  <Input.Password placeholder="••••••••" autoComplete="new-password" />
                 </Form.Item>
-
-                <Button
-                  type="primary"
-                  htmlType="submit"
-                  block
-                  loading={loading}
-                  style={{ height: '50px', background: COLORS.action }}
-                >
-                  Create Account
-                </Button>
-              </Form>
-
-              <Divider><Text style={{ color: COLORS.text }}>OR</Text></Divider>
-              <div style={{ textAlign: 'center' }}>
-                <Text style={{ color: COLORS.text }}>Already have an account? </Text>
-                <Link to="/login" style={{ color: COLORS.action }}>Sign In</Link>
               </div>
-            </Card>
-          </Col>
-        </Row>
-      </Content>
-    </Layout>
+
+              <Form.Item
+                className="lm-register-terms-wrap"
+                name="terms"
+                valuePropName="checked"
+                rules={[
+                  {
+                    validator: (_, value) =>
+                      value
+                        ? Promise.resolve()
+                        : Promise.reject(new Error("Please accept the terms to continue.")),
+                  },
+                ]}
+              >
+                <Checkbox className="lm-register-terms">
+                  <span>
+                    I agree to the <Link to="/">Terms of Service</Link> and{" "}
+                    <Link to="/">Privacy Policy</Link>.
+                  </span>
+                </Checkbox>
+              </Form.Item>
+
+              <button className="lm-register-submit" type="submit" disabled={loading}>
+                {loading ? "Creating Account..." : "Complete Registration"}
+              </button>
+            </Form>
+
+            <div className="lm-register-footer">
+              <p>
+                Already have access?
+                <Link to="/login">Login here</Link>
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
   );
 };
 
