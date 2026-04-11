@@ -3,7 +3,7 @@ import { useThree, useFrame } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
 import * as THREE from 'three';
 
-const EYE_LEVEL    = 1.6;
+const EYE_LEVEL    = 1.0;
 const WALK_SPEED   = 4.0;
 const SPRINT_SPEED = 7.5;
 const JUMP_FORCE   = 5.0;
@@ -11,7 +11,7 @@ const GRAVITY      = 12.0;
 const BOB_FREQ     = 8.0;
 const BOB_AMP      = 0.055;
 const MOUSE_SPEED  = 0.65;
-const SOFT_LIMIT   = 10.0;  // metres — comfortably outside any wall
+const MIN_SOFT_LIMIT = 16.0;
 const PUSH_STRENGTH = 6.0;  // how hard the pushback force is
 
 export default function FirstPersonControls({
@@ -31,15 +31,25 @@ export default function FirstPersonControls({
   const velocityY   = useRef(0);
   const bobTime     = useRef(0);
   const roomCentre = useRef(new THREE.Vector3(0, 0, 0));
+  const softLimit = useRef(MIN_SOFT_LIMIT);
   useEffect(() => {
     if (!walls || walls.length === 0) return;
     let sx = 0, sz = 0, count = 0;
+    let maxRadius = 0;
     walls.forEach(({ start, end }) => {
       sx += start[0] + end[0];
       sz += start[1] + end[1];
       count += 2;
     });
     roomCentre.current.set(sx / count, 0, sz / count);
+    walls.forEach(({ start, end }) => {
+      maxRadius = Math.max(
+        maxRadius,
+        Math.hypot(start[0] - roomCentre.current.x, start[1] - roomCentre.current.z),
+        Math.hypot(end[0] - roomCentre.current.x, end[1] - roomCentre.current.z),
+      );
+    });
+    softLimit.current = Math.max(MIN_SOFT_LIMIT, maxRadius + 8);
   }, [walls]);
 
   // ── Keyboard ────────────────────────────────────────────────────────────────
@@ -148,8 +158,8 @@ export default function FirstPersonControls({
     const dz  = nz - cz;
     const dist = Math.sqrt(dx * dx + dz * dz);
 
-    if (dist > SOFT_LIMIT) {
-      const overflow = dist - SOFT_LIMIT;
+    if (dist > softLimit.current) {
+      const overflow = dist - softLimit.current;
       const pushX = -(dx / dist) * overflow * PUSH_STRENGTH * dt;
       const pushZ = -(dz / dist) * overflow * PUSH_STRENGTH * dt;
       nx += pushX;

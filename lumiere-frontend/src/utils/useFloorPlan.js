@@ -136,10 +136,7 @@ export function pointInPolygon(px, py, pts) {
 
 // ─── main hook ────────────────────────────────────────────────────────────────
 export function useFloorPlan(initialState = null) {
-  const initialRooms = (initialState?.rooms ?? []).map(room => ({
-    ...room,
-    joinedCorners: room.joinedCorners ?? {},
-  }));
+  const initialRooms = initialState?.rooms ?? [];
   const initialFurniture = initialState?.furniture ?? [];
   const initialMode = initialState?.mode ?? (initialRooms.length ? "select" : "draw");
   const initialWallThickness = initialState?.wallThickness ?? WALL_THICKNESS;
@@ -238,7 +235,6 @@ export function useFloorPlan(initialState = null) {
       walls,
       area:   calcArea(pts),
       floor:  { type: "custom", color: "#c9a96e", opacity: 0.08, pattern: "solid", scale: 1, rotation: 0 },
-      joinedCorners: {},
     };
     setRooms(prev => [...prev, newRoom]);
     setDraftPts([]); draftRef.current = [];
@@ -344,49 +340,6 @@ export function useFloorPlan(initialState = null) {
     return { x, y };
   }, [snap]);
 
-  const joinCorner = useCallback((roomId, ptIdx) => {
-    pushHistory();
-    setRooms(prev => prev.map(room => {
-      if (room.id !== roomId) return room;
-      const joinedCorners = {
-        ...(room.joinedCorners ?? {}),
-        [ptIdx]: {
-          joined: true,
-          curved: room.joinedCorners?.[ptIdx]?.curved ?? false,
-          radius: room.joinedCorners?.[ptIdx]?.radius ?? 36,
-        },
-      };
-      return { ...room, joinedCorners };
-    }));
-  }, [pushHistory]);
-
-  const unjoinCorner = useCallback((roomId, ptIdx) => {
-    pushHistory();
-    setRooms(prev => prev.map(room => {
-      if (room.id !== roomId) return room;
-      const joinedCorners = { ...(room.joinedCorners ?? {}) };
-      delete joinedCorners[ptIdx];
-      return { ...room, joinedCorners };
-    }));
-  }, [pushHistory]);
-
-  const curveCorner = useCallback((roomId, ptIdx) => {
-    pushHistory();
-    setRooms(prev => prev.map(room => {
-      if (room.id !== roomId) return room;
-      const current = room.joinedCorners?.[ptIdx] ?? {};
-      const joinedCorners = {
-        ...(room.joinedCorners ?? {}),
-        [ptIdx]: {
-          joined: true,
-          curved: true,
-          radius: current.radius ?? 36,
-        },
-      };
-      return { ...room, joinedCorners };
-    }));
-  }, [pushHistory]);
-
   // ── furniture ops ─────────────────────────────────────────────────────────
   const moveFurniture = useCallback((id, rawX, rawY) => {
     const { x, y } = snap(rawX, rawY);
@@ -473,7 +426,6 @@ export function useFloorPlan(initialState = null) {
             walls: nextWalls,
             area: calcArea(nextPoints),
             floor: { ...DEFAULT_ROOM_FLOOR, ...(room?.floor ?? {}) },
-            joinedCorners: room?.joinedCorners ?? {},
           };
         })
       : [];
@@ -504,7 +456,6 @@ export function useFloorPlan(initialState = null) {
     handleCanvasClick, handleMouseMove, handleDoubleClick,
     undo, redo, cancelDraft, clearAll,
     rooms, closeRoom, deleteRoom, renameRoom, dragCorner,
-    joinCorner, unjoinCorner, curveCorner,
     updateFloor, applyRoomPreset,
     furniture, selectedFurnitureId, setSelectedFurnitureId,
     pendingFurniture, setPendingFurniture,

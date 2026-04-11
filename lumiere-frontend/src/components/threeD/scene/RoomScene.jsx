@@ -2469,7 +2469,7 @@ export default function RoomScene({ initialScene = null }) {
       gsap.to(orbitControlsRef.current.target, { x: target[0], y: target[1], z: target[2], duration: 1, ease: "power2.inOut" });
       gsap.to(orbitControlsRef.current.object.position, { x: position[0], y: position[1], z: position[2], duration: 1, ease: "power2.inOut", onUpdate: () => orbitControlsRef.current.update() });
     } else if (cameraMode === 'firstPerson') {
-      setTeleportTarget([position[0], 1.6, position[2]]);
+      setTeleportTarget([position[0], 1.28, position[2]]);
     }
   };
 
@@ -2642,7 +2642,7 @@ export default function RoomScene({ initialScene = null }) {
             <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
               Orbit
             </button>
-            <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }}>
+            <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}>
               Walk
             </button>
           </div>
@@ -2805,7 +2805,7 @@ export default function RoomScene({ initialScene = null }) {
       >
         <Canvas
           camera={cameraMode === 'firstPerson'
-            ? { position: [0, 1.6, 0], fov: 70, near: 0.1, far: 1000 }
+            ? { position: [0, 1.28, 0], fov: 75, near: 0.05, far: 1000 }
             : { position: orbitCameraConfig.position, fov: 50, near: 0.1, far: 1000 }
           }
           style={{ background: lighting.skyColor }}
@@ -2831,8 +2831,12 @@ export default function RoomScene({ initialScene = null }) {
               ref={orbitControlsRef}
               enableDamping dampingFactor={0.06}
               target={orbitCameraConfig.target}
-              enablePan={false}
-              maxPolarAngle={isTopDownView ? Math.PI - 0.01 : Math.PI / 2.4}
+              enablePan
+              screenSpacePanning
+              panSpeed={1.1}
+              rotateSpeed={0.85}
+              minDistance={0.35}
+              maxPolarAngle={isTopDownView ? Math.PI - 0.01 : Math.PI / 2 - 0.02}
               enabled={orbitEnabled && !mobileOpeningPlacementLocked}
               touches={mobileOpeningPlacementLocked
                 ? { ONE: THREE.TOUCH.NONE, TWO: THREE.TOUCH.NONE }
@@ -3179,7 +3183,7 @@ export default function RoomScene({ initialScene = null }) {
             cameraMode={cameraMode}
             onCameraToggle={() => {
               if (isSaving) return;
-              if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }
+              if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }
               else { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }
             }}
           />
@@ -3457,7 +3461,7 @@ export default function RoomScene({ initialScene = null }) {
                           <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
                             Orbit
                           </button>
-                          <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.6, 0]); }}>
+                          <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}>
                             Walk
                           </button>
                         </div>

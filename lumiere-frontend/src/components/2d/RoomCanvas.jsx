@@ -134,7 +134,7 @@ function makeTexture(pattern, color, scale = 1) {
 // ─────────────────────────────────────────────────────────────────────────────
 function FloorFill({ room, isSelected }) {
   const floor  = room.floor ?? { color: "#c9a96e", opacity: 0.08, pattern: "solid", scale: 1, rotation: 0 };
-  const flat   = roundedRoomPoints(room).flatMap(p => [p.x, p.y]);
+  const flat   = room.points.flatMap(p => [p.x, p.y]);
   const texRef = useRef(null);
 
   // Rebuild texture when floor settings change
@@ -173,83 +173,6 @@ function hexToRgbArr(hex) {
   ctx.fillRect(0, 0, 1, 1);
   const d = ctx.getImageData(0, 0, 1, 1).data;
   return [d[0], d[1], d[2]];
-}
-
-function dist(a, b) {
-  return Math.hypot((b?.x ?? 0) - (a?.x ?? 0), (b?.y ?? 0) - (a?.y ?? 0));
-}
-
-function pointToward(from, to, amount) {
-  const len = dist(from, to);
-  if (!len) return { x: from.x, y: from.y };
-  const t = amount / len;
-  return {
-    x: from.x + (to.x - from.x) * t,
-    y: from.y + (to.y - from.y) * t,
-  };
-}
-
-function getCornerRadius(room, idx) {
-  const meta = room.joinedCorners?.[idx];
-  if (!meta?.curved) return 0;
-  const pts = room.points;
-  const p = pts[idx];
-  const prev = pts[(idx - 1 + pts.length) % pts.length];
-  const next = pts[(idx + 1) % pts.length];
-  return Math.max(10, Math.min(meta.radius ?? 36, dist(p, prev) * 0.45, dist(p, next) * 0.45));
-}
-
-function roundedRoomPoints(room) {
-  const pts = room.points ?? [];
-  if (pts.length < 3) return pts;
-
-  const rounded = [];
-  pts.forEach((p, idx) => {
-    const radius = getCornerRadius(room, idx);
-    if (!radius) {
-      rounded.push(p);
-      return;
-    }
-
-    const prev = pts[(idx - 1 + pts.length) % pts.length];
-    const next = pts[(idx + 1) % pts.length];
-    const start = pointToward(p, prev, radius);
-    const end = pointToward(p, next, radius);
-    const steps = 8;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      const inv = 1 - t;
-      rounded.push({
-        x: inv * inv * start.x + 2 * inv * t * p.x + t * t * end.x,
-        y: inv * inv * start.y + 2 * inv * t * p.y + t * t * end.y,
-      });
-    }
-  });
-
-  return rounded;
-}
-
-function makeVisualWall(room, wall, idx) {
-  const pts = room.points;
-  let start = wall.start;
-  let end = wall.end;
-  const startRadius = getCornerRadius(room, idx);
-  const endRadius = getCornerRadius(room, (idx + 1) % pts.length);
-  if (startRadius) start = pointToward(start, end, startRadius);
-  if (endRadius) end = pointToward(end, start, endRadius);
-
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const len = Math.hypot(dx, dy);
-  return {
-    ...wall,
-    start,
-    end,
-    length: len,
-    angleDeg: Math.atan2(dy, dx) * (180 / Math.PI),
-    nx: len > 0 ? -dy / len : 0,
-    ny: len > 0 ? dx / len : 0,
-  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -500,39 +423,6 @@ function CornerJoint({ x, y, thickness }) {
     fill="#b8943e" stroke="#1a1714" strokeWidth={1} listening={false}/>;
 }
 
-function CurvedCornerWall({ room, idx }) {
-  const radius = getCornerRadius(room, idx);
-  if (!radius) return null;
-  const pts = room.points;
-  const p = pts[idx];
-  const prev = pts[(idx - 1 + pts.length) % pts.length];
-  const next = pts[(idx + 1) % pts.length];
-  const start = pointToward(p, prev, radius);
-  const end = pointToward(p, next, radius);
-  const steps = 10;
-  const curvePts = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const inv = 1 - t;
-    curvePts.push(
-      inv * inv * start.x + 2 * inv * t * p.x + t * t * end.x,
-      inv * inv * start.y + 2 * inv * t * p.y + t * t * end.y
-    );
-  }
-  const thickness = Math.max(room.walls[idx]?.thickness ?? 12, room.walls[(idx - 1 + pts.length) % pts.length]?.thickness ?? 12);
-  return (
-    <Line
-      points={curvePts}
-      stroke="rgba(201,169,110,0.32)"
-      strokeWidth={thickness}
-      lineCap="round"
-      lineJoin="round"
-      shadowColor="rgba(0,0,0,0.28)"
-      shadowBlur={3}
-      listening={false}
-    />
-  );
-}
 function WallLabel({ wall }) {
   if (wall.length < 30) return null;
   const mx = (wall.start.x+wall.end.x)/2, my = (wall.start.y+wall.end.y)/2;
@@ -591,26 +481,19 @@ function WindowOpening({ wall, opening }) {
 // Drag handle
 // ─────────────────────────────────────────────────────────────────────────────
 function DragHandle({
-  x, y, isSelected, cornerMeta,
+  x, y, isSelected,
   onMouseDown, onDragMove, onDragEnd,
-  onHover, onLeave, onTripleClick,
 }) {
   const radius = isSelected ? 10 : 7;
-  const isJoined = Boolean(cornerMeta?.joined);
-  const isCurved = Boolean(cornerMeta?.curved);
   return (
     <Group x={x} y={y} draggable
       onMouseDown={e=>{ e.cancelBubble = true; onMouseDown(e); }}
       onTouchStart={e=>{ e.cancelBubble = true; onMouseDown(e); }}
-      onClick={e=>{
-        e.cancelBubble = true;
-        if ((e.evt?.detail ?? 1) >= 3) onTripleClick(e);
-      }}
       onDragStart={e=>{ e.target.getStage().container().style.cursor="grabbing"; }}
       onDragMove={onDragMove}
       onDragEnd={e=>{ e.target.getStage().container().style.cursor="grab"; onDragEnd(e); }}
-      onMouseEnter={e=>{ e.target.getStage().container().style.cursor="grab"; onHover(e); }}
-      onMouseLeave={e=>{ e.target.getStage().container().style.cursor="crosshair"; onLeave(e); }}>
+      onMouseEnter={e=>{ e.target.getStage().container().style.cursor="grab"; }}
+      onMouseLeave={e=>{ e.target.getStage().container().style.cursor="crosshair"; }}>
       <Circle
         radius={18}
         fill="transparent"
@@ -618,22 +501,13 @@ function DragHandle({
       />
       <Circle
         radius={radius}
-        fill={isCurved ? "#4ecdc4" : isJoined ? "#d4956a" : isSelected ? "#e8c98a" : "#c9a96e"}
+        fill={isSelected?"#e8c98a":"#c9a96e"}
         stroke={isSelected?"#fff8e8":"#1a1714"}
         strokeWidth={isSelected?2:1.5}
         shadowColor={isSelected?"rgba(201,169,110,0.9)":"rgba(0,0,0,0.4)"}
         shadowBlur={isSelected?12:4}
         listening={false}
       />
-      {isJoined && (
-        <Circle
-          radius={14}
-          stroke={isCurved ? "rgba(78,205,196,0.75)" : "rgba(212,149,106,0.7)"}
-          strokeWidth={1.5}
-          dash={isCurved ? [] : [3, 3]}
-          listening={false}
-        />
-      )}
     </Group>
   );
 }
@@ -645,9 +519,8 @@ function RoomShape({
   room, mode, selectedRoom, selectedCorner, selectedWall, hoveredWall,
   onRoomClick, onWallClick, onWallHover, onWallHoverOut,
   onCornerMouseDown, onCornerDragMove, onCornerDragEnd,
-  onCornerHover, onCornerLeave, onCornerTripleClick,
 }) {
-  const flat = roundedRoomPoints(room).flatMap(p=>[p.x,p.y]);
+  const flat = room.points.flatMap(p=>[p.x,p.y]);
   const cx   = room.points.reduce((s,p)=>s+p.x,0)/room.points.length;
   const cy   = room.points.reduce((s,p)=>s+p.y,0)/room.points.length;
   const aM2  = (room.area/(PX_PER_M*PX_PER_M)).toFixed(1);
@@ -671,8 +544,8 @@ function RoomShape({
         stroke={floor.color} strokeWidth={1.2} opacity={0.5} dash={[6,4]} listening={false}/>}
 
       {/* ④ Walls */}
-      {room.walls.map((wall, wallIdx)=>(
-        <WallRect key={wall.id} wall={makeVisualWall(room, wall, wallIdx)}
+      {room.walls.map(wall=>(
+        <WallRect key={wall.id} wall={wall}
           isSelected={selectedWall?.wallId===wall.id}
           isHovered={hoveredWall?.wallId===wall.id && inOpening}
           onClick={inOpening ? e=>onWallClick(room.id,wall.id,
@@ -680,8 +553,6 @@ function RoomShape({
             e.target.getStage().getPointerPosition().y) : null}
         />
       ))}
-
-      {room.points.map((_, idx)=><CurvedCornerWall key={`curve_${idx}`} room={room} idx={idx}/>)}
 
       {/* ⑤ Corner joints */}
       {room.points.map((p,i)=>(
@@ -709,13 +580,8 @@ function RoomShape({
       {/* ⑨ Drag handles */}
       {inSelect && room.points.map((p,ptIdx)=>{
         const isSel = selectedCorner?.roomId===room.id && selectedCorner?.ptIdx===ptIdx;
-        const cornerMeta = room.joinedCorners?.[ptIdx];
         return <DragHandle key={ptIdx} x={p.x} y={p.y} isSelected={isSel}
-          cornerMeta={cornerMeta}
           onMouseDown={()=>onCornerMouseDown(room.id,ptIdx)}
-          onHover={e=>onCornerHover(room.id, ptIdx, p, cornerMeta, e)}
-          onLeave={()=>onCornerLeave(room.id, ptIdx)}
-          onTripleClick={e=>onCornerTripleClick(room.id, ptIdx, p, cornerMeta, e)}
           onDragMove={e=>{
             const sn=onCornerDragMove(room.id,ptIdx,e.target.x(),e.target.y());
             if(sn){e.target.x(sn.x);e.target.y(sn.y);}
@@ -998,8 +864,6 @@ export default function RoomCanvas({ initialPlan = null }) {
   const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: "idle", usdz: "idle" });
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
   const autosaveRef = useRef(null);
-  const [cornerTooltip, setCornerTooltip] = useState(null);
-  const [cornerMenu, setCornerMenu] = useState(null);
 
   const isTypingTarget = useCallback((target) => {
     if (!target) return false;
@@ -1015,7 +879,6 @@ export default function RoomCanvas({ initialPlan = null }) {
     handleCanvasClick, handleMouseMove, handleDoubleClick,
     undo, redo, cancelDraft, clearAll,
     rooms, deleteRoom, renameRoom, dragCorner,
-    joinCorner, unjoinCorner, curveCorner,
     updateFloor, applyRoomPreset,
     furniture, selectedFurnitureId, setSelectedFurnitureId,
     pendingFurniture, setPendingFurniture,
@@ -1064,57 +927,10 @@ export default function RoomCanvas({ initialPlan = null }) {
   const onPointerMove = useCallback(() => { const {x,y}=getPos(); handleMouseMove(x,y); }, [getPos, handleMouseMove]);
   const onStageClick = useCallback(e => {
     if (e.evt.button != null && e.evt.button !== 0) return;
-    setCornerMenu(null);
     if (mode==="draw"||mode==="furniture") { const {x,y}=getPos(); handleCanvasClick(x,y); }
     else if (mode==="select") { setSelectedCorner(null); setSelectedFurnitureId(null); }
   }, [mode, getPos, handleCanvasClick, setSelectedCorner, setSelectedFurnitureId]);
   const onDblClick = useCallback(() => handleDoubleClick(), [handleDoubleClick]);
-
-  const handleCornerHover = useCallback((roomId, ptIdx, point, cornerMeta) => {
-    setCornerTooltip({
-      roomId,
-      ptIdx,
-      x: point.x,
-      y: point.y,
-      text: cornerMeta?.joined ? "Click three times to view options" : "Click three times to join the two edge",
-    });
-  }, []);
-
-  const handleCornerLeave = useCallback((roomId, ptIdx) => {
-    setCornerTooltip(prev => (
-      prev?.roomId === roomId && prev?.ptIdx === ptIdx ? null : prev
-    ));
-  }, []);
-
-  const handleCornerTripleClick = useCallback((roomId, ptIdx, point, cornerMeta) => {
-    setSelectedCorner({ roomId, ptIdx });
-    if (!cornerMeta?.joined) {
-      joinCorner(roomId, ptIdx);
-      setCornerTooltip({
-        roomId,
-        ptIdx,
-        x: point.x,
-        y: point.y,
-        text: "Joined. Click three times to view options",
-      });
-      return;
-    }
-    setCornerMenu({ roomId, ptIdx, x: point.x, y: point.y });
-  }, [joinCorner, setSelectedCorner]);
-
-  const handleUnjoinCorner = useCallback(() => {
-    if (!cornerMenu) return;
-    unjoinCorner(cornerMenu.roomId, cornerMenu.ptIdx);
-    setCornerMenu(null);
-    setCornerTooltip(null);
-  }, [cornerMenu, unjoinCorner]);
-
-  const handleCurveCorner = useCallback(() => {
-    if (!cornerMenu) return;
-    curveCorner(cornerMenu.roomId, cornerMenu.ptIdx);
-    setCornerMenu(null);
-    setCornerTooltip(null);
-  }, [cornerMenu, curveCorner]);
 
   // Export
   const exportImage = useCallback(() => {
@@ -1692,9 +1508,6 @@ export default function RoomCanvas({ initialPlan = null }) {
                   onCornerMouseDown={(rId,ptIdx)=>setSelectedCorner({roomId:rId,ptIdx})}
                   onCornerDragMove={(rId,ptIdx,x,y)=>dragCorner(rId,ptIdx,x,y)}
                   onCornerDragEnd={(rId,ptIdx,x,y)=>dragCorner(rId,ptIdx,x,y)}
-                  onCornerHover={handleCornerHover}
-                  onCornerLeave={handleCornerLeave}
-                  onCornerTripleClick={handleCornerTripleClick}
                 />
               ))}
             </Layer>
@@ -1719,36 +1532,6 @@ export default function RoomCanvas({ initialPlan = null }) {
             </Layer>
           </Stage>
 
-          {mode === "select" && cornerTooltip && !cornerMenu && (
-            <div
-              className="corner-tooltip"
-              style={{ left: cornerTooltip.x + 18, top: cornerTooltip.y - 34 }}
-            >
-              {cornerTooltip.text}
-            </div>
-          )}
-
-          {mode === "select" && cornerMenu && (
-            <div
-              className="corner-menu"
-              style={{ left: cornerMenu.x + 18, top: cornerMenu.y + 14 }}
-              onMouseDown={e=>e.stopPropagation()}
-              onClick={e=>e.stopPropagation()}
-            >
-              <button type="button" className="corner-menu-item" onClick={handleUnjoinCorner}>
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M7 7h4v2H7a3 3 0 0 0 0 6h4v2H7A5 5 0 0 1 7 7Zm6 0h4a5 5 0 0 1 0 10h-4v-2h4a3 3 0 0 0 0-6h-4V7Zm-5 4h8v2H8v-2Z"/>
-                </svg>
-                Unjoin edge
-              </button>
-              <button type="button" className="corner-menu-item" onClick={handleCurveCorner}>
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M5 19C5 10.7 10.7 5 19 5v2C11.8 7 7 11.8 7 19H5Zm5 0c0-5.5 3.5-9 9-9v2c-4.4 0-7 2.6-7 7h-2Z"/>
-                </svg>
-                Curve edge
-              </button>
-            </div>
-          )}
         </div>
 
         <div className="canvas-statusbar">
