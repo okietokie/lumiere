@@ -91,6 +91,7 @@ async def add_process_time_header(request: Request, call_next):
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(model_routes.router, prefix="/api/models", tags=["Models"])
 app.include_router(project_routes.router, prefix="/api/projects", tags=["Projects"])
+app.include_router(project_routes.router, prefix="/projects", tags=["Projects Legacy"])
 
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 os.makedirs(PROJECT_ASSETS_DIR, exist_ok=True)

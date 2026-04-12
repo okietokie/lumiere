@@ -1,11 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Modal, Spin, Empty } from 'antd';
 import { SwapOutlined, ReloadOutlined } from '@ant-design/icons';
-import { gsap } from 'gsap';
 import { COLORS } from '../../../utils/colors';
+import { apiUrl } from '../../../utils/apiBase';
 import { resolveModelPreviewUrls } from '../furniture/FurnitureItem';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 export default function ReplaceModal({ open, onClose, selectedItem, onReplace }) {
   const [models,  setModels]  = useState([]);
@@ -16,7 +14,7 @@ export default function ReplaceModal({ open, onClose, selectedItem, onReplace })
   const fetchModels = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res  = await fetch(`${API_BASE}/api/models/list`);
+      const res  = await fetch(apiUrl('/models/list'));
       if (!res.ok) throw new Error();
       setModels(await res.json());
     } catch {

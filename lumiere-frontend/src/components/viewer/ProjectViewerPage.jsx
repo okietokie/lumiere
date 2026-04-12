@@ -4,15 +4,13 @@ import { OrbitControls, Environment, useGLTF } from '@react-three/drei';
 import { Link, useParams } from 'react-router-dom';
 import * as THREE from 'three';
 import { COLORS } from '../../utils/colors';
+import { apiAssetUrl, apiUrl } from '../../utils/apiBase';
 import { resolveGlbUrl } from '../threeD/furniture/FurnitureItem';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 function absolutizeUrl(value) {
   if (!value) return null;
   if (value.startsWith('http://') || value.startsWith('https://')) return value;
-  if (value.startsWith('/')) return `${API_BASE}${value}`;
-  return `${API_BASE}/${value}`;
+  return apiAssetUrl(value);
 }
 
 function getDevice() {
@@ -170,7 +168,7 @@ export default function ProjectViewerPage() {
       setLoading(true);
       setError('');
       try {
-        const res = await fetch(`${API_BASE}/api/projects/${projectId}`);
+        const res = await fetch(apiUrl(`/projects/${projectId}`));
         if (!res.ok) throw new Error('Project not found');
         const data = await res.json();
         if (!active) return;

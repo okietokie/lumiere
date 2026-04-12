@@ -2,11 +2,10 @@ import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef, us
 import * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
+import { API_ORIGIN, apiUrl } from '../../../utils/apiBase';
 import { applyTint, captureOriginals, normalizeTint, resetTint } from '../../../utils/tintStore';
 
 useGLTF.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-
-const API_BASE = import.meta.env.VITE_API_URL  || 'http://127.0.0.1:8000';
 
 // ── Runtime CDN base — learned from the model list, no env var needed ─────────
 //
@@ -64,11 +63,11 @@ function inferCdnBaseFromModel(model) {
 function toUsableModelUrl(value, fallbackFilename = '') {
   if (!value) return null;
   if (value.startsWith('http://') || value.startsWith('https://')) return value;
-  if (value.startsWith('/api/proxy/')) return `${API_BASE}${value}`;
+  if (value.startsWith('/api/proxy/')) return `${API_ORIGIN}${value}`;
   const clean = normalizePath(value || fallbackFilename);
   if (!clean) return null;
   if (_learnedCdnBase) return `${_learnedCdnBase}/${clean}`;
-  return `${API_BASE}/api/proxy/models/${clean}`;
+  return apiUrl(`/proxy/models/${clean}`);
 }
 export function learnCdnBase(models) {
   for (const m of models) {
@@ -118,7 +117,7 @@ export function resolveGlbUrl(raw, filename) {
   // 4. No url, no CDN base → proxy (works but has CORS dependency on the server)
   if (!raw && cleanFilename) {
     const clean = cleanFilename;
-    return `${API_BASE}/api/proxy/models/${clean}`;
+    return apiUrl(`/proxy/models/${clean}`);
   }
 
   // 5. Relative path from stale data — try the catalog before proxying

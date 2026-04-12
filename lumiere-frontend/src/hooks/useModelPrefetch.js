@@ -1,8 +1,8 @@
 
 import { useEffect, useState } from 'react';
 import { learnCdnBase, resolveModelPreviewUrls } from '../components/threeD/furniture/FurnitureItem';
+import { apiUrl } from '../utils/apiBase';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const PREFETCH_BATCH = 3;
 const PREFETCH_DELAY = 80;
 
@@ -56,13 +56,13 @@ function preloadImage(url) {
 }
 
 async function requestManifest(signal) {
-  const response = await fetch(`${API_BASE}/api/models/manifest`, { signal });
+  const response = await fetch(apiUrl('/models/manifest'), { signal });
   if (!response.ok) throw new Error('Manifest fetch failed');
   return response.json();
 }
 
 async function requestList(signal) {
-  const response = await fetch(`${API_BASE}/api/models/list`, { signal });
+  const response = await fetch(apiUrl('/models/list'), { signal });
   if (!response.ok) throw new Error('Model list fetch failed');
   return response.json();
 }

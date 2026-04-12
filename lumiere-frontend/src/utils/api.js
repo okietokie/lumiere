@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
+import { apiUrl } from "./apiBase";
 
 const getToken = () =>
   localStorage.getItem("token") ?? localStorage.getItem("lumiere_token");
@@ -9,7 +9,7 @@ const headers = () => ({
 });
 
 const request = async (method, path, body) => {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method,
     headers: headers(),
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

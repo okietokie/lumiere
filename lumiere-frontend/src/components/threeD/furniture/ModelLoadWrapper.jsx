@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../../../utils/apiBase';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const POLL_MS  = 2000;
 const _cache = {};   // filename → 'idle' | 'downloading' | 'ready'
 const _subs  = {};   // filename → Set of setStatus callbacks
@@ -19,7 +19,7 @@ function notify(filename) {
 
 async function _pollOnce(filename) {
   try {
-    const res  = await fetch(`${API_BASE}/api/models/status/${filename}`);
+    const res  = await fetch(apiUrl(`/models/status/${filename}`));
     if (!res.ok) return;
     const data = await res.json();
     const next = data.ready ? 'ready' : 'downloading';
@@ -44,7 +44,7 @@ export async function prefetchModel(filename) {
   if (_cache[filename] === 'ready') return;
   _startPolling(filename); // start polling right away (optimistic)
   try {
-    await fetch(`${API_BASE}/api/models/prefetch/${filename}`, { method: 'POST' });
+    await fetch(apiUrl(`/models/prefetch/${filename}`), { method: 'POST' });
   } catch { /* ignore network errors */ }
 }
 export function useModelStatus(filename) {

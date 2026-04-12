@@ -5,10 +5,9 @@ import { Center, ContactShadows, useGLTF } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { COLORS } from '../../utils/colors';
+import { apiUrl } from '../../utils/apiBase';
 import { fetchModelManifest } from '../../hooks/useModelPrefetch';
 import { resolveGlbUrl } from '../threeD/furniture/FurnitureItem';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 function computeFraming(scene) {
   const box = new THREE.Box3().setFromObject(scene);
@@ -132,7 +131,7 @@ function PreviewRenderWorker({ model, forceRefresh, onComplete }) {
       const formData = new FormData();
       formData.append('file', new File([blob], `${model.id}.${extension}`, { type: blob.type }));
 
-      const response = await fetch(`${API_BASE}/api/models/${model.id}/preview`, {
+      const response = await fetch(apiUrl(`/models/${model.id}/preview`), {
         method: 'POST',
         body: formData,
       });
