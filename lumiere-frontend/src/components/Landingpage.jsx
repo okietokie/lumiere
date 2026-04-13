@@ -170,7 +170,8 @@ function TopNav({ navigate }) {
           </button>
         </div>
         <button className="lm-nav-cta" onClick={() => navigate("/register")}>
-          Get Started
+          <span className="lm-nav-cta-full">Get Started</span>
+          <span className="lm-nav-cta-short">Start</span>
         </button>
       </nav>
     </header>

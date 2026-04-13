@@ -39,9 +39,9 @@ const ResetPassword = () => {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh', background: COLORS.background, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-      <Content style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <Card style={{ width: 400, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', background: COLORS.surface }}>
+    <Layout style={{ minHeight: '100dvh', background: COLORS.background, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <Content style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100dvh', width: '100%', padding: 16 }}>
+        <Card style={{ width: 'min(400px, 100%)', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', background: COLORS.surface }}>
           <Title level={3} style={{ textAlign: 'center', color: COLORS.text }}>Reset Password</Title>
           <Text type="secondary" style={{ display: 'block', textAlign: 'center', marginBottom: 24 }}>
             Enter your new password below.

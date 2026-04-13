@@ -12,12 +12,13 @@ const FADE_END   = 0.5;
 const WALL_EDGE_LINK_COLOR = '#ff9f1c';
 const _ray   = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _wallPlane = new THREE.Plane();
 const _hit   = new THREE.Vector3();
 
 const InteractiveWall = React.forwardRef(({
   wall, isSelected, onSelect, updateWall, setOrbitEnabled, cameraMode,
   selectedOpening, openingPreview, activeOpeningTool,
-  onOpeningPreviewMove, onOpeningCommit, onOpeningSelect, updateOpening,
+  onOpeningPreviewMove, onOpeningCommit, onOpeningSelect, onOpeningMenu, updateOpening,
   edgeLinkStart, onEdgeLinkPoint,
 }, ref) => {
   const { camera, gl } = useThree();
@@ -143,6 +144,20 @@ const InteractiveWall = React.forwardRef(({
     return null;
   }, [camera, gl]);
 
+  const getWallPlanePos = useCallback((clientX, clientY) => {
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc  = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width)  *  2 - 1,
+      ((clientY - rect.top)  / rect.height) * -2 + 1,
+    );
+    const wallNormal = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle)).normalize();
+    const wallPoint = new THREE.Vector3(start[0], height / 2, start[1]);
+    _wallPlane.setFromNormalAndCoplanarPoint(wallNormal, wallPoint);
+    _ray.setFromCamera(ndc, camera);
+    if (_ray.ray.intersectPlane(_wallPlane, _hit)) return _hit.clone();
+    return getGroundPos(clientX, clientY);
+  }, [angle, camera, getGroundPos, gl, height, start]);
+
   const projectOffsetAlongWall = useCallback((pos) => {
     const relX = pos.x - start[0];
     const relZ = pos.z - start[1];
@@ -205,7 +220,7 @@ const InteractiveWall = React.forwardRef(({
     }
     setOrbitEnabled(false);
 
-    const origin = getGroundPos(e.clientX, e.clientY);
+    const origin = getWallPlanePos(e.clientX, e.clientY);
     if (!origin) return;
 
     dragState.current = {
@@ -218,7 +233,7 @@ const InteractiveWall = React.forwardRef(({
     const onMove = (ev) => {
       const ds = dragState.current;
       if (!ds) return;
-      const pos = getGroundPos(ev.clientX, ev.clientY);
+      const pos = getWallPlanePos(ev.clientX, ev.clientY);
       if (!pos) return;
 
       const dx = pos.x - ds.origin.x;
@@ -335,7 +350,20 @@ const InteractiveWall = React.forwardRef(({
     gl.domElement.addEventListener('pointermove', onMove, { passive: true });
     gl.domElement.addEventListener('pointerup', onUp);
     window.addEventListener('pointerup', onUp);
-  }, [clampOpening, getGroundPos, gl, length, projectOffsetAlongWall, setOrbitEnabled, updateOpening]);
+  }, [clampOpening, getWallPlanePos, gl, length, projectOffsetAlongWall, setOrbitEnabled, updateOpening]);
+
+  const handleOpeningDoubleClick = useCallback((e, openingType, opening) => {
+    e.stopPropagation();
+    onOpeningSelect?.({ id: opening.id, type: openingType });
+    const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+    sourceEvent?.preventDefault?.();
+    onOpeningMenu?.({
+      id: opening.id,
+      type: openingType,
+      clientX: sourceEvent?.clientX ?? 0,
+      clientY: sourceEvent?.clientY ?? 0,
+    });
+  }, [onOpeningMenu, onOpeningSelect]);
 
   const ghostProps = ghost
     ? { transparent: true, opacity: 0.15, depthWrite: false }
@@ -397,6 +425,9 @@ const InteractiveWall = React.forwardRef(({
       ? (opening.valid ? COLORS.action : '#ff8b7c')
       : selected ? COLORS.action : COLORS.accent;
     const frameDepth = Math.max(safeThickness + 0.02, 0.12);
+    const moveHandleRadius = isWindow ? 0.12 : 0.1;
+    const moveHandleHeight = isWindow ? 0.24 : 0.2;
+    const resizeHandleSize = isWindow ? 0.22 : 0.16;
     if (preview) {
       return (
         <group key={`${openingType}-${opening.id}-preview`}>
@@ -428,7 +459,11 @@ const InteractiveWall = React.forwardRef(({
 
     if (openingType === 'door') {
       return (
-        <group key={`${openingType}-${opening.id}`}>
+        <group
+          key={`${openingType}-${opening.id}`}
+          onDoubleClick={(e) => handleOpeningDoubleClick(e, openingType, opening)}
+          onContextMenu={(e) => handleOpeningDoubleClick(e, openingType, opening)}
+        >
           <BasicDoor
             position={[localX, localBottomY, 0]}
             width={openingWidth}
@@ -461,15 +496,41 @@ const InteractiveWall = React.forwardRef(({
                 <ringGeometry args={[Math.max(openingWidth / 2, 0.32), Math.max(openingWidth / 2, 0.32) + 0.02, 48]} />
                 <meshBasicMaterial color={COLORS.action} transparent opacity={0.65} side={THREE.DoubleSide} />
               </mesh>
-              <mesh position={[0, localCenterY, (frameDepth / 2) + 0.025]} renderOrder={6}>
-                <planeGeometry args={[length, 0.015]} />
-                <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
-              </mesh>
+            <mesh position={[0, localCenterY, (frameDepth / 2) + 0.025]} renderOrder={6}>
+              <planeGeometry args={[length, 0.015]} />
+              <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
+            </mesh>
+            <mesh
+              position={[localX, localCenterY, (frameDepth / 2) + 0.075]}
+              onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
+              onPointerOver={() => { document.body.style.cursor = "grab"; }}
+              onPointerOut={() => { document.body.style.cursor = "auto"; }}
+            >
+              <planeGeometry args={[Math.max(openingWidth - 0.5, 0.12), Math.max(openingHeight + 0.25, 0.8)]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+            </mesh>
+            {[
+              [localX - (openingWidth / 2), 'start'],
+              [localX + (openingWidth / 2), 'end'],
+            ].map(([x, handle]) => (
               <mesh
-                position={[localX, localCenterY, (frameDepth / 2) + 0.08]}
-                onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
+                key={`${opening.id}-${handle}-hit`}
+                position={[x, localCenterY, (frameDepth / 2) + 0.09]}
+                onPointerDown={(e) => startOpeningDrag(e, openingType, opening, handle)}
+                onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+                onPointerOut={() => { document.body.style.cursor = "auto"; }}
               >
-                <coneGeometry args={[0.08, 0.18, 18]} />
+                <planeGeometry args={[0.42, Math.max(openingHeight + 0.35, 0.9)]} />
+                <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+              </mesh>
+            ))}
+            <mesh
+              position={[localX, localCenterY, (frameDepth / 2) + 0.08]}
+              onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
+                onPointerOver={() => { document.body.style.cursor = "grab"; }}
+                onPointerOut={() => { document.body.style.cursor = "auto"; }}
+              >
+                <coneGeometry args={[moveHandleRadius, moveHandleHeight, 18]} />
                 <meshBasicMaterial color={COLORS.action} depthTest={false} />
               </mesh>
               <mesh
@@ -482,15 +543,19 @@ const InteractiveWall = React.forwardRef(({
               <mesh
                 position={[localX - (openingWidth / 2), localCenterY, (frameDepth / 2) + 0.08]}
                 onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'start')}
+                onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+                onPointerOut={() => { document.body.style.cursor = "auto"; }}
               >
-                <boxGeometry args={[0.09, 0.09, 0.09]} />
+                <boxGeometry args={[resizeHandleSize, resizeHandleSize, resizeHandleSize]} />
                 <meshBasicMaterial color="#ffd86c" depthTest={false} />
               </mesh>
               <mesh
                 position={[localX + (openingWidth / 2), localCenterY, (frameDepth / 2) + 0.08]}
                 onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'end')}
+                onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+                onPointerOut={() => { document.body.style.cursor = "auto"; }}
               >
-                <boxGeometry args={[0.09, 0.09, 0.09]} />
+                <boxGeometry args={[resizeHandleSize, resizeHandleSize, resizeHandleSize]} />
                 <meshBasicMaterial color="#ffd86c" depthTest={false} />
               </mesh>
             </>
@@ -500,7 +565,11 @@ const InteractiveWall = React.forwardRef(({
     }
 
     return (
-      <group key={`${openingType}-${opening.id}`}>
+      <group
+        key={`${openingType}-${opening.id}`}
+        onDoubleClick={(e) => handleOpeningDoubleClick(e, openingType, opening)}
+        onContextMenu={(e) => handleOpeningDoubleClick(e, openingType, opening)}
+      >
         <BasicWindow
           position={[localX, localBottomY, 0]}
           width={openingWidth}
@@ -532,10 +601,36 @@ const InteractiveWall = React.forwardRef(({
               <meshBasicMaterial color={COLORS.action} transparent opacity={0.28} />
             </mesh>
             <mesh
+              position={[localX, localCenterY, (safeThickness / 2) + 0.045]}
+              onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
+              onPointerOver={() => { document.body.style.cursor = "grab"; }}
+              onPointerOut={() => { document.body.style.cursor = "auto"; }}
+            >
+              <planeGeometry args={[Math.max(openingWidth - 0.5, 0.12), Math.max(openingHeight + 0.25, 0.8)]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+            </mesh>
+            {[
+              [localX - (openingWidth / 2), 'start'],
+              [localX + (openingWidth / 2), 'end'],
+            ].map(([x, handle]) => (
+              <mesh
+                key={`${opening.id}-${handle}-hit`}
+                position={[x, localCenterY, (safeThickness / 2) + 0.06]}
+                onPointerDown={(e) => startOpeningDrag(e, openingType, opening, handle)}
+                onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+                onPointerOut={() => { document.body.style.cursor = "auto"; }}
+              >
+                <planeGeometry args={[0.5, Math.max(openingHeight + 0.45, 0.95)]} />
+                <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+              </mesh>
+            ))}
+            <mesh
               position={[localX, localCenterY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'move')}
+              onPointerOver={() => { document.body.style.cursor = "grab"; }}
+              onPointerOut={() => { document.body.style.cursor = "auto"; }}
             >
-              <coneGeometry args={[0.08, 0.18, 18]} />
+              <coneGeometry args={[moveHandleRadius, moveHandleHeight, 18]} />
               <meshBasicMaterial color={COLORS.action} depthTest={false} />
             </mesh>
             <mesh
@@ -548,15 +643,19 @@ const InteractiveWall = React.forwardRef(({
             <mesh
               position={[localX - (openingWidth / 2), localCenterY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'start')}
+              onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+              onPointerOut={() => { document.body.style.cursor = "auto"; }}
             >
-              <boxGeometry args={[0.09, 0.09, 0.09]} />
+              <boxGeometry args={[resizeHandleSize, resizeHandleSize, resizeHandleSize]} />
               <meshBasicMaterial color="#ffd86c" depthTest={false} />
             </mesh>
             <mesh
               position={[localX + (openingWidth / 2), localCenterY, (safeThickness / 2) + 0.04]}
               onPointerDown={(e) => startOpeningDrag(e, openingType, opening, 'end')}
+              onPointerOver={() => { document.body.style.cursor = "ew-resize"; }}
+              onPointerOut={() => { document.body.style.cursor = "auto"; }}
             >
-              <boxGeometry args={[0.09, 0.09, 0.09]} />
+              <boxGeometry args={[resizeHandleSize, resizeHandleSize, resizeHandleSize]} />
               <meshBasicMaterial color="#ffd86c" depthTest={false} />
             </mesh>
           </>

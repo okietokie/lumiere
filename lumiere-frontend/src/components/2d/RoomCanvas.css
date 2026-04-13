@@ -996,3 +996,222 @@
 /* Floor controls */
 .floor-controls { display: flex; flex-direction: column; gap: 5px; }
 .floor-ctrl-row { display: flex; align-items: center; gap: 4px; font-size: 10px; color: rgba(245,240,232,0.4); }
+
+@media (max-width: 900px) {
+  :root {
+    --lumiere-sidebar: 100vw;
+  }
+
+  .lumiere-wrapper {
+    height: 100dvh;
+    min-height: 100dvh;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .lumiere-sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    min-width: 0;
+    max-height: min(46dvh, 430px);
+    z-index: 60;
+    border-right: 0;
+    border-top: 1px solid rgba(201, 169, 110, 0.22);
+    border-radius: 8px 8px 0 0;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    box-shadow: 0 -18px 46px rgba(0, 0, 0, 0.42);
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 13px 18px 10px;
+    background: linear-gradient(180deg, rgba(44, 40, 37, 0.98), rgba(44, 40, 37, 0.88));
+    backdrop-filter: blur(14px);
+  }
+
+  .sidebar-header::before {
+    content: "";
+    display: block;
+    width: 44px;
+    height: 5px;
+    margin: 0 auto 12px;
+    border-radius: 999px;
+    background: rgba(201, 169, 110, 0.5);
+  }
+
+  .sidebar-logo {
+    font-size: 16px;
+  }
+
+  .sidebar-section {
+    padding: 14px 14px 10px;
+  }
+
+  .sidebar-section:first-of-type {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .sidebar-section:first-of-type .sidebar-section-title {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+  }
+
+  .sidebar-section:first-of-type > div[style] {
+    display: none !important;
+  }
+
+  .tool-btn,
+  .preset-btn,
+  .grid-size-btn,
+  .pattern-btn,
+  .catalogue-item,
+  .furn-action-btn,
+  .room-name-display,
+  .room-name-input {
+    min-height: 44px;
+  }
+
+  .tool-btn {
+    margin-bottom: 0;
+    justify-content: center;
+    padding: 10px;
+    text-align: center;
+  }
+
+  .tool-shortcut {
+    display: none;
+  }
+
+  .grid-size-options,
+  .thickness-presets,
+  .floor-pattern-options {
+    gap: 8px;
+  }
+
+  .room-list {
+    max-height: 180px;
+    flex: none;
+    padding: 0 14px 16px;
+  }
+
+  .room-item {
+    min-height: 56px;
+  }
+
+  .canvas-area {
+    width: 100vw;
+    height: 100dvh;
+    min-height: 0;
+    padding-bottom: min(46dvh, 430px);
+  }
+
+  .canvas-topbar {
+    height: auto;
+    min-height: calc(58px + env(safe-area-inset-top));
+    align-items: flex-start;
+    gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+    flex-wrap: wrap;
+  }
+
+  .canvas-topbar > div:last-child {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px !important;
+  }
+
+  .canvas-topbar button {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px !important;
+    border-radius: 8px !important;
+    font-size: 11px !important;
+    white-space: normal;
+  }
+
+  .topbar-breadcrumb {
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .topbar-hint {
+    display: none;
+  }
+
+  .canvas-stage-wrap {
+    min-height: 0;
+  }
+
+  .canvas-statusbar {
+    height: auto;
+    min-height: 34px;
+    gap: 12px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .status-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .shortcuts-panel {
+    display: none;
+  }
+
+  .canvas-empty {
+    width: min(82vw, 300px);
+  }
+
+  .canvas-empty-title {
+    font-size: 22px;
+  }
+
+  .canvas-empty-sub {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 480px) {
+  .lumiere-sidebar {
+    max-height: 50dvh;
+  }
+
+  .canvas-area {
+    padding-bottom: 50dvh;
+  }
+
+  .sidebar-section:first-of-type {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sidebar-section-title,
+  .room-list-title {
+    letter-spacing: 0.18em;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .lumiere-sidebar {
+    max-height: 58dvh;
+  }
+
+  .canvas-area {
+    padding-bottom: 58dvh;
+  }
+}

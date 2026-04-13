@@ -373,6 +373,8 @@ function GhostButton({ icon, onClick, children }) {
       onClick={onClick}
       style={{
         flex: 1,
+        minWidth: 0,
+        minHeight: 44,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -386,7 +388,9 @@ function GhostButton({ icon, onClick, children }) {
         fontFamily: 'Inter, sans-serif',
         cursor: 'pointer',
         transition: 'border-color 0.15s, background 0.15s',
-        whiteSpace: 'nowrap',
+        whiteSpace: 'normal',
+        textAlign: 'center',
+        lineHeight: 1.25,
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = COLORS.action;

@@ -152,7 +152,7 @@ function PreviewRenderWorker({ model, forceRefresh, onComplete }) {
   }, [model.id, forceRefresh]);
 
   return (
-    <div style={{ width: 420, height: 420, borderRadius: 24, overflow: 'hidden', border: `1px solid ${COLORS.secondary}30` }}>
+    <div style={{ width: 'min(420px, 100%)', aspectRatio: '1 / 1', borderRadius: 8, overflow: 'hidden', border: `1px solid ${COLORS.secondary}30` }}>
       <Canvas
         shadows
         dpr={[1, 2]}
@@ -238,7 +238,7 @@ export default function ModelPreviewStudio() {
   return (
     <div style={{
       minHeight: '100vh',
-      padding: '48px 28px',
+      padding: 'clamp(18px, 5vw, 48px) clamp(14px, 4vw, 28px)',
       background: `linear-gradient(180deg, ${COLORS.background} 0%, ${COLORS.surface} 100%)`,
       color: COLORS.text,
     }}>
@@ -271,7 +271,7 @@ export default function ModelPreviewStudio() {
 
         {error && <Alert type="error" message={error} />}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 460px) 1fr', gap: 24, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 24, alignItems: 'start' }}>
           <Card style={{ background: `${COLORS.surface}E6`, borderColor: `${COLORS.secondary}40` }}>
             <div style={{ display: 'grid', gap: 16 }}>
               <div>
@@ -294,10 +294,10 @@ export default function ModelPreviewStudio() {
                 />
               ) : (
                 <div style={{
-                  width: 420,
-                  height: 420,
+                  width: '100%',
+                  aspectRatio: '1 / 1',
                   maxWidth: '100%',
-                  borderRadius: 24,
+                  borderRadius: 8,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',

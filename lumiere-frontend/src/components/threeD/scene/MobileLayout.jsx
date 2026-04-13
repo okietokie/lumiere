@@ -64,7 +64,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
           height,
           zIndex:          1001,
           background:      `linear-gradient(180deg, ${COLORS.surface}F7 0%, ${COLORS.background}FC 100%)`,
-          borderRadius:    '24px 24px 0 0',
+          borderRadius:    '8px 8px 0 0',
           borderTop:       `1px solid ${COLORS.secondary}66`,
           boxShadow:       '0 -14px 42px rgba(0,0,0,0.42)',
           transform:       'translateY(100%)',
@@ -93,7 +93,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
             onClick={onClose}
             style={{
               background: `${COLORS.background}CC`,
-              border: `1px solid ${COLORS.secondary}55`, borderRadius: 999,
+              border: `1px solid ${COLORS.secondary}55`, borderRadius: 8,
               width: 32, height: 32,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: COLORS.text, cursor: 'pointer',
@@ -133,8 +133,13 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
       backdropFilter: 'blur(20px)',
       display:        'flex',
       alignItems:     'center',
-      justifyContent: 'space-around',
-      padding:        '8px 4px',
+      justifyContent: 'flex-start',
+      gap:            4,
+      overflowX:      'auto',
+      overscrollBehaviorX: 'contain',
+      WebkitOverflowScrolling: 'touch',
+      scrollbarWidth: 'none',
+      padding:        '8px 8px',
       paddingBottom:  'env(safe-area-inset-bottom, 8px)',
       boxShadow:      '0 -8px 28px rgba(0,0,0,0.35)',
     }}>
@@ -149,12 +154,13 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
               flexDirection:  'column',
               alignItems:     'center',
               gap:            3,
-              padding:        '6px 12px',
-              minWidth:       56,
+              padding:        '6px 8px',
+              flex:           '0 0 62px',
+              minWidth:       62,
               minHeight:      48,
               background:     active ? `${COLORS.surface}CC` : 'transparent',
               border:         'none',
-              borderRadius:   12,
+              borderRadius:   8,
               color:          active ? COLORS.action : `${COLORS.secondary}90`,
               cursor:         'pointer',
               transition:     'color 0.15s',
@@ -176,13 +182,13 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
       })}
 
       {/* Divider */}
-      <div style={{ width: 1, height: 32, background: `${COLORS.secondary}40` }} />
+      <div style={{ width: 1, height: 32, flex: '0 0 1px', background: `${COLORS.secondary}40` }} />
 
       {/* Undo */}
       <button onClick={onUndo} disabled={!canUndo} style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 10px', minWidth: 44, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 12,
+        padding: '6px 8px', flex: '0 0 54px', minWidth: 54, minHeight: 48,
+        background: 'transparent', border: 'none', borderRadius: 8,
         color: canUndo ? COLORS.secondary : `${COLORS.secondary}30`, cursor: canUndo ? 'pointer' : 'default',
       }}>
         <Icon d={ICONS.undo} size={18} color={canUndo ? COLORS.secondary : `${COLORS.secondary}30`} />
@@ -192,8 +198,8 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
       {/* Save */}
       <button onClick={onSave} style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 10px', minWidth: 44, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 12,
+        padding: '6px 8px', flex: '0 0 54px', minWidth: 54, minHeight: 48,
+        background: 'transparent', border: 'none', borderRadius: 8,
         color: COLORS.action, cursor: 'pointer',
       }}>
         <Icon d={ICONS.save} size={18} color={COLORS.action} />
@@ -203,8 +209,8 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
       {/* Dashboard */}
       <button onClick={onDashboard} style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 10px', minWidth: 44, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 12,
+        padding: '6px 8px', flex: '0 0 64px', minWidth: 64, minHeight: 48,
+        background: 'transparent', border: 'none', borderRadius: 8,
         color: COLORS.text, cursor: 'pointer',
       }}>
         <Icon d={ICONS.dashboard} size={18} color={COLORS.text} />
@@ -214,8 +220,8 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
       {/* Logout */}
       <button onClick={onLogout} style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 10px', minWidth: 44, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 12,
+        padding: '6px 8px', flex: '0 0 58px', minWidth: 58, minHeight: 48,
+        background: 'transparent', border: 'none', borderRadius: 8,
         color: COLORS.text, cursor: 'pointer',
       }}>
         <Icon d={ICONS.close} size={18} color={COLORS.text} />
@@ -258,7 +264,7 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
           padding:        '8px 14px',
           background:     cameraMode === 'firstPerson' ? `${COLORS.surface}` : `${COLORS.background}CC`,
           border:         `1px solid ${cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary}66`,
-          borderRadius:   999,
+          borderRadius:   8,
           color:          cameraMode === 'firstPerson' ? COLORS.action : COLORS.text,
           fontSize:       12,
           fontFamily:     '"Plus Jakarta Sans", Inter, sans-serif',

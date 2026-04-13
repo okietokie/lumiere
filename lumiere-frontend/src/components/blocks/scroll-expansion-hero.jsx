@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { MoveRight, PlayCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useNavigate } from "react-router-dom";
 import { COLORS } from "@/utils/colors";
 
 const titles = [
@@ -21,6 +21,7 @@ const ScrollExpandMedia = ({
   textBlend = true,
   children,
 }) => {
+  const navigate = useNavigate();
   const [scrollProgress, setScrollProgress] = useState(0);
   const [showContent, setShowContent] = useState(false);
   const [mediaFullyExpanded, setMediaFullyExpanded] = useState(false);
@@ -208,7 +209,7 @@ const ScrollExpandMedia = ({
                   style={{ transform: `translateX(-${textTranslateX}vw)` }}
                 >
                   <h1
-                    className='text-6xl md:text-8xl lg:text-9xl font-bold tracking-tighter transition-none leading-[1.1]'
+                    className='w-full max-w-[calc(100vw-2rem)] px-4 text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-bold tracking-normal sm:tracking-tight transition-none leading-[1.08] break-words'
                     style={{ color: COLORS.action }}
                   >
                     Lumiere Maison
@@ -223,7 +224,7 @@ const ScrollExpandMedia = ({
                     {titles.map((title, index) => (
                       <motion.h2
                         key={index}
-                        className="absolute text-2xl md:text-4xl lg:text-5xl font-medium tracking-tight"
+                        className="absolute w-full max-w-[calc(100vw-2rem)] px-4 text-lg sm:text-2xl md:text-4xl lg:text-5xl font-medium tracking-normal leading-tight"
                         style={{ color: COLORS.text }}
                         initial={{ opacity: 0, y: 50 }}
                         transition={{ type: "spring", stiffness: 50 }}
@@ -241,18 +242,20 @@ const ScrollExpandMedia = ({
                   <div className="flex flex-row items-center gap-6 mt-6">
                     {/* Start Designing Button */}
                     <button
-                      className="group relative flex items-center justify-center w-[50px] h-[50px] hover:w-[180px] rounded-full overflow-hidden transition-all duration-300 cursor-pointer font-semibold border-none"
+                      type="button"
+                      onClick={() => navigate("/register")}
+                      className="group relative flex items-center justify-center w-[150px] h-[48px] sm:w-[50px] sm:h-[50px] sm:hover:w-[180px] rounded-lg sm:rounded-full overflow-hidden transition-all duration-300 cursor-pointer font-semibold border-none"
                       style={{
                         backgroundColor: COLORS.action,
                         color: COLORS.background,
                         boxShadow: `0 0 20px ${COLORS.action}4d`,
                       }}
                     >
-                      <div className="absolute inset-0 flex items-center justify-center transition-all duration-300 group-hover:translate-y-[30px] group-hover:opacity-0">
+                      <div className="absolute inset-0 hidden sm:flex items-center justify-center transition-all duration-300 group-hover:translate-y-[30px] group-hover:opacity-0">
                         <MoveRight className="w-5 h-5" />
                       </div>
                       <span
-                        className="absolute left-1/2 -translate-x-1/2 top-[-20px] opacity-0 transition-all duration-300 group-hover:top-1/2 group-hover:-translate-y-1/2 group-hover:opacity-100 whitespace-nowrap text-lg"
+                        className="static text-sm sm:absolute sm:left-1/2 sm:-translate-x-1/2 sm:top-[-20px] sm:opacity-0 transition-all duration-300 sm:group-hover:top-1/2 sm:group-hover:-translate-y-1/2 sm:group-hover:opacity-100 whitespace-nowrap sm:text-lg"
                         style={{ color: COLORS.background }}
                       >
                         Start Designing
@@ -261,17 +264,19 @@ const ScrollExpandMedia = ({
 
                     {/* Watch Demo Button */}
                     <button
-                      className="group relative flex items-center justify-center w-[50px] h-[50px] hover:w-[160px] rounded-full bg-transparent overflow-hidden backdrop-blur-md transition-all duration-300 cursor-pointer font-semibold"
+                      type="button"
+                      onClick={() => navigate("/user/room")}
+                      className="group relative flex items-center justify-center w-[132px] h-[48px] sm:w-[50px] sm:h-[50px] sm:hover:w-[160px] rounded-lg sm:rounded-full bg-transparent overflow-hidden backdrop-blur-md transition-all duration-300 cursor-pointer font-semibold"
                       style={{
                         color: COLORS.text,
                         border: `2px solid ${COLORS.action}66`,
                       }}
                     >
-                      <div className="absolute inset-0 flex items-center justify-center transition-all duration-300 group-hover:translate-y-[30px] group-hover:opacity-0">
+                      <div className="absolute inset-0 hidden sm:flex items-center justify-center transition-all duration-300 group-hover:translate-y-[30px] group-hover:opacity-0">
                         <PlayCircle className="w-5 h-5" />
                       </div>
                       <span
-                        className="absolute left-1/2 -translate-x-1/2 top-[-20px] opacity-0 transition-all duration-300 group-hover:top-1/2 group-hover:-translate-y-1/2 group-hover:opacity-100 whitespace-nowrap text-lg"
+                        className="static text-sm sm:absolute sm:left-1/2 sm:-translate-x-1/2 sm:top-[-20px] sm:opacity-0 transition-all duration-300 sm:group-hover:top-1/2 sm:group-hover:-translate-y-1/2 sm:group-hover:opacity-100 whitespace-nowrap sm:text-lg"
                         style={{ color: COLORS.action }}
                       >
                         Watch Demo

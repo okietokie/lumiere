@@ -170,6 +170,7 @@ export function useFloorPlan(initialState = null) {
   const [selectedRoom,   setSelectedRoom]   = useState(null);
   const [selectedCorner, setSelectedCorner] = useState(null);
   const [selectedWall,   setSelectedWall]   = useState(null);
+  const [selectedOpening, setSelectedOpening] = useState(null);
   const [hoveredWall,    setHoveredWall]    = useState(null);
 
   // ── settings ──────────────────────────────────────────────────────────────
@@ -306,9 +307,11 @@ export function useFloorPlan(initialState = null) {
         const ow    = mode === "door" ? doorWidth : windowWidth;
         const half  = (ow / 2) / wall.length;
         const t     = Math.max(half, Math.min(1 - half, along));
-        return { ...wall, openings: [...wall.openings, {
+        const opening = {
           id: `${mode}_${Date.now()}`, type: mode, t, width: ow, swingDir: "left",
-        }]};
+        };
+        setSelectedOpening({ roomId, wallId, openingId: opening.id });
+        return { ...wall, openings: [...wall.openings, opening]};
       });
       return { ...room, walls };
     }));
@@ -326,7 +329,30 @@ export function useFloorPlan(initialState = null) {
         ),
       }
     ));
+    setSelectedOpening(prev => prev?.openingId === openingId ? null : prev);
   }, [pushHistory]);
+
+  const updateOpening = useCallback((roomId, wallId, openingId, updates) => {
+    setRooms(prev => prev.map(room => {
+      if (room.id !== roomId) return room;
+      return {
+        ...room,
+        walls: room.walls.map(wall => {
+          if (wall.id !== wallId) return wall;
+          return {
+            ...wall,
+            openings: wall.openings.map(opening => {
+              if (opening.id !== openingId) return opening;
+              const nextWidth = updates.width ?? opening.width;
+              const half = (nextWidth / 2) / wall.length;
+              const nextT = Math.max(half, Math.min(1 - half, updates.t ?? opening.t));
+              return { ...opening, ...updates, width: nextWidth, t: nextT };
+            }),
+          };
+        }),
+      };
+    }));
+  }, []);
 
   // ── drag corner ───────────────────────────────────────────────────────────
   const dragCorner = useCallback((roomId, ptIdx, rawX, rawY) => {
@@ -339,6 +365,43 @@ export function useFloorPlan(initialState = null) {
     }));
     return { x, y };
   }, [snap]);
+
+  const deleteCorner = useCallback((roomId, ptIdx) => {
+    pushHistory();
+    setRooms(prev => prev.map(room => {
+      if (room.id !== roomId || room.points.length <= 3) return room;
+      const pts = room.points.filter((_, index) => index !== ptIdx);
+      return {
+        ...room,
+        points: pts,
+        walls: buildWalls(pts, room.id),
+        area: calcArea(pts),
+      };
+    }));
+    setSelectedCorner(null);
+    setSelectedWall(null);
+    setSelectedOpening(null);
+  }, [pushHistory]);
+
+  const deleteWallEdge = useCallback((roomId, wallId) => {
+    pushHistory();
+    setRooms(prev => prev.map(room => {
+      if (room.id !== roomId || room.points.length <= 3) return room;
+      const wallIndex = room.walls.findIndex(wall => wall.id === wallId);
+      if (wallIndex < 0) return room;
+      const removePointIndex = (wallIndex + 1) % room.points.length;
+      const pts = room.points.filter((_, index) => index !== removePointIndex);
+      return {
+        ...room,
+        points: pts,
+        walls: buildWalls(pts, room.id),
+        area: calcArea(pts),
+      };
+    }));
+    setSelectedCorner(null);
+    setSelectedWall(null);
+    setSelectedOpening(null);
+  }, [pushHistory]);
 
   // ── furniture ops ─────────────────────────────────────────────────────────
   const moveFurniture = useCallback((id, rawX, rawY) => {
@@ -398,6 +461,7 @@ export function useFloorPlan(initialState = null) {
     setRooms(prev => prev.filter(r => r.id !== roomId));
     setFurniture(prev => prev.filter(f => f.roomId !== roomId));
     setSelectedRoom(null); setSelectedCorner(null); setSelectedWall(null);
+    setSelectedOpening(null);
   }, [pushHistory]);
 
   const cancelDraft = useCallback(() => {
@@ -411,6 +475,7 @@ export function useFloorPlan(initialState = null) {
     setDraftPts([]); draftRef.current = [];
     setClosingSnap(false); setMousePos(null); setSnappedPos(null);
     setSelectedRoom(null); setSelectedCorner(null); setSelectedWall(null);
+    setSelectedOpening(null);
     setSelectedFurnitureId(null);
   }, [pushHistory]);
 
@@ -444,6 +509,7 @@ export function useFloorPlan(initialState = null) {
     setSelectedRoom(nextRooms[0] ? { roomId: nextRooms[0].id } : null);
     setSelectedCorner(null);
     setSelectedWall(null);
+    setSelectedOpening(null);
     setHoveredWall(null);
     setSelectedFurnitureId(null);
     setPendingFurniture(null);
@@ -455,7 +521,7 @@ export function useFloorPlan(initialState = null) {
     draftPts, mousePos, snappedPos, closingSnap,
     handleCanvasClick, handleMouseMove, handleDoubleClick,
     undo, redo, cancelDraft, clearAll,
-    rooms, closeRoom, deleteRoom, renameRoom, dragCorner,
+    rooms, closeRoom, deleteRoom, renameRoom, dragCorner, deleteCorner, deleteWallEdge,
     updateFloor, applyRoomPreset,
     furniture, selectedFurnitureId, setSelectedFurnitureId,
     pendingFurniture, setPendingFurniture,
@@ -463,8 +529,9 @@ export function useFloorPlan(initialState = null) {
     selectedRoom,   setSelectedRoom,
     selectedCorner, setSelectedCorner,
     selectedWall,   setSelectedWall,
+    selectedOpening, setSelectedOpening,
     hoveredWall,    setHoveredWall,
-    handleWallClick, deleteOpening,
+    handleWallClick, deleteOpening, updateOpening,
     wallThickness, applyGlobalThickness,
     doorWidth, setDoorWidth, windowWidth, setWindowWidth,
     setRooms,

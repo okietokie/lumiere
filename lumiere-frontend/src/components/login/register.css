@@ -14,6 +14,7 @@
   --lm-secondary-deep: #604403;
   --lm-outline: rgba(132, 147, 150, 0.25);
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at top left, rgba(0, 218, 243, 0.08), transparent 28%),
     radial-gradient(circle at bottom right, rgba(233, 193, 118, 0.08), transparent 30%),
@@ -83,6 +84,7 @@
 
 .lm-register-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
 }
 
@@ -405,5 +407,70 @@
 
   .lm-register-header-note {
     display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .lm-register-header {
+    padding: 0.9rem 1rem 0;
+    gap: 0.75rem;
+  }
+
+  .lm-register-back {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    justify-content: center;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .lm-register-back span {
+    display: none;
+  }
+
+  .lm-register-wordmark {
+    min-width: 0;
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lm-register-panel {
+    align-items: flex-start;
+    min-height: 100dvh;
+    padding: 5.5rem 1rem 2rem;
+  }
+
+  .lm-register-intro {
+    margin-bottom: 2rem;
+  }
+
+  .lm-register-intro h2 {
+    font-size: 2rem;
+  }
+
+  .lm-register-subcopy {
+    font-size: 0.92rem;
+  }
+
+  .lm-register-form .ant-form-item {
+    margin-bottom: 1.25rem;
+  }
+
+  .lm-register-terms-wrap {
+    margin-bottom: 1.5rem !important;
+  }
+
+  .lm-register-submit {
+    min-height: 3rem;
+    padding: 0.95rem 1rem;
+    letter-spacing: 0.14em;
+  }
+
+  .lm-register-footer {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
   }
 }

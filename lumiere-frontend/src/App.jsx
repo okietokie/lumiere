@@ -51,9 +51,14 @@ function LiveRoomCanvasRoute() {
 }
 
 function LiveRoomSceneRoute() {
-  const [initialScene, setInitialScene] = useState(null);
+  const initialLiveScene = useMemo(() => {
+    const latest = getLatestLiveEditorSnapshot();
+    return latest?.type === "3d" ? latest.data : null;
+  }, []);
+  const [initialScene, setInitialScene] = useState(initialLiveScene);
 
   useEffect(() => {
+    if (initialLiveScene) return undefined;
     let cancelled = false;
 
     const load = async () => {
@@ -84,7 +89,7 @@ function LiveRoomSceneRoute() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialLiveScene]);
 
   return <RoomScene initialScene={initialScene} />;
 }
@@ -121,6 +126,18 @@ function RouteShell() {
 
     const from = previousPathRef.current;
     const to = location.pathname;
+    const isEditorViewSwitch =
+      from.startsWith("/user/room") &&
+      to.startsWith("/user/room") &&
+      from !== to;
+
+    if (isEditorViewSwitch) {
+      gsap.set(shell, { autoAlpha: 1, y: 0, filter: "blur(0px)" });
+      gsap.set(veil, { autoAlpha: 0, scaleY: 0 });
+      previousPathRef.current = to;
+      return undefined;
+    }
+
     const data = {
       current: { namespace: from },
       next: { namespace: to },

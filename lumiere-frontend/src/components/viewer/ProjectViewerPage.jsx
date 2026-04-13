@@ -200,12 +200,12 @@ export default function ProjectViewerPage() {
       display: 'flex',
       flexDirection: 'column',
     }}>
-      <div style={{ padding: '18px 18px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <div>
+      <div style={{ padding: '18px 18px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ color: COLORS.action, letterSpacing: '0.18em', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }}>Lumiere View</div>
           <h1 style={{ margin: '8px 0 0', fontSize: 'clamp(1.6rem, 4vw, 2.6rem)' }}>{projectTitle}</h1>
         </div>
-        <Link to="/user/room" style={{ color: COLORS.text, textDecoration: 'none', border: `1px solid ${COLORS.secondary}80`, borderRadius: 999, padding: '10px 14px' }}>
+        <Link to="/user/room" style={{ color: COLORS.text, textDecoration: 'none', border: `1px solid ${COLORS.secondary}80`, borderRadius: 8, padding: '10px 14px', minHeight: 44, display: 'inline-flex', alignItems: 'center' }}>
           Open editor
         </Link>
       </div>
@@ -230,7 +230,7 @@ export default function ProjectViewerPage() {
 
         <div style={{
           minHeight: '62vh',
-          borderRadius: 28,
+          borderRadius: 8,
           overflow: 'hidden',
           border: `1px solid ${COLORS.secondary}66`,
           background: 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.24) 100%)',
@@ -289,7 +289,7 @@ function ActionButton({ children, disabled, onClick }) {
       style={{
         minHeight: 46,
         padding: '0 16px',
-        borderRadius: 16,
+        borderRadius: 8,
         border: `1px solid ${disabled ? `${COLORS.secondary}40` : `${COLORS.action}90`}`,
         background: disabled ? 'rgba(255,255,255,0.03)' : `linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%)`,
         color: disabled ? `${COLORS.text}66` : '#1b120d',
@@ -313,7 +313,7 @@ function CenterMessage({ children }) {
 function InfoCard({ title, children }) {
   return (
     <div style={{
-      borderRadius: 18,
+      borderRadius: 8,
       padding: '14px 16px',
       border: `1px solid ${COLORS.secondary}44`,
       background: 'rgba(255,255,255,0.04)',
@@ -344,7 +344,7 @@ function ActionLink({ children, href, rel, disabled }) {
       style={{
         minHeight: 46,
         padding: '0 16px',
-        borderRadius: 16,
+        borderRadius: 8,
         border: `1px solid ${disabled ? `${COLORS.secondary}40` : `${COLORS.action}90`}`,
         background: disabled ? 'rgba(255,255,255,0.03)' : `linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%)`,
         color: disabled ? `${COLORS.text}66` : '#1b120d',

@@ -92,7 +92,11 @@ import FolderCopyRoundedIcon from "@mui/icons-material/FolderCopyRounded";
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
 import { clearAuthSession } from "../../../utils/authStorage";
-import { saveLive3DSceneSnapshot } from "../../../utils/editorSceneBridge";
+import {
+  convert3DSceneTo2DPlan,
+  saveLive2DPlanSnapshot,
+  saveLive3DSceneSnapshot,
+} from "../../../utils/editorSceneBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 
@@ -511,6 +515,7 @@ export default function RoomScene({ initialScene = null }) {
   // UI state 
   const [selectedWallId,      setSelectedWallId]      = useState(null);
   const [selectedOpening,     setSelectedOpening]     = useState(null);
+  const [openingContextMenu,  setOpeningContextMenu]  = useState(null);
   const [roomWallPlacementSide, setRoomWallPlacementSide] = useState('right');
   const [sceneRoomActionsVisible, setSceneRoomActionsVisible] = useState(false);
   const [cameraMode,          setCameraMode]          = useState('orbit');
@@ -542,7 +547,6 @@ export default function RoomScene({ initialScene = null }) {
   const snapshotApiRef   = useRef(null);
   const wallRefs         = useRef({});
   const localMutationVersionRef = useRef(0);
-  const pendingOpeningSaveRef = useRef(false);
   const loadingProjectIdRef = useRef(null);
   const loadProjectRef = useRef(null);
   const desktopFloatingRef = useRef(null);
@@ -568,6 +572,20 @@ export default function RoomScene({ initialScene = null }) {
     window.addEventListener('resize', handler);
     return () => window.removeEventListener('resize', handler);
   }, []);
+
+  useEffect(() => {
+    if (!openingContextMenu) return undefined;
+    const closeMenu = () => setOpeningContextMenu(null);
+    const handleKey = (event) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('pointerdown', closeMenu);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('pointerdown', closeMenu);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [openingContextMenu]);
 
   const openMobilePanel = useCallback((tab) => {
     const hasSelectedRoom = Boolean(selectedRoomId || rooms[0]?.id);
@@ -596,24 +614,18 @@ export default function RoomScene({ initialScene = null }) {
   const { loadProject, saveProject, projectName } = projectSave;
   const isSaving = projectSave.saveStatus === 'saving';
 
-  useEffect(() => {
-    loadProjectRef.current = loadProject;
-  }, [loadProject]);
-
-  useEffect(() => {
-    saveLive3DSceneSnapshot({
-      rooms,
-      walls,
-      placedItems,
-      floorMaterial,
-      ceilingMaterial,
-      lighting: {
-        timeOfDay: lightingState.timeOfDay,
-        activeMood: lightingState.activeMood,
-        globalBrightness: lightingState.globalBrightness,
-      },
-    });
-  }, [
+  const buildLive3DSceneSnapshot = useCallback(() => ({
+    rooms,
+    walls,
+    placedItems,
+    floorMaterial,
+    ceilingMaterial,
+    lighting: {
+      timeOfDay: lightingState.timeOfDay,
+      activeMood: lightingState.activeMood,
+      globalBrightness: lightingState.globalBrightness,
+    },
+  }), [
     rooms,
     walls,
     placedItems,
@@ -623,6 +635,22 @@ export default function RoomScene({ initialScene = null }) {
     lightingState.activeMood,
     lightingState.globalBrightness,
   ]);
+
+  const switchTo2D = useCallback(() => {
+    const snapshot = buildLive3DSceneSnapshot();
+    saveLive3DSceneSnapshot(snapshot);
+    const plan = convert3DSceneTo2DPlan(snapshot);
+    if (plan) saveLive2DPlanSnapshot(plan);
+    navigate(switchTo2DUrl);
+  }, [buildLive3DSceneSnapshot, navigate, switchTo2DUrl]);
+
+  useEffect(() => {
+    loadProjectRef.current = loadProject;
+  }, [loadProject]);
+
+  useEffect(() => {
+    saveLive3DSceneSnapshot(buildLive3DSceneSnapshot());
+  }, [buildLive3DSceneSnapshot]);
   useEffect(() => {
     if (!shouldLoadSelectedProject) {
       loadingProjectIdRef.current = null;
@@ -906,6 +934,15 @@ export default function RoomScene({ initialScene = null }) {
       : (selectedWall.windows ?? []);
     return openings.find((opening) => opening.id === selectedOpening.id) ?? null;
   }, [selectedOpening, selectedWall]);
+  const contextMenuOpeningEntity = useMemo(() => {
+    if (!openingContextMenu) return null;
+    const wall = walls.find((item) => item.id === openingContextMenu.wallId);
+    if (!wall) return null;
+    const openings = openingContextMenu.type === 'door'
+      ? (wall.doors ?? [])
+      : (wall.windows ?? []);
+    return openings.find((opening) => opening.id === openingContextMenu.id) ?? null;
+  }, [openingContextMenu, walls]);
   const mobileOpeningPlacementLocked = isMobile
     && cameraMode === 'orbit'
     && (activeTool === 'door' || activeTool === 'window');
@@ -1082,9 +1119,8 @@ export default function RoomScene({ initialScene = null }) {
   }, []);
 
   // Wall helpers
-  const markSceneMutation = useCallback(({ saveOpening = false } = {}) => {
+  const markSceneMutation = useCallback(() => {
     localMutationVersionRef.current += 1;
-    if (saveOpening) pendingOpeningSaveRef.current = true;
   }, []);
 
   const updateWall = (id, updates) => {
@@ -1093,7 +1129,7 @@ export default function RoomScene({ initialScene = null }) {
   };
 
   const updateWallOpening = useCallback((wallId, openingType, openingId, updates) => {
-    markSceneMutation({ saveOpening: true });
+    markSceneMutation();
     setWalls((prev) => prev.map((wall) => {
       if (wall.id !== wallId) return wall;
       const key = openingType === 'door' ? 'doors' : 'windows';
@@ -1110,7 +1146,7 @@ export default function RoomScene({ initialScene = null }) {
   }, [markSceneMutation, setWalls]);
 
   const removeWallOpening = useCallback((wallId, openingType, openingId) => {
-    markSceneMutation({ saveOpening: true });
+    markSceneMutation();
     setWalls((prev) => prev.map((wall) => {
       if (wall.id !== wallId) return wall;
       const key = openingType === 'door' ? 'doors' : 'windows';
@@ -1121,7 +1157,19 @@ export default function RoomScene({ initialScene = null }) {
       };
     }));
     setSelectedOpening((prev) => (prev?.id === openingId ? null : prev));
+    setOpeningContextMenu((prev) => (prev?.id === openingId ? null : prev));
   }, [markSceneMutation, setWalls]);
+
+  const nudgeOpeningWidth = useCallback((direction) => {
+    if (!openingContextMenu || !contextMenuOpeningEntity) return;
+    const bounds = getOpeningBounds(openingContextMenu.type).width;
+    const nextWidth = Number(THREE.MathUtils.clamp(
+      (contextMenuOpeningEntity.width ?? 1) + (direction * 0.1),
+      bounds.min,
+      bounds.max
+    ).toFixed(2));
+    updateWallOpening(openingContextMenu.wallId, openingContextMenu.type, openingContextMenu.id, { width: nextWidth });
+  }, [contextMenuOpeningEntity, getOpeningBounds, openingContextMenu, updateWallOpening]);
 
   const updateOpeningNumericField = useCallback((field, rawValue) => {
     if (!selectedOpening || !selectedOpeningEntity) return;
@@ -1185,6 +1233,14 @@ export default function RoomScene({ initialScene = null }) {
             />
             <span className="room-input-unit">m</span>
           </Space.Compact>
+          <Slider
+            min={getOpeningBounds(selectedOpening.type).width.min}
+            max={getOpeningBounds(selectedOpening.type).width.max}
+            step={OPENING_STEP}
+            value={selectedOpeningEntity.width}
+            onChange={(value) => updateOpeningNumericField('width', value)}
+            tooltip={{ formatter: (value) => `${Number(value).toFixed(2)} m` }}
+          />
         </div>
         <div style={openingFieldCardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -1207,6 +1263,14 @@ export default function RoomScene({ initialScene = null }) {
             />
             <span className="room-input-unit">m</span>
           </Space.Compact>
+          <Slider
+            min={getOpeningBounds(selectedOpening.type).height.min}
+            max={getOpeningBounds(selectedOpening.type).height.max}
+            step={OPENING_STEP}
+            value={selectedOpeningEntity.height}
+            onChange={(value) => updateOpeningNumericField('height', value)}
+            tooltip={{ formatter: (value) => `${Number(value).toFixed(2)} m` }}
+          />
         </div>
       </div>
     );
@@ -2346,7 +2410,7 @@ export default function RoomScene({ initialScene = null }) {
     delete openingToStore.valid;
     delete openingToStore.reason;
 
-    markSceneMutation({ saveOpening: true });
+    markSceneMutation();
     setWalls((prev) => prev.map((item) => (
       item.id === wall.id
         ? { ...item, [key]: [...(item[key] ?? []), openingToStore], updatedAt: Date.now() }
@@ -2358,17 +2422,6 @@ export default function RoomScene({ initialScene = null }) {
     toast.success(`${openingType === 'door' ? 'Door' : 'Window'} added to wall.`);
     return true;
   }, [activeTool, buildOpeningPreview, markSceneMutation, openingPreview, setWalls, toast]);
-
-  useEffect(() => {
-    if (!pendingOpeningSaveRef.current) return;
-    if (!currentProjectId || isSaving) return;
-
-    pendingOpeningSaveRef.current = false;
-    saveProject(projectName, false).catch((error) => {
-      pendingOpeningSaveRef.current = true;
-      console.error('Failed to save wall opening:', error);
-    });
-  }, [currentProjectId, isSaving, projectName, saveProject, walls]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -3011,6 +3064,22 @@ export default function RoomScene({ initialScene = null }) {
                     setSelectedRoomId(room.id);
                     setSelectedWallId(wall.id);
                     setSelectedOpening({ ...opening, wallId: wall.id });
+                    setOpeningContextMenu(null);
+                    setSelectedFurnitureId(null);
+                    setSelectedLightId(null);
+                    setActiveTab('walls');
+                  }}
+                  onOpeningMenu={(opening) => {
+                    setSelectedRoomId(room.id);
+                    setSelectedWallId(wall.id);
+                    setSelectedOpening({ id: opening.id, type: opening.type, wallId: wall.id });
+                    setOpeningContextMenu({
+                      id: opening.id,
+                      type: opening.type,
+                      wallId: wall.id,
+                      x: Math.min(Math.max(opening.clientX, 12), window.innerWidth - 180),
+                      y: Math.min(Math.max(opening.clientY, 12), window.innerHeight - 72),
+                    });
                     setSelectedFurnitureId(null);
                     setSelectedLightId(null);
                     setActiveTab('walls');
@@ -3353,7 +3422,7 @@ export default function RoomScene({ initialScene = null }) {
             <Button
               type="default"
               disabled={isSaving}
-              onClick={() => navigate(switchTo2DUrl)}
+              onClick={switchTo2D}
               className="room-standalone-action-button"
             >
               Switch to 2D View
@@ -3606,6 +3675,91 @@ export default function RoomScene({ initialScene = null }) {
         suggestions={spatial.suggestions}
         visible={placedItems.length > 0}
       />
+
+      {openingContextMenu && (
+        <div
+          role="menu"
+          aria-label={`${openingContextMenu.type} actions`}
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{
+            position: 'fixed',
+            left: openingContextMenu.x,
+            top: openingContextMenu.y,
+            zIndex: 1700,
+            minWidth: 168,
+            padding: 8,
+            borderRadius: 12,
+            background: `${COLORS.background}F7`,
+            border: `1px solid ${COLORS.secondary}66`,
+            boxShadow: '0 18px 44px rgba(0,0,0,0.34)',
+            backdropFilter: 'blur(16px)',
+          }}
+        >
+          <div style={{ padding: '4px 6px 8px', color: `${COLORS.text}A8`, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Width {contextMenuOpeningEntity ? `${Number(contextMenuOpeningEntity.width).toFixed(2)} m` : ''}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => nudgeOpeningWidth(-1)}
+              style={{
+                minHeight: 38,
+                border: 0,
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.07)',
+                color: COLORS.text,
+                fontSize: 18,
+                fontWeight: 900,
+                cursor: 'pointer',
+              }}
+            >
+              -
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => nudgeOpeningWidth(1)}
+              style={{
+                minHeight: 38,
+                border: 0,
+                borderRadius: 8,
+                background: 'rgba(196,154,108,0.18)',
+                color: COLORS.text,
+                fontSize: 18,
+                fontWeight: 900,
+                cursor: 'pointer',
+              }}
+            >
+              +
+            </button>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => removeWallOpening(openingContextMenu.wallId, openingContextMenu.type, openingContextMenu.id)}
+            style={{
+              width: '100%',
+              minHeight: 38,
+              border: 0,
+              borderRadius: 8,
+              background: 'rgba(255, 91, 91, 0.12)',
+              color: '#ffb3ad',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '0 12px',
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: 'pointer',
+              textTransform: 'capitalize',
+            }}
+          >
+            <DeleteOutlined />
+            Delete {openingContextMenu.type}
+          </button>
+        </div>
+      )}
 
       {/*  Save modal  */}
       <SaveModal
