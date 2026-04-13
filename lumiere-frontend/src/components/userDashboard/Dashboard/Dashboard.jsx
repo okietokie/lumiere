@@ -202,6 +202,184 @@ const quietButtonStyle = {
   boxShadow: "inset 0 1px 0 rgba(234,216,195,0.035)",
 };
 
+const animatedButtonCss = `
+  .lm-animated-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    gap: 4px;
+    min-width: 140px;
+    max-width: 100%;
+    height: 48px;
+    padding: 0 36px;
+    border: 4px solid transparent;
+    border-radius: 100px;
+    background: transparent;
+    color: ${palette.accent};
+    box-shadow: 0 0 0 1.5px ${palette.accent};
+    cursor: pointer;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 650;
+    line-height: 1;
+    font-family: inherit;
+    appearance: none;
+    transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .lm-animated-button svg {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    max-width: 22px;
+    max-height: 22px;
+    fill: ${palette.accent};
+    z-index: 2;
+    pointer-events: none;
+    transition: all 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .lm-animated-button .arr-1 {
+    right: 16px;
+  }
+
+  .lm-animated-button .arr-2 {
+    left: -25%;
+  }
+
+  .lm-animated-button .circle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: ${palette.accent};
+    opacity: 0;
+    transform: translate(-50%, -50%);
+    transition: all 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .lm-animated-button .text {
+    position: relative;
+    z-index: 3;
+    transform: translateX(-12px);
+    transition: all 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+    white-space: nowrap;
+  }
+
+  .lm-animated-button:hover {
+    border-radius: 14px;
+    color: #120f0d;
+    box-shadow: 0 0 0 12px transparent;
+  }
+
+  .lm-animated-button:hover .arr-1 {
+    right: -25%;
+  }
+
+  .lm-animated-button:hover .arr-2 {
+    left: 16px;
+  }
+
+  .lm-animated-button:hover .text {
+    transform: translateX(12px);
+  }
+
+  .lm-animated-button:hover svg {
+    fill: #120f0d;
+  }
+
+  .lm-animated-button:hover .circle {
+    width: 230px;
+    height: 230px;
+    opacity: 1;
+  }
+
+  .lm-animated-button:active {
+    transform: scale(0.96);
+    box-shadow: 0 0 0 4px ${palette.accent};
+  }
+
+  .lm-animated-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+    color: rgba(234,216,195,0.42);
+    box-shadow: 0 0 0 1.5px rgba(234,216,195,0.18);
+  }
+
+  .lm-animated-button:disabled svg {
+    fill: rgba(234,216,195,0.42);
+  }
+
+  .lm-animated-button:disabled:hover {
+    border-radius: 100px;
+    color: rgba(234,216,195,0.42);
+    box-shadow: 0 0 0 1.5px rgba(234,216,195,0.18);
+  }
+
+  .lm-animated-button:disabled:hover .arr-1 {
+    right: 16px;
+  }
+
+  .lm-animated-button:disabled:hover .arr-2 {
+    left: -25%;
+  }
+
+  .lm-animated-button:disabled:hover .text {
+    transform: translateX(-12px);
+  }
+
+  .lm-animated-button:disabled:hover .circle {
+    width: 20px;
+    height: 20px;
+    opacity: 0;
+  }
+
+  .lm-hover-card {
+    transform-origin: center;
+    transition:
+      transform 0.4s ease,
+      box-shadow 0.4s ease,
+      background 0.4s ease;
+  }
+
+  .lm-hover-card .lm-hover-card-content,
+  .lm-hover-card .ant-card-body {
+    transform-origin: center;
+    transition: transform 0.4s ease;
+  }
+
+  .lm-hover-card .lm-card-visual,
+  .lm-hover-card .lm-card-accent-icon,
+  .lm-hover-card .lm-project-preview {
+    transform-origin: center;
+    transition: transform 0.4s ease;
+  }
+
+  .lm-hover-card:hover {
+    cursor: pointer;
+    transform: scale(0.985);
+  }
+
+  .lm-hover-card:hover .lm-hover-card-content,
+  .lm-hover-card:hover > .ant-card-body {
+    transform: scale(0.985);
+  }
+
+  .lm-hover-card:hover .lm-card-visual,
+  .lm-hover-card:hover .lm-card-accent-icon,
+  .lm-hover-card:hover .lm-project-preview {
+    transform: scale(1.035);
+  }
+
+  .lm-hover-card:active {
+    transform: scale(0.965);
+  }
+`;
+
 const formatDate = (value) => {
   if (!value) return "Not edited yet";
   const date = new Date(value);
@@ -1085,17 +1263,51 @@ const MobileBottomNav = ({ activeTab, setActiveTab, onCreateNew }) => (
   </>
 );
 
-const AntDashboardButton = ({ variant = "quiet", style, children, ...props }) => (
-  <Button
-    style={{
-      ...(variant === "primary" ? primaryButtonStyle : quietButtonStyle),
-      ...style,
-    }}
-    {...props}
-  >
-    {children}
-  </Button>
+const ArrowIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} xmlns="http://www.w3.org/2000/svg">
+    <path d="M16.1716 10.9999L10.8076 5.63589L12.2218 4.22168L20 11.9999L12.2218 19.778L10.8076 18.3638L16.1716 12.9999H4V10.9999H16.1716Z" />
+  </svg>
 );
+
+const AntDashboardButton = ({
+  variant = "quiet",
+  style,
+  children,
+  disabled,
+  icon,
+  ...props
+}) => {
+  if (variant === "primary") {
+    return (
+      <button
+        type="button"
+        className="lm-animated-button"
+        style={style}
+        disabled={disabled}
+        {...props}
+      >
+        <ArrowIcon className="arr-2" />
+        <span className="text">{children}</span>
+        <span className="circle" />
+        <ArrowIcon className="arr-1" />
+      </button>
+    );
+  }
+
+  return (
+    <Button
+      style={{
+        ...quietButtonStyle,
+        ...style,
+      }}
+      disabled={disabled}
+      icon={icon}
+      {...props}
+    >
+      {children}
+    </Button>
+  );
+};
 
 const AntSectionHeading = ({ eyebrow, title, copy, action }) => (
   <Flex align="flex-end" justify="space-between" gap={24} wrap="wrap">
@@ -1253,7 +1465,7 @@ const AntTopbar = ({ user, onLogout, activeTab, setActiveTab, onCreateNew, onSea
         </Flex>
         <Space size={12}>
           {!compact && (
-            <AntDashboardButton variant="primary" onClick={onCreateNew} icon={<Plus size={17} />}>
+            <AntDashboardButton variant="primary" onClick={onCreateNew}>
               New Project
             </AntDashboardButton>
           )}
@@ -1320,7 +1532,7 @@ const AntOverviewHero = ({
   const activeProjects = Number(stats?.active_projects ?? stats?.active ?? stats?.projects ?? 0);
 
   return (
-    <Card style={antdStyles.hero} styles={{ body: antdStyles.heroBody }}>
+    <Card className="lm-hover-card" style={antdStyles.hero} styles={{ body: antdStyles.heroBody }}>
       <Row gutter={[32, 32]} align="middle">
         <Col xs={24} xl={15}>
           <Space direction="vertical" size={18} style={{ maxWidth: 780 }}>
@@ -1357,13 +1569,13 @@ const AntOverviewHero = ({
               Continue the studio work in {lastProject?.name ?? "your latest room"}, or begin a fresh concept with a cleaner canvas.
             </Paragraph>
             <Space size={12} wrap style={{ paddingTop: 14 }}>
-              <AntDashboardButton variant="primary" onClick={onCreateNew} icon={<Plus size={17} />}>
+              <AntDashboardButton variant="primary" onClick={onCreateNew}>
                 New Project
               </AntDashboardButton>
               <AntDashboardButton
+                variant="primary"
                 onClick={onOpenLastProject}
                 disabled={!lastProject}
-                icon={<ExternalLink size={16} />}
               >
                 Continue Work
               </AntDashboardButton>
@@ -1372,6 +1584,7 @@ const AntOverviewHero = ({
         </Col>
         <Col xs={24} xl={9}>
           <Card
+            className="lm-hover-card"
             style={{
               ...antdStyles.panel,
               background: "rgba(10, 8, 7, 0.52)",
@@ -1473,7 +1686,7 @@ const AntStatsStrip = ({ stats, projectAssets, projectRenders }) => {
   ];
 
   return (
-    <Card style={antdStyles.panel} styles={{ body: { padding: 0 } }}>
+    <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: { padding: 0 } }}>
       <Row gutter={[0, 0]}>
         {metrics.map(({ label, value, subtext, icon: Icon }, index) => (
           <Col xs={12} lg={6} key={label}>
@@ -1487,6 +1700,7 @@ const AntStatsStrip = ({ stats, projectAssets, projectRenders }) => {
               }}
             >
               <Avatar
+                className="lm-card-accent-icon"
                 size={42}
                 icon={<Icon size={19} />}
                 style={{ color: palette.accent, background: palette.accentSoft }}
@@ -1519,6 +1733,7 @@ const AntQuickActions = ({ onAction }) => {
       {actions.map(({ id, title, copy, icon: Icon }) => (
         <Col xs={24} sm={12} xl={6} key={id}>
           <Card
+            className="lm-hover-card"
             hoverable
             onClick={() => onAction(id)}
             style={{
@@ -1531,6 +1746,7 @@ const AntQuickActions = ({ onAction }) => {
           >
             <Flex align="center" gap={18}>
               <Avatar
+                className="lm-card-accent-icon"
                 size={48}
                 icon={<Icon size={20} />}
                 style={{ color: palette.accent, background: palette.accentSoft }}
@@ -1564,6 +1780,7 @@ const AntProjectPreview = ({ project }) => {
   if (project?.thumbnail_url || project?.thumbnailUrl) {
     return (
       <img
+        className="lm-project-preview"
         src={project.thumbnail_url ?? project.thumbnailUrl}
         alt={project.name}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -1573,6 +1790,7 @@ const AntProjectPreview = ({ project }) => {
 
   return (
     <div
+      className="lm-project-preview"
       style={{
         height: "100%",
         minHeight: 240,
@@ -1609,7 +1827,12 @@ const AntProjectCard = ({ project, onOpen, onDuplicate, onDelete, onRename }) =>
   ];
 
   return (
-    <Card hoverable style={antdStyles.projectCard} styles={{ body: { padding: 0 } }}>
+    <Card
+      className="lm-hover-card"
+      hoverable
+      style={antdStyles.projectCard}
+      styles={{ body: { padding: 0 } }}
+    >
       <div style={{ position: "relative", aspectRatio: "16 / 10", overflow: "hidden" }}>
         <AntProjectPreview project={project} />
         <span
@@ -1710,7 +1933,7 @@ const AntProjectGrid = ({ projects, loading, featured = false, ...handlers }) =>
 };
 
 const AntActivityList = ({ activities, loading, onOpenProject }) => (
-  <Card style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
+  <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
     <Flex align="center" justify="space-between" style={{ marginBottom: 20 }}>
       <Title level={3} style={{ margin: 0, color: palette.text, fontSize: 22 }}>
         Recent Activity
@@ -2209,7 +2432,6 @@ const Dashboard = ({ user, onLogout }) => {
             <AntDashboardButton
               variant="primary"
               onClick={() => setCreateOpen(true)}
-              icon={<Plus size={16} />}
             >
               New Project
             </AntDashboardButton>
@@ -2229,7 +2451,7 @@ const Dashboard = ({ user, onLogout }) => {
           <Row gutter={[16, 16]}>
             {projectAssets.map((asset) => (
               <Col xs={24} sm={12} xl={6} key={asset.id}>
-                <Card style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
+                <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
                   <div
                     style={{
                       aspectRatio: "1 / 1",
@@ -2242,9 +2464,9 @@ const Dashboard = ({ user, onLogout }) => {
                     }}
                   >
                     {asset.url ? (
-                      <img src={asset.url} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <img className="lm-card-visual" src={asset.url} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     ) : (
-                      <Layers size={30} color="rgba(234,216,195,0.45)" />
+                      <Layers className="lm-card-accent-icon" size={30} color="rgba(234,216,195,0.45)" />
                     )}
                   </div>
                   <Title level={5} ellipsis style={{ margin: "18px 0 6px", color: palette.text }}>
@@ -2277,7 +2499,7 @@ const Dashboard = ({ user, onLogout }) => {
         {budgetItems.length ? (
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={16}>
-              <Card style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
+              <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
                 <Text style={{ color: palette.muted }}>Total Estimated Cost</Text>
                 <Title level={2} style={{ color: palette.text, marginTop: 10 }}>
                   {formatMoney(totalBudget)}
@@ -2302,7 +2524,7 @@ const Dashboard = ({ user, onLogout }) => {
               </Card>
             </Col>
             <Col xs={24} lg={8}>
-              <Card style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
+              <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
                 <Text style={{ color: palette.muted }}>Coverage</Text>
                 <Title level={2} style={{ color: palette.text, marginTop: 10 }}>
                   {budgetItems.length}
@@ -2332,10 +2554,10 @@ const Dashboard = ({ user, onLogout }) => {
           <Row gutter={[16, 16]}>
             {projectRenders.map((render) => (
               <Col xs={24} md={12} xl={8} key={render.id}>
-                <Card style={antdStyles.projectCard} styles={{ body: { padding: 0 } }}>
+                <Card className="lm-hover-card" style={antdStyles.projectCard} styles={{ body: { padding: 0 } }}>
                   <div style={{ aspectRatio: "16 / 10", background: "#030303" }}>
                     {render.url ? (
-                      <img src={render.url} alt={render.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <img className="lm-card-visual" src={render.url} alt={render.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     ) : (
                       <Flex align="center" justify="center" style={{ height: "100%" }}>
                         <Camera color="rgba(234,216,195,0.45)" />
@@ -2371,7 +2593,7 @@ const Dashboard = ({ user, onLogout }) => {
           title="Workspace Settings"
           copy="Display-only profile and workspace preferences."
         />
-        <Card style={{ ...antdStyles.panel, maxWidth: 760 }} styles={{ body: antdStyles.panelBody }}>
+        <Card className="lm-hover-card" style={{ ...antdStyles.panel, maxWidth: 760 }} styles={{ body: antdStyles.panelBody }}>
           <Space direction="vertical" size={24} style={{ width: "100%" }}>
             <Title level={3} style={{ margin: 0, color: palette.text }}>
               Profile
@@ -2398,6 +2620,8 @@ const Dashboard = ({ user, onLogout }) => {
 
   return (
     <Layout style={antdStyles.root}>
+      <style>{animatedButtonCss}</style>
+
       <AntSidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}

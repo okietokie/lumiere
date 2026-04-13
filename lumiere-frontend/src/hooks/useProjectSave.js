@@ -3,6 +3,16 @@ import axiosClient from '../api/axiosClient';
 import { createRoomEntity } from '../utils/sceneEntities';
 import { generateLayoutWalls } from '../utils/roomLayout';
 import { getAccessToken } from '../utils/authStorage';
+import {
+  buildItemMeasurements,
+  buildLightMeasurements,
+  buildOpeningMeasurements,
+  buildRoomMeasurements,
+  buildWallMeasurements,
+  getRoomIdForPosition,
+} from '../utils/measurements';
+import { createEmptySceneBudget } from '../utils/budgetContract';
+import { useBudgetStore } from '../stores/useBudgetStore';
 
 const AUTOSAVE_MS = 30_000;
 const DEFAULT_PROJECT_NAME = 'Untitled Room';
@@ -113,26 +123,68 @@ function normalizeLoadedRooms(sceneData) {
   });
 }
 
-export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState }) {
+export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState, budget }) {
   return {
     version: '1.3',
     savedAt: new Date().toISOString(),
     rooms: rooms.map(({ id, name, type, x, z, width, depth, height, footprint, isCustomShape }) => ({
-      id, name, type, x, z, width, depth, height, footprint, isCustomShape,
+      id,
+      name,
+      label: name,
+      type,
+      x,
+      z,
+      width,
+      depth,
+      height,
+      footprint,
+      isCustomShape,
+      measurements: buildRoomMeasurements({ id, name, type, x, z, width, depth, height, footprint, isCustomShape }, floorMaterial, ceilingMaterial),
     })),
     walls: walls.map(({ id, roomId, start, end, height, thickness, color, roughness, metalness, textureId, doors, windows }) => ({
-      id, roomId, start, end, height, thickness, color, roughness, metalness, textureId, doors, windows,
+      id,
+      type: 'wall',
+      roomId,
+      start,
+      end,
+      height,
+      thickness,
+      color,
+      roughness,
+      metalness,
+      textureId,
+      doors: (doors ?? []).map((door) => ({
+        ...door,
+        type: 'door',
+        roomId,
+        wallId: door.wallId ?? id,
+        label: door.label ?? 'Door',
+        measurements: buildOpeningMeasurements(door),
+      })),
+      windows: (windows ?? []).map((window) => ({
+        ...window,
+        type: 'window',
+        roomId,
+        wallId: window.wallId ?? id,
+        label: window.label ?? 'Window',
+        measurements: buildOpeningMeasurements(window),
+      })),
+      measurements: buildWallMeasurements({ id, roomId, start, end, height, doors, windows }),
     })),
     furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale, tint }) => ({
       id,
+      type: category || 'furniture',
       filename,
       name,
+      label: name || filename || 'Furniture',
       url: url || null,
       category: category || null,
+      roomId: getRoomIdForPosition(rooms, position),
       position,
       rotation,
       scale,
       tint,
+      measurements: buildItemMeasurements({ scale }),
     })),
     materials: {
       floor: floorMaterial,
@@ -142,10 +194,23 @@ export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceili
       timeOfDay: lightingState.timeOfDay,
       activeMood: lightingState.activeMood,
       globalBrightness: lightingState.globalBrightness,
-      placedLights: lightingState.placedLights.map(({ id, type, position, intensity, color, distance, angle, enabled }) => ({
-        id, type, position, intensity, color, distance, angle, enabled,
+      placedLights: lightingState.placedLights.map(({ id, type, budgetCategory, quantity, position, intensity, color, distance, angle, enabled }) => ({
+        id,
+        type,
+        budgetCategory,
+        quantity: quantity ?? 1,
+        roomId: getRoomIdForPosition(rooms, position),
+        label: `${type || 'Light'} light`,
+        position,
+        intensity,
+        color,
+        distance,
+        angle,
+        enabled,
+        measurements: buildLightMeasurements({ quantity }),
       })),
     },
+    budget: createEmptySceneBudget(budget),
   };
 }
 
@@ -211,10 +276,19 @@ export default function useProjectSave({
   const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: 'idle', usdz: 'idle' });
   const autosaveTimer = useRef(null);
   const hasAttemptedInitialLoad = useRef(false);
+  const getSceneBudget = useBudgetStore((state) => state.getSceneBudget);
+  const hydrateBudgetFromScene = useBudgetStore((state) => state.hydrateFromSceneBudget);
+  const resetBudgetStore = useBudgetStore((state) => state.resetBudgetStore);
 
   const getSceneData = useCallback(() => buildSceneData({
-    rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState,
-  }), [rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState]);
+    rooms,
+    walls,
+    placedItems,
+    floorMaterial,
+    ceilingMaterial,
+    lightingState,
+    budget: getSceneBudget(),
+  }), [rooms, walls, placedItems, floorMaterial, ceilingMaterial, lightingState, getSceneBudget]);
 
   const getCanvas = useCallback(() => {
     if (canvasRef?.current) return canvasRef.current;
@@ -266,6 +340,7 @@ export default function useProjectSave({
       }
 
       const data = response.data;
+      hydrateBudgetFromScene(data.scene_data?.budget ?? data.scene?.budget ?? scene.budget);
       setCurrentProjectId(data.id);
       setProjectName(data.title || name);
       setShareUrl(data.share_url || '');
@@ -278,7 +353,7 @@ export default function useProjectSave({
       setTimeout(() => setSaveStatus('idle'), 3000);
       throw e;
     }
-  }, [projectName, currentProjectId, getSceneData, captureSnapshot, setCurrentProjectId]);
+  }, [projectName, currentProjectId, getSceneData, captureSnapshot, hydrateBudgetFromScene, setCurrentProjectId]);
 
   const downloadSnapshot = useCallback(() => {
     requestAnimationFrame(() => {
@@ -326,6 +401,7 @@ export default function useProjectSave({
             setCeiling: setCeilingMaterial,
             lightingState,
           });
+          hydrateBudgetFromScene(data.budget);
           setProjectName(file.name.replace(/\.(lumiere\.json|json)$/, ''));
           setCurrentProjectId(null);
           setShareUrl('');
@@ -337,7 +413,7 @@ export default function useProjectSave({
       reader.readAsText(file);
     };
     input.click();
-  }, [setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
+  }, [hydrateBudgetFromScene, setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
   const loadProject = useCallback(async (projectId, options = {}) => {
     const startMutationVersion = getLocalMutationVersion();
@@ -350,6 +426,7 @@ export default function useProjectSave({
     }
     const sceneData = data.scene_data || data.scene;
     if (sceneData) {
+      hydrateBudgetFromScene(sceneData.budget);
       applySceneData(sceneData, {
         setRooms,
         setWalls,
@@ -364,7 +441,7 @@ export default function useProjectSave({
       setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
     }
     return data;
-  }, [getLocalMutationVersion, setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
+  }, [getLocalMutationVersion, hydrateBudgetFromScene, setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
   const loadLatestProject = useCallback(async () => {
     if (!getAccessToken() || currentProjectId) return null;
@@ -376,6 +453,7 @@ export default function useProjectSave({
       }
       const sceneData = data.scene_data || data.scene;
       if (!sceneData) return null;
+      hydrateBudgetFromScene(sceneData.budget);
       applySceneData(sceneData, {
         setRooms,
         setWalls,
@@ -396,6 +474,7 @@ export default function useProjectSave({
   }, [
     currentProjectId,
     getLocalMutationVersion,
+    hydrateBudgetFromScene,
     lightingState,
     setCeilingMaterial,
     setCurrentProjectId,
@@ -473,6 +552,7 @@ export default function useProjectSave({
     lightingState.setSelectedLightId(null);
     lightingState.setGlobalBrightness(1);
     lightingState.setPreviewMode(false);
+    resetBudgetStore();
     setCurrentProjectId(null);
     setProjectName(DEFAULT_PROJECT_NAME);
     setShareUrl('');
@@ -487,6 +567,7 @@ export default function useProjectSave({
     setPlacedItems,
     setRooms,
     setWalls,
+    resetBudgetStore,
   ]);
 
   const listProjects = useCallback(async () => {

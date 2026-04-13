@@ -1,7 +1,7 @@
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid as DreiGrid, GizmoHelper, GizmoViewport, Html, Text } from "@react-three/drei";
 import { useState, useEffect, useRef, Suspense, useCallback, useMemo } from "react";
-import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Slider } from "antd";
+import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Slider, Drawer, Form, Select, Input } from "antd";
 import {
   EyeOutlined,
   EyeInvisibleOutlined,
@@ -26,6 +26,7 @@ import {
   CheckOutlined,
   CloseOutlined,
   LoadingOutlined,
+  WalletOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
@@ -48,7 +49,7 @@ import {
 import * as THREE from "three";
 import useHistory   from "../../../hooks/useHistory";
 import useMaterials from "../../../hooks/useMaterials";
-import useLighting  from "../../../hooks/useLighting";
+import useLighting, { LIGHT_BUDGET_CATEGORIES, LIGHT_TYPES } from "../../../hooks/useLighting";
 import FirstPersonControls from "../camera/FirstPersonControls";
 import WalkHUD             from "../camera/WalkHUD";
 import InteractiveWall from "../walls/InteractiveWall";
@@ -73,6 +74,24 @@ import { useToast }        from "../../../ui/ToastNotification";
 import { SlidePanel, BottomNav, MobileTopBar } from "./MobileLayout";
 import RevealActionButton from "./RevealActionButton";
 import useProjectSave      from "../../../hooks/useProjectSave";
+import axiosClient from "../../../api/axiosClient";
+import { useBudgetStore } from "../../../stores/useBudgetStore";
+import { calculateBudgetSummary } from "../../../utils/budgetEstimator";
+import {
+  AREA_COST_TARGET_TYPES,
+  BUDGET_COST_SOURCE_LABELS,
+  BUDGET_COST_SOURCES,
+  BUDGET_RULE_SCOPES,
+  normalizeBudgetRuleScopeFields,
+} from "../../../utils/budgetContract";
+import {
+  getCeilingArea,
+  getFloorArea,
+  getRoomIdForPosition,
+  getWallArea,
+  getWallHeight,
+  getWallLength,
+} from "../../../utils/measurements";
 import RoomCreationPanel from "../rooms/RoomCreationPanel";
 import PendingRoomNameInput from "../rooms/PendingRoomNameInput";
 import useRoomCreation, { buildAdjacentRoomFromBoundary } from "../rooms/useRoomCreation";
@@ -123,6 +142,16 @@ const ROOM_ACTION_BUTTONS = [
   { key: 'delete', icon: DeleteOutlined, label: 'Delete Room' },
 ];
 const ROOM_CREATION_ROOT_SELECTOR = '[data-room-creation-root="true"]';
+const BUDGET_SCOPE_LABELS = {
+  [BUDGET_RULE_SCOPES.SINGLE_ITEM]: 'This item only',
+  [BUDGET_RULE_SCOPES.ROOM_TYPE]: 'This room only',
+  [BUDGET_RULE_SCOPES.GLOBAL_TYPE]: 'All items of this type',
+};
+const BUDGET_COST_SOURCE_OPTIONS = Object.entries(BUDGET_COST_SOURCE_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}));
+const MAX_BUDGET_AMOUNT_DECIMALS = 2;
 
 function formatMoney(value, currency = 'AED') {
   return new Intl.NumberFormat(currency === 'EUR' ? 'en-IE' : 'en-AE', {
@@ -130,6 +159,29 @@ function formatMoney(value, currency = 'AED') {
     currency,
     maximumFractionDigits: 0,
   }).format(value || 0);
+}
+
+function titleCaseBudgetType(value = '') {
+  return String(value)
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function formatMeasurement(value, suffix = '') {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return `0${suffix}`;
+  return `${Number(numericValue.toFixed(2))}${suffix}`;
+}
+
+function hasTooManyBudgetDecimals(value) {
+  if (value === '' || value === null || value === undefined) return false;
+  const normalizedValue = String(value).trim().toLowerCase();
+  if (normalizedValue.includes('e')) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) && !Number.isInteger(numericValue * 100);
+  }
+  const decimals = normalizedValue.split('.')[1] ?? '';
+  return decimals.length > MAX_BUDGET_AMOUNT_DECIMALS;
 }
 
 function getRoomFootprint(room, surfaceBounds = null) {
@@ -341,6 +393,7 @@ function PolygonSurface({
   material,
   fallbackColor,
   onClick,
+  onContextMenu,
   flip = false,
   hidden = false,
   transparent = false,
@@ -358,6 +411,7 @@ function PolygonSurface({
       position={[0, y, 0]}
       receiveShadow
       onClick={interactive ? onClick : undefined}
+      onContextMenu={interactive ? onContextMenu : undefined}
       raycast={interactive ? undefined : () => null}
     >
       <shapeGeometry args={[shape]} />
@@ -516,6 +570,7 @@ export default function RoomScene({ initialScene = null }) {
   const [selectedWallId,      setSelectedWallId]      = useState(null);
   const [selectedOpening,     setSelectedOpening]     = useState(null);
   const [openingContextMenu,  setOpeningContextMenu]  = useState(null);
+  const [elementContextMenu,  setElementContextMenu]  = useState(null);
   const [roomWallPlacementSide, setRoomWallPlacementSide] = useState('right');
   const [sceneRoomActionsVisible, setSceneRoomActionsVisible] = useState(false);
   const [cameraMode,          setCameraMode]          = useState('orbit');
@@ -533,8 +588,13 @@ export default function RoomScene({ initialScene = null }) {
   const [currentProjectId,    setCurrentProjectId]    = useState(() => selectedProjectId ?? null);
   const [projectLoading,      setProjectLoading]      = useState(shouldLoadSelectedProject);
   const [projectLoadError,    setProjectLoadError]    = useState('');
+  const [budgetRuleSaving,    setBudgetRuleSaving]    = useState(false);
+  const [budgetBadgeMode,     setBudgetBadgeMode]     = useState('cost');
+  const [budgetSummaryOpen,   setBudgetSummaryOpen]   = useState(false);
+  const [budgetSummaryExpanded, setBudgetSummaryExpanded] = useState(false);
   const [wallsHidden,         setWallsHidden]         = useState(false);
   const [ceilingHidden,       setCeilingHidden]       = useState(false);
+  const [sceneControlsMenuOpen, setSceneControlsMenuOpen] = useState(false);
   const [wallToolbarPinned,   setWallToolbarPinned]   = useState(false);
   const [furnitureToolbarPinned, setFurnitureToolbarPinned] = useState(false);
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
@@ -587,6 +647,20 @@ export default function RoomScene({ initialScene = null }) {
     };
   }, [openingContextMenu]);
 
+  useEffect(() => {
+    if (!elementContextMenu) return undefined;
+    const closeMenu = () => setElementContextMenu(null);
+    const handleKey = (event) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('pointerdown', closeMenu);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('pointerdown', closeMenu);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [elementContextMenu]);
+
   const openMobilePanel = useCallback((tab) => {
     const hasSelectedRoom = Boolean(selectedRoomId || rooms[0]?.id);
     const nextTab = tab === 'room' && !hasSelectedRoom ? 'walls' : tab;
@@ -613,6 +687,83 @@ export default function RoomScene({ initialScene = null }) {
   });
   const { loadProject, saveProject, projectName } = projectSave;
   const isSaving = projectSave.saveStatus === 'saving';
+  const budgetEnabled = useBudgetStore((state) => state.budgetEnabled);
+  const budgetSummary = useBudgetStore((state) => state.summary);
+  const budgetUnsavedChanges = useBudgetStore((state) => state.unsavedChanges);
+  const setBudgetEnabled = useBudgetStore((state) => state.setBudgetEnabled);
+  const openBudgetPanel = useBudgetStore((state) => state.openBudgetPanel);
+  const closeBudgetPanel = useBudgetStore((state) => state.closeBudgetPanel);
+  const budgetPanelOpen = useBudgetStore((state) => state.budgetPanelOpen);
+  const selectedBudgetTarget = useBudgetStore((state) => state.selectedBudgetTarget);
+  const draftBudgetRule = useBudgetStore((state) => state.draftRule);
+  const budgetRules = useBudgetStore((state) => state.rules);
+  const updateDraftRule = useBudgetStore((state) => state.updateDraftRule);
+  const upsertBudgetRule = useBudgetStore((state) => state.upsertRule);
+  const removeBudgetRule = useBudgetStore((state) => state.removeRule);
+  const setBudgetSummary = useBudgetStore((state) => state.setSummary);
+  const setBudgetSnapshots = useBudgetStore((state) => state.setSnapshots);
+  const hydrateBudgetFromScene = useBudgetStore((state) => state.hydrateFromSceneBudget);
+  const budgetGrandTotal = budgetSummary?.grandTotal ?? budgetSummary?.totals?.grandTotal ?? 0;
+  const budgetBreakdownByTargetId = useMemo(() => {
+    const rows = Array.isArray(budgetSummary?.breakdown) ? budgetSummary.breakdown : [];
+    return new Map(rows.map((row) => [row.targetId, row]));
+  }, [budgetSummary?.breakdown]);
+  const getBudgetBadgeLabel = useCallback((targetId) => {
+    if (!budgetEnabled || budgetBadgeMode === 'hidden') return null;
+    const row = budgetBreakdownByTargetId.get(targetId);
+    if (!row?.appliedRuleId) return null;
+
+    if (budgetBadgeMode === 'rate') {
+      if (row.unit === 'sqm') return `${formatMeasurement(row.amount)} AED/sq.m`;
+      return formatMoney(row.amount, budgetSummary.currency);
+    }
+
+    if (!row.calculatedCost) return null;
+    return formatMoney(row.calculatedCost, budgetSummary.currency);
+  }, [budgetBadgeMode, budgetBreakdownByTargetId, budgetEnabled, budgetSummary.currency]);
+  const budgetUnpricedCount = useMemo(() => {
+    const rows = Array.isArray(budgetSummary?.breakdown) ? budgetSummary.breakdown : [];
+    return rows.filter((row) => !row?.appliedRuleId).length;
+  }, [budgetSummary?.breakdown]);
+  const budgetCategoryRows = useMemo(() => {
+    const byCategory = budgetSummary?.byCategory ?? {};
+    return [
+      ['Furniture', (byCategory.furniture ?? 0) + (byCategory.decor ?? 0)],
+      ['Walls', byCategory.walls ?? 0],
+      ['Floor', byCategory.floor ?? 0],
+      ['Ceiling', byCategory.ceiling ?? 0],
+      ['Doors', byCategory.doors ?? 0],
+      ['Windows', byCategory.windows ?? 0],
+      ['Lights', byCategory.lights ?? 0],
+    ];
+  }, [budgetSummary?.byCategory]);
+  const budgetRoomRows = useMemo(() => {
+    const byRoom = budgetSummary?.byRoom ?? {};
+    return Object.entries(byRoom)
+      .map(([roomId, total]) => [
+        rooms.find((room) => room.id === roomId)?.name ?? roomId,
+        Number(total) || 0,
+      ])
+      .sort((a, b) => b[1] - a[1]);
+  }, [budgetSummary?.byRoom, rooms]);
+
+  const handleBudgetActivationChange = useCallback(async (enabled) => {
+    setBudgetEnabled(enabled);
+    setBudgetSummaryOpen(false);
+    setBudgetSummaryExpanded(false);
+
+    if (!currentProjectId) return;
+
+    try {
+      const { data } = await axiosClient.patch(`/api/projects/${currentProjectId}/budget/activate`, {
+        enabled,
+      });
+      hydrateBudgetFromScene(data?.scene_data?.budget ?? data?.scene?.budget ?? { enabled });
+    } catch (error) {
+      setBudgetEnabled(!enabled);
+      toast?.error?.(error?.response?.data?.detail || error?.message || 'Budget mode could not be updated.');
+    }
+  }, [currentProjectId, hydrateBudgetFromScene, setBudgetEnabled, toast]);
 
   const buildLive3DSceneSnapshot = useCallback(() => ({
     rooms,
@@ -634,6 +785,48 @@ export default function RoomScene({ initialScene = null }) {
     lightingState.timeOfDay,
     lightingState.activeMood,
     lightingState.globalBrightness,
+  ]);
+
+  const budgetEstimateScene = useMemo(() => ({
+    projectName: projectName || 'Untitled Room',
+    rooms,
+    walls,
+    furniture: placedItems,
+    materials: {
+      floor: floorMaterial,
+      ceiling: ceilingMaterial,
+    },
+    lighting: {
+      placedLights,
+    },
+    budget: {
+      currency: budgetSummary.currency,
+      quotation: {
+        date: budgetSummary.quotation?.date,
+      },
+    },
+  }), [budgetSummary.currency, budgetSummary.quotation?.date, ceilingMaterial, floorMaterial, placedItems, placedLights, projectName, rooms, walls]);
+
+  useEffect(() => {
+    if (!budgetEnabled) return;
+    const summary = calculateBudgetSummary(budgetEstimateScene, budgetRules);
+    setBudgetSummary({
+      enabled: budgetEnabled,
+      currency: budgetSummary.currency,
+      ...summary,
+      rules_count: budgetRules.length,
+      snapshots_count: summary.snapshots.length,
+      last_calculated_at: budgetSummary.last_calculated_at,
+    });
+    setBudgetSnapshots(summary.snapshots);
+  }, [
+    budgetEnabled,
+    budgetEstimateScene,
+    budgetRules,
+    budgetSummary.currency,
+    budgetSummary.last_calculated_at,
+    setBudgetSnapshots,
+    setBudgetSummary,
   ]);
 
   const switchTo2D = useCallback(() => {
@@ -724,6 +917,10 @@ export default function RoomScene({ initialScene = null }) {
   const toggleCeilingHidden = useCallback(() => {
     setCeilingHidden((prev) => !prev);
   }, []);
+  const handleSwitchTo2DFromMenu = useCallback(() => {
+    setSceneControlsMenuOpen(false);
+    switchTo2D();
+  }, [switchTo2D]);
   const recorder = useRecorder({
     canvasWrapperRef,         
     orbitControlsRef,         
@@ -858,6 +1055,403 @@ export default function RoomScene({ initialScene = null }) {
       };
     });
   }, [roomWalls]);
+
+  const findBudgetRuleForScope = useCallback((scope, target = selectedBudgetTarget) => {
+    if (!target?.targetType || !scope) return null;
+    return budgetRules.find((rule) => {
+      if (rule.targetType !== target.targetType || rule.scope !== scope) return false;
+      if (scope === BUDGET_RULE_SCOPES.SINGLE_ITEM) return rule.targetId === target.targetId;
+      if (scope === BUDGET_RULE_SCOPES.ROOM_TYPE) return rule.roomId === target.roomId;
+      return true;
+    }) ?? null;
+  }, [budgetRules, selectedBudgetTarget]);
+
+  const budgetTargetDetails = useMemo(() => {
+    const target = selectedBudgetTarget;
+    if (!target?.targetType) return null;
+
+    const targetType = target.targetType;
+    let entity = target.entity ?? null;
+    let roomId = target.roomId ?? null;
+    let objectName = target.label || titleCaseBudgetType(targetType);
+    let measurements = { quantity: 1 };
+    const measurementRows = [];
+
+    if (targetType === 'wall') {
+      entity = walls.find((wall) => wall.id === target.targetId) ?? entity;
+      roomId = entity?.roomId ?? roomId;
+      const length = getWallLength(entity ?? {});
+      const height = getWallHeight(entity ?? {});
+      const areaSqm = getWallArea(entity ?? {});
+      measurements = { length, height, areaSqm };
+      objectName = target.label || 'Wall';
+      measurementRows.push(
+        ['Dimensions', `${formatMeasurement(length, 'm')} x ${formatMeasurement(height, 'm')}`],
+        ['Area', `${formatMeasurement(areaSqm, ' sq.m')}`],
+      );
+    } else if (targetType === 'floor' || targetType === 'ceiling') {
+      const fallbackRoomId = target.targetId?.split(':')?.[1];
+      roomId = roomId ?? fallbackRoomId ?? null;
+      entity = rooms.find((room) => room.id === roomId) ?? entity;
+      const areaSqm = targetType === 'floor'
+        ? getFloorArea({}, entity ?? {})
+        : getCeilingArea({}, entity ?? {});
+      measurements = { areaSqm };
+      objectName = target.label || `${entity?.name ?? 'Room'} ${targetType}`;
+      measurementRows.push(
+        ['Dimensions', `${formatMeasurement(entity?.width, 'm')} x ${formatMeasurement(entity?.depth, 'm')}`],
+        ['Area', `${formatMeasurement(areaSqm, ' sq.m')}`],
+      );
+    } else if (targetType === 'furniture' || targetType === 'decor') {
+      entity = placedItems.find((item) => item.id === target.targetId) ?? entity;
+      roomId = entity?.roomId ?? roomId ?? getRoomIdForPosition(rooms, entity?.position);
+      objectName = target.label || entity?.name || titleCaseBudgetType(targetType);
+      measurements = { quantity: 1 };
+      measurementRows.push(['Quantity', '1 item']);
+    } else if (targetType === 'light') {
+      entity = placedLights.find((light) => light.id === target.targetId) ?? entity;
+      roomId = entity?.roomId ?? roomId ?? getRoomIdForPosition(rooms, entity?.position);
+      const lightCategory = entity?.budgetCategory ?? LIGHT_TYPES[entity?.type]?.budgetCategory ?? null;
+      const categoryLabel = LIGHT_BUDGET_CATEGORIES[lightCategory]?.label ?? LIGHT_TYPES[entity?.type]?.label ?? 'Light';
+      const quantity = Number(entity?.measurements?.quantity ?? entity?.quantity ?? 1);
+      objectName = target.label || entity?.name || categoryLabel;
+      measurements = { quantity: Number.isFinite(quantity) ? Math.max(1, quantity) : 1 };
+      measurementRows.push(
+        ['Light category', categoryLabel],
+        ['Quantity', `${measurements.quantity} light${measurements.quantity === 1 ? '' : 's'}`],
+      );
+    } else if (targetType === 'door' || targetType === 'window') {
+      const ownerWall = walls.find((wall) => (
+        [...(wall.doors ?? []), ...(wall.windows ?? [])].some((opening) => opening.id === target.targetId)
+      ));
+      const opening = [...(ownerWall?.doors ?? []), ...(ownerWall?.windows ?? [])].find((item) => item.id === target.targetId);
+      entity = opening ?? entity;
+      roomId = ownerWall?.roomId ?? roomId;
+      objectName = target.label || entity?.label || titleCaseBudgetType(targetType);
+      measurements = { quantity: 1 };
+      measurementRows.push(['Quantity', '1 item']);
+      if (Number.isFinite(entity?.width) && Number.isFinite(entity?.height)) {
+        measurementRows.push(['Dimensions', `${formatMeasurement(entity.width, 'm')} x ${formatMeasurement(entity.height, 'm')}`]);
+      }
+    }
+
+    const room = rooms.find((item) => item.id === roomId) ?? null;
+    return {
+      entity,
+      objectName,
+      roomId,
+      roomName: room?.name ?? 'Unassigned',
+      targetType,
+      typeLabel: titleCaseBudgetType(targetType),
+      measurements,
+      measurementRows,
+      isAreaBased: AREA_COST_TARGET_TYPES.includes(targetType),
+    };
+  }, [placedItems, placedLights, rooms, selectedBudgetTarget, walls]);
+
+  const budgetScopeOptions = useMemo(() => {
+    if (!budgetTargetDetails) return [];
+    const type = budgetTargetDetails.targetType;
+
+    if (AREA_COST_TARGET_TYPES.includes(type)) {
+      const noun = type === 'wall' ? 'wall' : type;
+      return [
+        { value: BUDGET_RULE_SCOPES.SINGLE_ITEM, label: `This ${noun} only` },
+        { value: BUDGET_RULE_SCOPES.ROOM_TYPE, label: type === 'wall' ? "This room's walls" : 'This room only' },
+        { value: BUDGET_RULE_SCOPES.GLOBAL_TYPE, label: `All ${type}s` },
+      ];
+    }
+
+    return [
+      { value: BUDGET_RULE_SCOPES.SINGLE_ITEM, label: `This ${budgetTargetDetails.typeLabel.toLowerCase()} only` },
+      { value: BUDGET_RULE_SCOPES.GLOBAL_TYPE, label: `All ${budgetTargetDetails.typeLabel.toLowerCase()}s` },
+    ];
+  }, [budgetTargetDetails]);
+
+  const budgetPreview = useMemo(() => {
+    if (!budgetTargetDetails) return { quantity: 0, amount: 0, total: 0, formula: '' };
+    const amount = Number(draftBudgetRule.amount);
+    const safeAmount = Number.isFinite(amount) ? amount : 0;
+    const quantity = budgetTargetDetails.isAreaBased
+      ? Number(budgetTargetDetails.measurements.areaSqm ?? 0)
+      : Number(budgetTargetDetails.measurements.quantity ?? 1);
+    const safeQuantity = Number.isFinite(quantity) ? quantity : 0;
+    const total = safeQuantity * safeAmount;
+    const unit = budgetTargetDetails.isAreaBased ? 'sq.m' : 'item';
+    return {
+      quantity: safeQuantity,
+      amount: safeAmount,
+      total,
+      formula: `${formatMeasurement(safeQuantity, ` ${unit}`)} x ${formatMoney(safeAmount, budgetSummary.currency)} = ${formatMoney(total, budgetSummary.currency)}`,
+    };
+  }, [budgetSummary.currency, budgetTargetDetails, draftBudgetRule.amount]);
+
+  const activeBudgetRule = useMemo(() => {
+    if (!selectedBudgetTarget) return null;
+    return findBudgetRuleForScope(draftBudgetRule.scope ?? BUDGET_RULE_SCOPES.SINGLE_ITEM);
+  }, [draftBudgetRule.scope, findBudgetRuleForScope, selectedBudgetTarget]);
+
+  const inheritedBudgetRule = useMemo(() => {
+    if (!selectedBudgetTarget || !budgetTargetDetails) return null;
+    const scope = draftBudgetRule.scope ?? BUDGET_RULE_SCOPES.SINGLE_ITEM;
+    const baseTarget = {
+      ...selectedBudgetTarget,
+      roomId: budgetTargetDetails.roomId ?? selectedBudgetTarget.roomId ?? null,
+    };
+
+    if (scope === BUDGET_RULE_SCOPES.SINGLE_ITEM) {
+      if (budgetTargetDetails.isAreaBased) {
+        return findBudgetRuleForScope(BUDGET_RULE_SCOPES.ROOM_TYPE, {
+          ...baseTarget,
+          targetId: null,
+          scope: BUDGET_RULE_SCOPES.ROOM_TYPE,
+        }) ?? findBudgetRuleForScope(BUDGET_RULE_SCOPES.GLOBAL_TYPE, {
+          ...baseTarget,
+          targetId: null,
+          roomId: null,
+          scope: BUDGET_RULE_SCOPES.GLOBAL_TYPE,
+        });
+      }
+
+      return findBudgetRuleForScope(BUDGET_RULE_SCOPES.GLOBAL_TYPE, {
+        ...baseTarget,
+        targetId: null,
+        roomId: null,
+        scope: BUDGET_RULE_SCOPES.GLOBAL_TYPE,
+      });
+    }
+
+    if (scope === BUDGET_RULE_SCOPES.ROOM_TYPE) {
+      return findBudgetRuleForScope(BUDGET_RULE_SCOPES.GLOBAL_TYPE, {
+        ...baseTarget,
+        targetId: null,
+        roomId: null,
+        scope: BUDGET_RULE_SCOPES.GLOBAL_TYPE,
+      });
+    }
+
+    return null;
+  }, [budgetTargetDetails, draftBudgetRule.scope, findBudgetRuleForScope, selectedBudgetTarget]);
+
+  const duplicateRuleScope = useMemo(() => {
+    if (!budgetTargetDetails) return null;
+    const scope = draftBudgetRule.scope ?? BUDGET_RULE_SCOPES.SINGLE_ITEM;
+    if (scope === BUDGET_RULE_SCOPES.GLOBAL_TYPE) return null;
+    if (scope === BUDGET_RULE_SCOPES.ROOM_TYPE) return BUDGET_RULE_SCOPES.GLOBAL_TYPE;
+    if (budgetTargetDetails.isAreaBased && budgetTargetDetails.roomId) return BUDGET_RULE_SCOPES.ROOM_TYPE;
+    return BUDGET_RULE_SCOPES.GLOBAL_TYPE;
+  }, [budgetTargetDetails, draftBudgetRule.scope]);
+
+  const handleBudgetScopeChange = useCallback((scope) => {
+    if (!selectedBudgetTarget) return;
+    const scopedTarget = normalizeBudgetRuleScopeFields({
+      ...selectedBudgetTarget,
+      roomId: scope === BUDGET_RULE_SCOPES.GLOBAL_TYPE ? null : (budgetTargetDetails?.roomId ?? selectedBudgetTarget.roomId ?? null),
+      targetId: scope === BUDGET_RULE_SCOPES.SINGLE_ITEM ? selectedBudgetTarget.targetId : null,
+      scope,
+    });
+    const existingRule = findBudgetRuleForScope(scope, scopedTarget);
+    updateDraftRule({
+      ...(existingRule ?? {}),
+      targetType: selectedBudgetTarget.targetType,
+      targetId: scopedTarget.targetId,
+      roomId: scopedTarget.roomId,
+      scope,
+      amount: existingRule?.amount ?? '',
+      label: existingRule?.label ?? selectedBudgetTarget.label ?? budgetTargetDetails?.objectName ?? '',
+    });
+  }, [budgetTargetDetails, findBudgetRuleForScope, selectedBudgetTarget, updateDraftRule]);
+
+  const persistBudgetRule = useCallback(async (rule, existingRule = null) => {
+    setBudgetRuleSaving(true);
+    try {
+      if (currentProjectId) {
+        const payload = { ...rule };
+        delete payload.id;
+        const request = existingRule?.id
+          ? axiosClient.patch(`/api/projects/${currentProjectId}/budget/rules/${existingRule.id}`, payload)
+          : axiosClient.post(`/api/projects/${currentProjectId}/budget/rules`, payload);
+        const { data } = await request;
+        hydrateBudgetFromScene(data?.scene_data?.budget ?? data?.scene?.budget ?? {});
+      } else {
+        upsertBudgetRule(rule);
+      }
+      return true;
+    } catch (error) {
+      toast?.error?.(error?.response?.data?.detail || error?.message || 'Budget rule could not be saved.');
+      return false;
+    } finally {
+      setBudgetRuleSaving(false);
+    }
+  }, [
+    currentProjectId,
+    hydrateBudgetFromScene,
+    toast,
+    upsertBudgetRule,
+  ]);
+
+  const validateBudgetAmount = useCallback((rawAmount, emptyMessage = 'Enter a budget amount.') => {
+    if (rawAmount === '' || rawAmount === null || rawAmount === undefined) {
+      toast?.error?.(emptyMessage);
+      return null;
+    }
+
+    const amount = Number(rawAmount);
+    if (!Number.isFinite(amount)) {
+      toast?.error?.('Enter a valid budget amount.');
+      return null;
+    }
+
+    if (amount < 0) {
+      toast?.error?.('Budget amount cannot be negative.');
+      return null;
+    }
+
+    if (hasTooManyBudgetDecimals(rawAmount)) {
+      toast?.error?.(`Use no more than ${MAX_BUDGET_AMOUNT_DECIMALS} decimal places.`);
+      return null;
+    }
+
+    return amount;
+  }, [toast]);
+
+  const handleBudgetRuleSave = useCallback(async () => {
+    if (!selectedBudgetTarget || !budgetTargetDetails) return;
+    const amount = validateBudgetAmount(draftBudgetRule.amount);
+    if (amount === null) return;
+
+    const scope = draftBudgetRule.scope ?? BUDGET_RULE_SCOPES.SINGLE_ITEM;
+    const existingRule = activeBudgetRule ?? findBudgetRuleForScope(scope);
+    const rule = normalizeBudgetRuleScopeFields({
+      id: draftBudgetRule.id ?? existingRule?.id ?? uuidv4(),
+      targetType: selectedBudgetTarget.targetType,
+      targetId: scope === BUDGET_RULE_SCOPES.SINGLE_ITEM ? selectedBudgetTarget.targetId : null,
+      roomId: scope === BUDGET_RULE_SCOPES.GLOBAL_TYPE ? null : (budgetTargetDetails.roomId ?? selectedBudgetTarget.roomId ?? null),
+      pricingMode: draftBudgetRule.pricingMode,
+      amount,
+      unit: draftBudgetRule.unit,
+      label: draftBudgetRule.label || budgetTargetDetails.objectName,
+      scope,
+      costSource: draftBudgetRule.costSource ?? existingRule?.costSource ?? BUDGET_COST_SOURCES.MANUAL,
+    });
+
+    const saved = await persistBudgetRule(rule, existingRule);
+    if (saved) {
+      closeBudgetPanel();
+      toast?.success?.('Budget rule saved.');
+      if (amount === 0) {
+        toast?.info?.('Zero price saved. This item will be treated as free.');
+      }
+    }
+  }, [
+    activeBudgetRule,
+    budgetTargetDetails,
+    closeBudgetPanel,
+    draftBudgetRule,
+    findBudgetRuleForScope,
+    persistBudgetRule,
+    selectedBudgetTarget,
+    toast,
+    validateBudgetAmount,
+  ]);
+
+  const handleBudgetRuleDelete = useCallback(async () => {
+    const rule = activeBudgetRule;
+    if (!rule?.id) return;
+
+    setBudgetRuleSaving(true);
+    try {
+      if (currentProjectId) {
+        const { data } = await axiosClient.delete(`/api/projects/${currentProjectId}/budget/rules/${rule.id}`);
+        hydrateBudgetFromScene(data?.scene_data?.budget ?? data?.scene?.budget ?? {});
+      } else {
+        removeBudgetRule(rule.id);
+      }
+      closeBudgetPanel();
+      toast?.success?.('Budget rule deleted.');
+    } catch (error) {
+      toast?.error?.(error?.response?.data?.detail || error?.message || 'Budget rule could not be deleted.');
+    } finally {
+      setBudgetRuleSaving(false);
+    }
+  }, [
+    activeBudgetRule,
+    closeBudgetPanel,
+    currentProjectId,
+    hydrateBudgetFromScene,
+    removeBudgetRule,
+    toast,
+  ]);
+
+  const handleResetBudgetRuleToInherited = useCallback(async () => {
+    if (!activeBudgetRule?.id || !inheritedBudgetRule) return;
+    await handleBudgetRuleDelete();
+  }, [activeBudgetRule, handleBudgetRuleDelete, inheritedBudgetRule]);
+
+  const handleDuplicateBudgetPattern = useCallback(async () => {
+    if (!selectedBudgetTarget || !budgetTargetDetails || !duplicateRuleScope) return;
+    const rawAmount = draftBudgetRule.amount === '' || draftBudgetRule.amount === null || draftBudgetRule.amount === undefined
+      ? activeBudgetRule?.amount
+      : draftBudgetRule.amount;
+    const amount = validateBudgetAmount(rawAmount, 'Enter an amount before duplicating this pattern.');
+    if (amount === null) return;
+
+    const duplicateTarget = normalizeBudgetRuleScopeFields({
+      ...selectedBudgetTarget,
+      targetId: duplicateRuleScope === BUDGET_RULE_SCOPES.SINGLE_ITEM ? selectedBudgetTarget.targetId : null,
+      roomId: duplicateRuleScope === BUDGET_RULE_SCOPES.ROOM_TYPE ? (budgetTargetDetails.roomId ?? selectedBudgetTarget.roomId ?? null) : null,
+      scope: duplicateRuleScope,
+    });
+    const existingRule = findBudgetRuleForScope(duplicateRuleScope, duplicateTarget);
+    const labelPrefix = duplicateRuleScope === BUDGET_RULE_SCOPES.ROOM_TYPE ? 'Room pattern' : 'Project pattern';
+    const nextRule = normalizeBudgetRuleScopeFields({
+      id: existingRule?.id ?? uuidv4(),
+      targetType: selectedBudgetTarget.targetType,
+      targetId: duplicateTarget.targetId,
+      roomId: duplicateTarget.roomId,
+      pricingMode: draftBudgetRule.pricingMode,
+      amount,
+      unit: draftBudgetRule.unit,
+      label: `${labelPrefix}: ${draftBudgetRule.label || budgetTargetDetails.objectName}`,
+      scope: duplicateRuleScope,
+      costSource: draftBudgetRule.costSource ?? activeBudgetRule?.costSource ?? BUDGET_COST_SOURCES.MANUAL,
+    });
+
+    const saved = await persistBudgetRule(nextRule, existingRule);
+    if (saved) {
+      closeBudgetPanel();
+      toast?.success?.('Budget pattern duplicated.');
+      if (amount === 0) {
+        toast?.info?.('Zero price saved. This pattern will be treated as free.');
+      }
+    }
+  }, [
+    activeBudgetRule,
+    budgetTargetDetails,
+    closeBudgetPanel,
+    draftBudgetRule,
+    duplicateRuleScope,
+    findBudgetRuleForScope,
+    persistBudgetRule,
+    selectedBudgetTarget,
+    toast,
+    validateBudgetAmount,
+  ]);
+
+  useEffect(() => {
+    if (!budgetPanelOpen || !selectedBudgetTarget || draftBudgetRule.id || draftBudgetRule.amount !== '') return;
+    const existingRule = findBudgetRuleForScope(draftBudgetRule.scope ?? BUDGET_RULE_SCOPES.SINGLE_ITEM);
+    if (!existingRule) return;
+    updateDraftRule(existingRule);
+  }, [
+    budgetPanelOpen,
+    draftBudgetRule.amount,
+    draftBudgetRule.id,
+    draftBudgetRule.scope,
+    findBudgetRuleForScope,
+    selectedBudgetTarget,
+    updateDraftRule,
+  ]);
   const selectedRoomSurfaceBounds = useMemo(
     () => roomSurfaceBounds.find((entry) => entry.roomId === selectedRoom?.id) ?? null,
     [roomSurfaceBounds, selectedRoom]
@@ -1069,6 +1663,13 @@ export default function RoomScene({ initialScene = null }) {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [desktopPanelOpen, isMobile]);
+
+  useEffect(() => {
+    if (!sceneControlsMenuOpen) return undefined;
+    const onPointerDown = () => setSceneControlsMenuOpen(false);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [sceneControlsMenuOpen]);
 
   useEffect(() => {
     if (!roomCreation.pendingRoomCreation) return undefined;
@@ -2500,6 +3101,25 @@ export default function RoomScene({ initialScene = null }) {
     if (selectedFurnitureId === id) setSelectedFurnitureId(null);
   };
 
+  const duplicateItem = (item) => {
+    if (!item) return;
+    const nextItem = {
+      ...item,
+      id: uuidv4(),
+      name: item.name ? `${item.name} Copy` : item.name,
+      position: [
+        (item.position?.[0] ?? 0) + 0.45,
+        item.position?.[1] ?? 0,
+        (item.position?.[2] ?? 0) + 0.45,
+      ],
+    };
+    setPlacedItems((p) => [...p, nextItem]);
+    setSelectedFurnitureId(nextItem.id);
+    setSelectedWallId(null);
+    setSelectedLightId(null);
+    setActiveTab('furniture');
+  };
+
   const replaceItem = (newMeta) => {
     if (!selectedFurniture) return;
     const newItem = {
@@ -2513,6 +3133,129 @@ export default function RoomScene({ initialScene = null }) {
     setPlacedItems((p) => [...p.filter((i) => i.id !== selectedFurnitureId), newItem]);
     setSelectedFurnitureId(newItem.id);
   };
+
+  const duplicateWall = (wall) => {
+    if (!wall) return;
+    const nextWall = {
+      ...wall,
+      id: uuidv4(),
+      start: [(wall.start?.[0] ?? 0) + 0.35, (wall.start?.[1] ?? 0) + 0.35],
+      end: [(wall.end?.[0] ?? 0) + 0.35, (wall.end?.[1] ?? 0) + 0.35],
+      doors: [],
+      windows: [],
+      source: 'manual',
+      boundaryType: 'custom',
+      updatedAt: Date.now(),
+    };
+    setWalls((prev) => [...prev, nextWall], true);
+    setSelectedWallId(nextWall.id);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+    setActiveTab('walls');
+  };
+
+  const duplicateLight = (light) => {
+    if (!light) return;
+    const nextLight = {
+      ...light,
+      id: uuidv4(),
+      position: [
+        (light.position?.[0] ?? 0) + 0.35,
+        light.position?.[1] ?? 1.4,
+        (light.position?.[2] ?? 0) + 0.35,
+      ],
+    };
+    lightingState.setPlacedLights((prev) => [...prev, nextLight]);
+    lightingState.setSelectedLightId(nextLight.id);
+    setSelectedLightId(nextLight.id);
+    setSelectedWallId(null);
+    setSelectedFurnitureId(null);
+    setActiveTab('lighting');
+  };
+
+  const openElementContextMenu = useCallback((menu) => {
+    setOpeningContextMenu(null);
+    setElementContextMenu({
+      ...menu,
+      x: Math.min(Math.max(menu.clientX ?? 12, 12), window.innerWidth - 236),
+      y: Math.min(Math.max(menu.clientY ?? 12, 12), window.innerHeight - 260),
+    });
+  }, []);
+
+  const openBudgetDraftForTarget = useCallback((target, overrides = {}) => {
+    if (!budgetEnabled) return;
+    openBudgetPanel(target, overrides);
+    setElementContextMenu(null);
+    setOpeningContextMenu(null);
+  }, [budgetEnabled, openBudgetPanel]);
+
+  const handleElementContextAction = useCallback((action) => {
+    const menu = elementContextMenu;
+    if (!menu) return;
+
+    if (action === 'edit') {
+      if (menu.kind === 'wall') {
+        setSelectedWallId(menu.targetId);
+        setSelectedFurnitureId(null);
+        setSelectedLightId(null);
+        setActiveTab('walls');
+      } else if (menu.kind === 'furniture') {
+        setSelectedFurnitureId(menu.targetId);
+        setSelectedWallId(null);
+        setSelectedLightId(null);
+        setActiveTab('furniture');
+      } else if (menu.kind === 'light') {
+        setSelectedLightId(menu.targetId);
+        setSelectedWallId(null);
+        setSelectedFurnitureId(null);
+        setActiveTab('lighting');
+      } else {
+        setSelectedRoomId(menu.roomId);
+        setActiveTab('materials');
+      }
+    }
+
+    if (action === 'material') {
+      if (menu.roomId) setSelectedRoomId(menu.roomId);
+      setActiveTab('materials');
+    }
+
+    if (action === 'transform') {
+      if (menu.kind === 'wall') {
+        setSelectedWallId(menu.targetId);
+        setSelectedFurnitureId(null);
+        setSelectedLightId(null);
+        setActiveTab('walls');
+      }
+      if (menu.kind === 'furniture') {
+        setSelectedFurnitureId(menu.targetId);
+        setSelectedWallId(null);
+        setSelectedLightId(null);
+        setGizmoMode('translate');
+        setActiveTab('furniture');
+      }
+      if (menu.kind === 'light') {
+        setSelectedLightId(menu.targetId);
+        setSelectedWallId(null);
+        setSelectedFurnitureId(null);
+        setActiveTab('lighting');
+      }
+    }
+
+    if (action === 'delete') {
+      if (menu.kind === 'wall') deleteWall(menu.targetId);
+      if (menu.kind === 'furniture') deleteItem(menu.targetId);
+      if (menu.kind === 'light') lightingState.deleteLight(menu.targetId);
+    }
+
+    if (action === 'duplicate') {
+      if (menu.kind === 'wall') duplicateWall(menu.entity);
+      if (menu.kind === 'furniture') duplicateItem(menu.entity);
+      if (menu.kind === 'light') duplicateLight(menu.entity);
+    }
+
+    setElementContextMenu(null);
+  }, [deleteWall, duplicateItem, duplicateLight, duplicateWall, elementContextMenu, lightingState, setGizmoMode]);
 
   // Camera helpers 
   const applyCameraPreset = (preset) => {
@@ -2813,6 +3556,215 @@ export default function RoomScene({ initialScene = null }) {
         onStop={recorder.stopManualRecording}
       />
 
+      <div
+        style={{
+          position: 'absolute',
+          left: isMobile ? 'auto' : '50%',
+          right: isMobile ? 12 : 'auto',
+          top: isMobile ? 'auto' : 24,
+          bottom: isMobile ? 84 : 'auto',
+          transform: isMobile ? 'none' : 'translateX(-50%)',
+          zIndex: 80,
+          display: 'flex',
+          flexDirection: isMobile ? 'column-reverse' : 'column',
+          alignItems: isMobile ? 'flex-end' : 'center',
+          gap: isMobile ? 8 : 10,
+          pointerEvents: 'auto',
+          maxWidth: isMobile ? 'calc(100vw - 24px)' : 320,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            disabled={isSaving}
+            aria-label="Activate Budget Estimation"
+            aria-pressed={budgetEnabled}
+            onClick={() => handleBudgetActivationChange(!budgetEnabled)}
+            style={{
+              position: 'relative',
+              minHeight: isMobile ? 38 : 42,
+              padding: isMobile ? '8px 14px' : '10px 18px',
+              border: 0,
+              borderRadius: 50,
+              zIndex: 1,
+              cursor: isSaving ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: isMobile ? 8 : 10,
+              color: '#fff',
+              fontSize: isMobile ? 12 : 13,
+              fontWeight: 800,
+              background: budgetEnabled ? COLORS.action : 'rgb(46, 46, 46)',
+              boxShadow: budgetEnabled ? '0 0 34px rgba(196, 154, 108, 0.42)' : '0 14px 34px rgba(0,0,0,0.26)',
+              transition: 'background 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease',
+              opacity: isSaving ? 0.62 : 1,
+            }}
+          >
+            {budgetEnabled ? 'Active' : 'Start'}
+            <svg viewBox="0 0 512 512" height={isMobile ? 14 : 15} width={isMobile ? 14 : 15} aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32v224c0 17.7 14.3 32 32 32s32-14.3 32-32V32zM143.5 120.6c13.6-11.3 15.4-31.5 4.1-45.1s-31.5-15.4-45.1-4.1C49.7 115.4 16 181.8 16 256c0 132.5 107.5 240 240 240s240-107.5 240-240c0-74.2-33.8-140.6-86.6-184.6c-13.6-11.3-33.8-9.4-45.1 4.1s-9.4 33.8 4.1 45.1c38.9 32.3 63.5 81 63.5 135.4c0 97.2-78.8 176-176 176s-176-78.8-176-176c0-54.4 24.7-103.1 63.5-135.4z"
+              />
+            </svg>
+          </button>
+          {budgetEnabled && (
+            <button
+              type="button"
+              aria-label={budgetSummaryOpen ? 'Hide Budget Summary' : 'Show Budget Summary'}
+              onClick={() => {
+                setBudgetSummaryOpen((open) => !open);
+                setBudgetSummaryExpanded(false);
+              }}
+              style={{
+                width: isMobile ? 38 : 42,
+                height: isMobile ? 38 : 42,
+                border: 0,
+                borderRadius: 50,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: budgetSummaryOpen ? COLORS.background : COLORS.text,
+                background: budgetSummaryOpen ? COLORS.action : 'rgb(46, 46, 46)',
+                boxShadow: budgetSummaryOpen ? '0 0 28px rgba(196, 154, 108, 0.38)' : '0 12px 28px rgba(0,0,0,0.24)',
+                cursor: 'pointer',
+              }}
+            >
+              <WalletOutlined style={{ fontSize: isMobile ? 14 : 16 }} />
+            </button>
+          )}
+        </div>
+
+        {budgetEnabled && budgetSummaryOpen && (
+          <div
+            style={{
+              width: isMobile ? 'min(calc(100vw - 24px), 300px)' : 286,
+              maxHeight: isMobile
+                ? (budgetSummaryExpanded ? 'min(46vh, 320px)' : 118)
+                : 'calc(100vh - 180px)',
+              overflowY: 'auto',
+              padding: isMobile ? 12 : 14,
+              borderRadius: 8,
+              background: `${COLORS.background}F2`,
+              border: `1px solid ${COLORS.action}77`,
+              boxShadow: '0 18px 42px rgba(0,0,0,0.28)',
+              color: COLORS.text,
+              backdropFilter: 'blur(18px)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>
+                  Budget Summary
+                </div>
+                <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 800, lineHeight: 1.2 }}>
+                  {formatMoney(budgetGrandTotal, budgetSummary.currency)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {budgetUnsavedChanges && (
+                  <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>
+                    Unsaved
+                  </span>
+                )}
+                {isMobile && (
+                  <Button
+                    size="small"
+                    type="text"
+                    onClick={() => setBudgetSummaryExpanded((expanded) => !expanded)}
+                    style={{ color: COLORS.action, fontWeight: 800, padding: '0 4px' }}
+                  >
+                    {budgetSummaryExpanded ? 'Less' : 'More'}
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div
+              style={{
+                marginTop: 10,
+                padding: 10,
+                borderRadius: 8,
+                background: budgetUnpricedCount > 0 ? 'rgba(255, 190, 118, 0.12)' : 'rgba(255,255,255,0.06)',
+                border: budgetUnpricedCount > 0 ? '1px solid rgba(255, 190, 118, 0.38)' : '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ color: `${COLORS.text}B8`, fontSize: 12, fontWeight: 800 }}>Unpriced items</span>
+                <span style={{ color: budgetUnpricedCount > 0 ? '#ffd09a' : COLORS.text, fontSize: 15, fontWeight: 900 }}>
+                  {budgetUnpricedCount}
+                </span>
+              </div>
+            </div>
+            {(!isMobile || budgetSummaryExpanded) && (
+              <>
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ marginBottom: 6, color: COLORS.action, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>
+                    Categories
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {budgetCategoryRows.map(([label, total]) => (
+                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                        <span style={{ color: `${COLORS.text}B8` }}>{label}</span>
+                        <span style={{ color: COLORS.text, fontWeight: 800 }}>{formatMoney(total, budgetSummary.currency)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ marginBottom: 6, color: COLORS.action, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>
+                    Rooms
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {budgetRoomRows.length ? budgetRoomRows.map(([label, total]) => (
+                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                        <span style={{ color: `${COLORS.text}B8`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                        <span style={{ color: COLORS.text, fontWeight: 800 }}>{formatMoney(total, budgetSummary.currency)}</span>
+                      </div>
+                    )) : (
+                      <div style={{ color: `${COLORS.text}88`, fontSize: 12 }}>No priced rooms yet.</div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}>
+                    <div style={{ color: `${COLORS.text}99`, fontSize: 11 }}>Rules</div>
+                    <div style={{ fontSize: 15, fontWeight: 800 }}>{budgetSummary.rules_count ?? 0}</div>
+                  </div>
+                  <div style={{ padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}>
+                    <div style={{ color: `${COLORS.text}99`, fontSize: 11 }}>Items</div>
+                    <div style={{ fontSize: 15, fontWeight: 800 }}>{budgetSummary.snapshots_count ?? 0}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ marginBottom: 6, color: `${COLORS.text}99`, fontSize: 11, fontWeight: 800 }}>
+                    Scene badges
+                  </div>
+                  <Select
+                    size="small"
+                    value={budgetBadgeMode}
+                    onChange={setBudgetBadgeMode}
+                    style={{ width: '100%' }}
+                    options={[
+                      { value: 'cost', label: 'Show final costs' },
+                      { value: 'rate', label: 'Show rates' },
+                      { value: 'hidden', label: 'Hide badges' },
+                    ]}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       {(activeTool !== 'select' || openingPreview) && (
         <div
           style={{
@@ -2849,6 +3801,12 @@ export default function RoomScene({ initialScene = null }) {
       <div
         ref={canvasWrapperRef}
         style={{ height: '100%', width: '100%' }}
+        onPointerDown={() => {
+          if (isMobile && budgetSummaryOpen) {
+            setBudgetSummaryOpen(false);
+            setBudgetSummaryExpanded(false);
+          }
+        }}
         onClick={() => {
           if (cameraMode === 'firstPerson' && !isPointerLocked) {
             const c = canvasWrapperRef.current?.querySelector('canvas');
@@ -2928,6 +3886,8 @@ export default function RoomScene({ initialScene = null }) {
               depth: room.depth,
             };
             const footprint = getRenderableRoomFootprint(room, roomScopedWalls, surfaceBounds);
+            const floorBudgetBadge = getBudgetBadgeLabel(`floor:${room.id}`);
+            const ceilingBudgetBadge = getBudgetBadgeLabel(`ceiling:${room.id}`);
 
             return (
             (() => {
@@ -2941,6 +3901,21 @@ export default function RoomScene({ initialScene = null }) {
                 onClick={(event) => {
                   event.stopPropagation();
                   selectRoom(room.id, 'walls');
+                }}
+                onContextMenu={(event) => {
+                  event.stopPropagation();
+                  const sourceEvent = event.nativeEvent ?? event.sourceEvent;
+                  sourceEvent?.preventDefault?.();
+                  openElementContextMenu({
+                    kind: 'floor',
+                    targetType: 'floor',
+                    targetId: `floor:${room.id}`,
+                    roomId: room.id,
+                    label: `${room.name ?? 'Room'} floor`,
+                    entity: room,
+                    clientX: sourceEvent?.clientX ?? 0,
+                    clientY: sourceEvent?.clientY ?? 0,
+                  });
                 }}
               />
               {!ceilingHidden && (
@@ -2957,7 +3932,32 @@ export default function RoomScene({ initialScene = null }) {
                     event.stopPropagation();
                     selectRoom(room.id, 'walls');
                   }}
+                  onContextMenu={(event) => {
+                    event.stopPropagation();
+                    const sourceEvent = event.nativeEvent ?? event.sourceEvent;
+                    sourceEvent?.preventDefault?.();
+                    openElementContextMenu({
+                      kind: 'ceiling',
+                      targetType: 'ceiling',
+                      targetId: `ceiling:${room.id}`,
+                      roomId: room.id,
+                      label: `${room.name ?? 'Room'} ceiling`,
+                      entity: room,
+                      clientX: sourceEvent?.clientX ?? 0,
+                      clientY: sourceEvent?.clientY ?? 0,
+                    });
+                  }}
                 />
+              )}
+              {budgetEnabled && floorBudgetBadge && (
+                <Html position={[surfaceBounds.centerX, 0.16, surfaceBounds.centerZ]} center distanceFactor={10}>
+                  <div className="room-budget-badge">{floorBudgetBadge}</div>
+                </Html>
+              )}
+              {budgetEnabled && !ceilingHidden && ceilingBudgetBadge && !isTopDownView && (
+                <Html position={[surfaceBounds.centerX, room.height + 0.16, surfaceBounds.centerZ]} center distanceFactor={10}>
+                  <div className="room-budget-badge">{ceilingBudgetBadge}</div>
+                </Html>
               )}
               {room.id === selectedRoom?.id && (
                 <>
@@ -3084,6 +4084,22 @@ export default function RoomScene({ initialScene = null }) {
                     setSelectedLightId(null);
                     setActiveTab('walls');
                   }}
+                  onContextMenu={({ wall: contextWall, clientX, clientY }) => {
+                    setSelectedRoomId(room.id);
+                    setSelectedWallId(contextWall.id);
+                    setSelectedFurnitureId(null);
+                    setSelectedLightId(null);
+                    openElementContextMenu({
+                      kind: 'wall',
+                      targetType: 'wall',
+                      targetId: contextWall.id,
+                      roomId: contextWall.roomId ?? room.id,
+                      label: 'Wall',
+                      entity: contextWall,
+                      clientX,
+                      clientY,
+                    });
+                  }}
                   updateOpening={(type, openingId, updates) => updateWallOpening(wall.id, type, openingId, updates)}
                   updateWall={updateWall}
                   edgeLinkStart={wallEdgeLinkStart}
@@ -3168,6 +4184,39 @@ export default function RoomScene({ initialScene = null }) {
             );
           })()}
 
+          {budgetEnabled && (
+            <>
+              {!wallsHidden && walls.map((wall) => {
+                const { center } = getWallMetrics(wall);
+                const badgeLabel = getBudgetBadgeLabel(wall.id);
+                if (!badgeLabel) return null;
+                return (
+                  <Html key={`budget-wall-${wall.id}`} position={[center[0], (wall.height ?? 3) + 0.22, center[1]]} center distanceFactor={10}>
+                    <div className="room-budget-badge">{badgeLabel}</div>
+                  </Html>
+                );
+              })}
+              {placedItems.map((item) => {
+                const badgeLabel = getBudgetBadgeLabel(item.id);
+                if (!badgeLabel) return null;
+                return (
+                  <Html key={`budget-item-${item.id}`} position={[item.position[0], (item.position[1] ?? 0) + 1.25, item.position[2]]} center distanceFactor={10}>
+                    <div className="room-budget-badge">{badgeLabel}</div>
+                  </Html>
+                );
+              })}
+              {placedLights.map((light) => {
+                const badgeLabel = getBudgetBadgeLabel(light.id);
+                if (!badgeLabel) return null;
+                return (
+                  <Html key={`budget-light-${light.id}`} position={[light.position[0], light.position[1] + 0.32, light.position[2]]} center distanceFactor={10}>
+                    <div className="room-budget-badge">{badgeLabel}</div>
+                  </Html>
+                );
+              })}
+            </>
+          )}
+
           {/* Furniture */}
           <Suspense fallback={null}>
             {placedItems.map((item) => (
@@ -3177,6 +4226,21 @@ export default function RoomScene({ initialScene = null }) {
                 item={item}
                 isSelected={item.id === selectedFurnitureId}
                 onSelect={() => { setSelectedFurnitureId(item.id); setSelectedWallId(null); setSelectedLightId(null); }}
+                onContextMenu={({ item: contextItem, clientX, clientY }) => {
+                  setSelectedFurnitureId(contextItem.id);
+                  setSelectedWallId(null);
+                  setSelectedLightId(null);
+                  openElementContextMenu({
+                    kind: 'furniture',
+                    targetType: String(contextItem.category ?? '').toLowerCase().includes('decor') ? 'decor' : 'furniture',
+                    targetId: contextItem.id,
+                    roomId: contextItem.roomId ?? null,
+                    label: contextItem.name ?? 'Furniture',
+                    entity: contextItem,
+                    clientX,
+                    clientY,
+                  });
+                }}
                 setOrbitEnabled={setOrbitEnabled}
                 updateItem={updateItem}
               />
@@ -3205,6 +4269,21 @@ export default function RoomScene({ initialScene = null }) {
               light={light}
               isSelected={light.id === selectedLightId}
               onSelect={() => { setSelectedLightId(light.id); setSelectedWallId(null); setSelectedFurnitureId(null); setActiveTab('lighting'); }}
+              onContextMenu={({ light: contextLight, clientX, clientY }) => {
+                setSelectedLightId(contextLight.id);
+                setSelectedWallId(null);
+                setSelectedFurnitureId(null);
+                openElementContextMenu({
+                  kind: 'light',
+                  targetType: 'light',
+                  targetId: contextLight.id,
+                  roomId: contextLight.roomId ?? null,
+                  label: contextLight.name ?? LIGHT_BUDGET_CATEGORIES[contextLight.budgetCategory]?.label ?? LIGHT_TYPES[contextLight.type]?.label ?? 'Light',
+                  entity: contextLight,
+                  clientX,
+                  clientY,
+                });
+              }}
               updateLight={lightingState.updateLight}
               setOrbitEnabled={setOrbitEnabled}
             />
@@ -3222,6 +4301,83 @@ export default function RoomScene({ initialScene = null }) {
       </div>
     </div>
   );
+
+  const renderElementContextButton = (label, onClick, options = {}) => (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={options.disabled}
+      onClick={onClick}
+      style={{
+        width: '100%',
+        minHeight: 38,
+        border: 0,
+        borderRadius: 8,
+        background: options.danger ? 'rgba(255, 91, 91, 0.12)' : options.active ? 'rgba(196,154,108,0.18)' : 'rgba(255,255,255,0.07)',
+        color: options.danger ? '#ffb3ad' : options.disabled ? `${COLORS.text}78` : COLORS.text,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+        padding: '0 12px',
+        fontSize: 13,
+        fontWeight: 800,
+        cursor: options.disabled ? 'not-allowed' : 'pointer',
+        opacity: options.disabled ? 0.68 : 1,
+        textAlign: 'left',
+      }}
+    >
+      <span>{label}</span>
+      {options.icon}
+    </button>
+  );
+
+  const openContextBudgetRule = (scope, label) => {
+    if (!elementContextMenu) return;
+    const isSingleItem = scope === 'singleItem';
+    openBudgetDraftForTarget(normalizeBudgetRuleScopeFields({
+      targetType: elementContextMenu.targetType,
+      targetId: isSingleItem ? elementContextMenu.targetId : null,
+      roomId: scope === 'roomType' || isSingleItem ? elementContextMenu.roomId : null,
+      label,
+      scope,
+    }));
+  };
+
+  const renderElementBudgetActions = () => {
+    if (!elementContextMenu) return null;
+
+    if (!budgetEnabled) {
+      return renderElementContextButton('Activate Budget first', undefined, { disabled: true });
+    }
+
+    const surfaceKind = elementContextMenu.kind === 'wall' || elementContextMenu.kind === 'floor' || elementContextMenu.kind === 'ceiling';
+    if (!surfaceKind) {
+      return renderElementContextButton('Budget / Cost', () => openContextBudgetRule('singleItem', elementContextMenu.label), {
+        active: true,
+        icon: <WalletOutlined />,
+      });
+    }
+
+    if (elementContextMenu.kind === 'wall') {
+      return (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {renderElementContextButton('Apply to this wall only', () => openContextBudgetRule('singleItem', 'Wall override'), { active: true })}
+          {renderElementContextButton('Apply to all walls in this room', () => openContextBudgetRule('roomType', 'Room wall finish'))}
+          {renderElementContextButton('Apply to all walls in all rooms', () => openContextBudgetRule('globalType', 'All walls'))}
+        </div>
+      );
+    }
+
+    const noun = elementContextMenu.kind;
+    return (
+      <div style={{ display: 'grid', gap: 6 }}>
+        {renderElementContextButton(`Apply to this ${noun} only`, () => openContextBudgetRule('singleItem', `${elementContextMenu.label} override`), { active: true })}
+        {renderElementContextButton('Apply to this room only', () => openContextBudgetRule('roomType', `Room ${noun} finish`))}
+        {renderElementContextButton(`Apply to all ${noun}s`, () => openContextBudgetRule('globalType', `All ${noun}s`))}
+      </div>
+    );
+  };
 
   // Render 
   return (
@@ -3422,6 +4578,7 @@ export default function RoomScene({ initialScene = null }) {
             <Button
               type="default"
               disabled={isSaving}
+              icon={<SpaceDashboardRoundedIcon style={{ fontSize: 16 }} />}
               onClick={switchTo2D}
               className="room-standalone-action-button"
             >
@@ -3676,6 +4833,125 @@ export default function RoomScene({ initialScene = null }) {
         visible={placedItems.length > 0}
       />
 
+      {isMobile && (
+        <div
+          className="room-scene-controls-menu"
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{
+            right: placedItems.length > 0 ? 248 : 16,
+          }}
+        >
+          {sceneControlsMenuOpen && (
+            <div className="room-scene-controls-popover" role="menu" aria-label="Scene visibility controls">
+              <button
+                type="button"
+                className={wallsHidden ? 'room-bubble-action is-active' : 'room-bubble-action'}
+                onClick={toggleWallsHidden}
+                disabled={isSaving}
+                role="menuitem"
+              >
+                <span className="room-bubble-visual">
+                  <ColumnWidthOutlined />
+                </span>
+                <span className="room-bubble-copy">
+                  <span>{wallsHidden ? 'Show walls' : 'Hide walls'}</span>
+                  <small>Wall visibility</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={ceilingHidden ? 'room-bubble-action is-active' : 'room-bubble-action'}
+                onClick={toggleCeilingHidden}
+                disabled={isSaving}
+                role="menuitem"
+              >
+                <span className="room-bubble-visual">
+                  <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
+                </span>
+                <span className="room-bubble-copy">
+                  <span>{ceilingHidden ? 'Show ceiling' : 'Hide ceiling'}</span>
+                  <small>Ceiling visibility</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="room-bubble-action"
+                onClick={handleSwitchTo2DFromMenu}
+                disabled={isSaving}
+                role="menuitem"
+              >
+                <span className="room-bubble-visual">
+                  <SpaceDashboardRoundedIcon style={{ fontSize: 18 }} />
+                </span>
+                <span className="room-bubble-copy">
+                  <span>Switch to 2D</span>
+                  <small>Plan editor</small>
+                </span>
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            className={sceneControlsMenuOpen ? 'room-three-dot-menu is-open' : 'room-three-dot-menu'}
+            aria-label={sceneControlsMenuOpen ? 'Close scene controls' : 'Open scene controls'}
+            aria-expanded={sceneControlsMenuOpen}
+            onClick={() => setSceneControlsMenuOpen((open) => !open)}
+            disabled={isSaving}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+        </div>
+      )}
+
+      {elementContextMenu && (
+        <div
+          role="menu"
+          aria-label={`${elementContextMenu.label ?? elementContextMenu.kind} actions`}
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{
+            position: 'fixed',
+            left: elementContextMenu.x,
+            top: elementContextMenu.y,
+            zIndex: 1710,
+            minWidth: 236,
+            padding: 8,
+            borderRadius: 12,
+            background: `${COLORS.background}F7`,
+            border: `1px solid ${COLORS.secondary}66`,
+            boxShadow: '0 18px 44px rgba(0,0,0,0.34)',
+            backdropFilter: 'blur(16px)',
+          }}
+        >
+          <div style={{ padding: '4px 6px 8px', color: `${COLORS.text}A8`, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            {elementContextMenu.label ?? elementContextMenu.kind}
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {renderElementContextButton('Edit', () => handleElementContextAction('edit'))}
+            {renderElementContextButton('Material', () => handleElementContextAction('material'), {
+              disabled: elementContextMenu.kind === 'light',
+            })}
+            {renderElementContextButton('Transform', () => handleElementContextAction('transform'), {
+              disabled: elementContextMenu.kind === 'floor' || elementContextMenu.kind === 'ceiling',
+            })}
+            {renderElementContextButton('Duplicate', () => handleElementContextAction('duplicate'), {
+              disabled: elementContextMenu.kind === 'floor' || elementContextMenu.kind === 'ceiling',
+            })}
+          </div>
+          <div style={{ height: 1, margin: '8px 2px', background: `${COLORS.secondary}44` }} />
+          <div style={{ display: 'grid', gap: 6 }}>
+            {renderElementBudgetActions()}
+          </div>
+          <div style={{ height: 1, margin: '8px 2px', background: `${COLORS.secondary}44` }} />
+          {renderElementContextButton(`Delete ${elementContextMenu.kind}`, () => handleElementContextAction('delete'), {
+            danger: true,
+            icon: <DeleteOutlined />,
+            disabled: elementContextMenu.kind === 'floor' || elementContextMenu.kind === 'ceiling',
+          })}
+        </div>
+      )}
+
       {openingContextMenu && (
         <div
           role="menu"
@@ -3734,6 +5010,41 @@ export default function RoomScene({ initialScene = null }) {
               +
             </button>
           </div>
+          {budgetEnabled && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const wall = walls.find((item) => item.id === openingContextMenu.wallId);
+                openBudgetPanel({
+                  targetType: openingContextMenu.type,
+                  targetId: openingContextMenu.id,
+                  roomId: wall?.roomId ?? null,
+                  label: contextMenuOpeningEntity?.label ?? openingContextMenu.type,
+                });
+                setOpeningContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                minHeight: 38,
+                border: 0,
+                borderRadius: 8,
+                background: 'rgba(196,154,108,0.18)',
+                color: COLORS.text,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '0 12px',
+                fontSize: 13,
+                fontWeight: 800,
+                cursor: 'pointer',
+                marginBottom: 8,
+              }}
+            >
+              <WalletOutlined />
+              Set budget cost
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -3760,6 +5071,202 @@ export default function RoomScene({ initialScene = null }) {
           </button>
         </div>
       )}
+
+      <Drawer
+        className="budget-drawer"
+        title="Budget Cost"
+        placement="right"
+        width={isMobile ? '100%' : 420}
+        open={budgetPanelOpen}
+        onClose={closeBudgetPanel}
+        destroyOnClose
+        styles={{
+          body: { background: COLORS.background, color: COLORS.text },
+          header: { background: COLORS.background, borderBottom: `1px solid ${COLORS.secondary}55` },
+          footer: { background: COLORS.background, borderTop: `1px solid ${COLORS.secondary}55` },
+        }}
+        footer={(
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+            <Button
+              danger
+              disabled={!activeBudgetRule?.id || budgetRuleSaving}
+              onClick={handleBudgetRuleDelete}
+            >
+              Delete rule
+            </Button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <Button onClick={closeBudgetPanel} disabled={budgetRuleSaving}>
+                Cancel
+              </Button>
+              <Button type="primary" onClick={handleBudgetRuleSave} loading={budgetRuleSaving}>
+                Save rule
+              </Button>
+            </div>
+          </div>
+        )}
+      >
+        {budgetTargetDetails ? (
+          <Form layout="vertical">
+            <div
+              style={{
+                marginBottom: 18,
+                padding: 14,
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.06)',
+                border: `1px solid ${COLORS.secondary}44`,
+              }}
+            >
+              <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>
+                {budgetTargetDetails.typeLabel}
+              </div>
+              <div style={{ marginTop: 4, color: COLORS.text, fontSize: 20, fontWeight: 900 }}>
+                {budgetTargetDetails.objectName}
+              </div>
+              <div style={{ marginTop: 4, color: `${COLORS.text}AA`, fontSize: 13 }}>
+                Room: {budgetTargetDetails.roomName}
+              </div>
+            </div>
+
+            {budgetTargetDetails.measurementRows.length > 0 && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ marginBottom: 8, color: `${COLORS.text}AA`, fontSize: 12, fontWeight: 800, textTransform: 'uppercase' }}>
+                  Measurements
+                </div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {budgetTargetDetails.measurementRows.map(([label, value]) => (
+                    <div
+                      key={label}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        background: 'rgba(255,255,255,0.05)',
+                      }}
+                    >
+                      <span style={{ color: `${COLORS.text}A8`, fontSize: 13 }}>{label}</span>
+                      <span style={{ color: COLORS.text, fontSize: 13, fontWeight: 800 }}>{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <Form.Item label="Object name">
+              <Input
+                value={draftBudgetRule.label ?? ''}
+                onChange={(event) => updateDraftRule({ label: event.target.value })}
+              />
+            </Form.Item>
+
+            <Form.Item label="Pricing mode">
+              <Select
+                value={draftBudgetRule.pricingMode}
+                disabled
+                options={[
+                  { value: 'fixed', label: 'Fixed' },
+                  { value: 'perSqm', label: 'Per sq.m' },
+                ]}
+              />
+            </Form.Item>
+
+            <Form.Item label="Cost source">
+              <Select
+                value={draftBudgetRule.costSource ?? BUDGET_COST_SOURCES.MANUAL}
+                onChange={(value) => updateDraftRule({ costSource: value })}
+                options={BUDGET_COST_SOURCE_OPTIONS}
+              />
+            </Form.Item>
+
+            <Form.Item label={budgetTargetDetails.isAreaBased ? 'Rate' : 'Cost'}>
+              <InputNumber
+                min={0}
+                precision={MAX_BUDGET_AMOUNT_DECIMALS}
+                step={budgetTargetDetails.isAreaBased ? 0.5 : 1}
+                value={draftBudgetRule.amount === '' ? null : Number(draftBudgetRule.amount)}
+                onChange={(value) => updateDraftRule({ amount: value ?? '' })}
+                addonAfter={budgetTargetDetails.isAreaBased ? 'AED/sq.m' : 'AED'}
+                style={{ width: '100%' }}
+                placeholder={budgetTargetDetails.isAreaBased ? '35' : '1200'}
+              />
+            </Form.Item>
+
+            <Form.Item label="Scope">
+              <Select
+                value={draftBudgetRule.scope}
+                onChange={handleBudgetScopeChange}
+                options={budgetScopeOptions.map((option) => ({
+                  ...option,
+                  label: option.label ?? BUDGET_SCOPE_LABELS[option.value],
+                }))}
+              />
+            </Form.Item>
+
+            {inheritedBudgetRule && (
+              <div
+                style={{
+                  marginBottom: 14,
+                  padding: 12,
+                  borderRadius: 8,
+                  background: 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${COLORS.secondary}44`,
+                }}
+              >
+                <div style={{ color: `${COLORS.text}A8`, fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>
+                  Inherited default
+                </div>
+                <div style={{ marginTop: 6, color: COLORS.text, fontSize: 13, fontWeight: 800 }}>
+                  {formatMoney(inheritedBudgetRule.amount, budgetSummary.currency)}
+                  {inheritedBudgetRule.unit === 'sqm' ? ' / sq.m' : ''}
+                </div>
+                <div style={{ marginTop: 3, color: `${COLORS.text}99`, fontSize: 12 }}>
+                  From {BUDGET_SCOPE_LABELS[inheritedBudgetRule.scope] ?? inheritedBudgetRule.scope}
+                  {' '}| {BUDGET_COST_SOURCE_LABELS[inheritedBudgetRule.costSource ?? BUDGET_COST_SOURCES.MANUAL] ?? 'Manual'}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+              <Button
+                disabled={!activeBudgetRule?.id || !inheritedBudgetRule || budgetRuleSaving}
+                onClick={handleResetBudgetRuleToInherited}
+              >
+                Reset to inherited default
+              </Button>
+              <Button
+                disabled={!duplicateRuleScope || budgetRuleSaving}
+                onClick={handleDuplicateBudgetPattern}
+              >
+                Duplicate pattern to similar items
+              </Button>
+            </div>
+
+            <div
+              style={{
+                marginTop: 18,
+                padding: 14,
+                borderRadius: 8,
+                background: 'rgba(196,154,108,0.14)',
+                border: `1px solid ${COLORS.action}55`,
+              }}
+            >
+              <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>
+                Preview calculated cost
+              </div>
+              <div style={{ marginTop: 8, color: COLORS.text, fontSize: 16, fontWeight: 900 }}>
+                {formatMoney(budgetPreview.total, budgetSummary.currency)}
+              </div>
+              <div style={{ marginTop: 4, color: `${COLORS.text}B8`, fontSize: 13 }}>
+                {budgetPreview.formula}
+              </div>
+            </div>
+          </Form>
+        ) : (
+          <div style={{ color: COLORS.text }}>Select an object to assign a budget cost.</div>
+        )}
+      </Drawer>
 
       {/*  Save modal  */}
       <SaveModal
@@ -3939,6 +5446,218 @@ export default function RoomScene({ initialScene = null }) {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body, html { overflow: hidden; height: 100vh; width: 100vw; touch-action: none; }
         canvas { outline: none !important; border: none !important; display: block !important; }
+        .room-budget-badge {
+          pointer-events: none;
+          padding: 5px 9px;
+          border-radius: 8px;
+          background: rgba(24, 18, 15, 0.84);
+          border: 1px solid rgba(196, 154, 108, 0.58);
+          box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
+          color: #f3d7b6;
+          font-size: 11px;
+          font-weight: 900;
+          line-height: 1;
+          white-space: nowrap;
+          backdrop-filter: blur(10px);
+        }
+        .budget-drawer .ant-drawer-title,
+        .budget-drawer .ant-form-item-label > label {
+          color: ${COLORS.text} !important;
+          font-weight: 800;
+        }
+        .budget-drawer .ant-drawer-close {
+          color: ${COLORS.text} !important;
+        }
+        .room-scene-controls-menu {
+          position: fixed;
+          bottom: 90px;
+          z-index: 805;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          pointer-events: auto;
+          font-family: Inter, sans-serif;
+        }
+        .room-three-dot-menu {
+          width: 46px;
+          height: 46px;
+          border: 1px solid ${COLORS.secondary}55;
+          border-radius: 50%;
+          background: ${COLORS.surface}F0;
+          color: ${COLORS.text};
+          box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+          backdrop-filter: blur(12px);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 3px;
+          cursor: pointer;
+          transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+        }
+        .room-three-dot-menu span {
+          width: 4px;
+          height: 4px;
+          border-radius: 50%;
+          background: currentColor;
+          display: block;
+        }
+        .room-three-dot-menu:hover,
+        .room-three-dot-menu.is-open {
+          border-color: ${COLORS.action}AA;
+          background: ${COLORS.surface};
+          color: ${COLORS.action};
+          transform: translateY(-1px);
+        }
+        .room-scene-controls-popover {
+          position: absolute;
+          right: 58px;
+          bottom: 0;
+          width: 224px;
+          padding: 10px;
+          border-radius: 12px;
+          background: ${COLORS.surface}F2;
+          border: 1px solid ${COLORS.secondary}55;
+          box-shadow: 0 18px 42px rgba(0,0,0,0.42);
+          backdrop-filter: blur(14px);
+          display: grid;
+          gap: 8px;
+        }
+        .room-bubble-action {
+          width: 100%;
+          min-height: 58px;
+          border: 0;
+          border-radius: 8px;
+          padding: 7px 10px;
+          background: rgba(255,255,255,0.055);
+          color: ${COLORS.text};
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          cursor: pointer;
+          text-align: left;
+          transition: background 0.2s ease, transform 0.2s ease;
+        }
+        .room-bubble-action:hover {
+          background: rgba(255,255,255,0.09);
+          transform: translateY(-1px);
+        }
+        .room-bubble-action:disabled {
+          opacity: 0.58;
+          cursor: not-allowed;
+          transform: none;
+        }
+        .room-bubble-visual {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex: 0 0 auto;
+          width: 3em;
+          height: 3em;
+          color: #fff;
+          border-radius: 50%;
+          position: relative;
+          transform-style: preserve-3d;
+          animation: roomBubbleFloat 4s ease-in-out infinite;
+          background-image:
+            radial-gradient(8% 8% at 22% 28%, hsl(0,0%,100%) 45%, hsla(0,0%,100%,0) 50%),
+            radial-gradient(8% 8% at 23% 27%, hsl(0,0%,100%) 45%, hsla(0,0%,100%,0) 50%),
+            radial-gradient(8% 8% at 24% 26%, hsl(0,0%,100%) 45%, hsla(0,0%,100%,0) 50%),
+            radial-gradient(8% 8% at 25% 25%, hsl(0,0%,100%) 45%, hsla(0,0%,100%,0) 50%),
+            radial-gradient(8% 8% at 26% 24%, hsl(0,0%,100%) 45%, hsla(0,0%,100%,0) 50%),
+            radial-gradient(8% 8% at 27% 23%, hsl(0,0%,100%) 45%, hsla(0,0%,100%,0) 50%),
+            radial-gradient(8% 8% at 28% 22%, hsl(0,0%,100%) 45%, hsla(0,0%,100%,0) 50%);
+          box-shadow:
+            0 -0.06em 0.1em hsl(0,90%,100%) inset,
+            0 -0.15em 0.4em hsl(0,90%,45%) inset,
+            0 0.05em 0.05em hsl(0,90%,45%) inset,
+            0.05em 0 0.1em hsl(0,90%,100%) inset,
+            -0.05em 0 0.1em hsl(0,90%,100%) inset,
+            0 0.1em 0.4em hsl(0,90%,60%) inset;
+          transition: box-shadow 0.2s ease, transform 0.2s ease, width 0.2s ease, height 0.2s ease;
+        }
+        .room-bubble-visual:before,
+        .room-bubble-visual:after {
+          content: "";
+          display: block;
+          position: absolute;
+          transition: inherit;
+          pointer-events: none;
+        }
+        .room-bubble-visual:before {
+          border-radius: 0.75em;
+          box-shadow: 0 0 0 0.5em hsl(0,0%,100%) inset;
+          filter: drop-shadow(0.6em 0.6em 4px hsla(0,0%,0%,0.2));
+          top: 50%;
+          left: 50%;
+          width: 1.5em;
+          height: 1.5em;
+          transform: translate3d(-50%,-50%,-1px);
+          z-index: -1;
+        }
+        .room-bubble-visual:after {
+          background: radial-gradient(100% 100% at center, hsla(0,0%,0%,0) 35%, hsla(0,0%,0%,0.2) 48%, hsla(0,0%,0%,0) 50%);
+          filter: blur(4px);
+          top: 0.6em;
+          left: 0.6em;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          transform: translate3d(0,0,-1px);
+          z-index: -2;
+        }
+        .room-bubble-action:hover .room-bubble-visual {
+          transform: scale(1.08);
+        }
+        .room-bubble-action:active .room-bubble-visual {
+          width: 3.5em;
+          height: 2.5em;
+        }
+        .room-bubble-action.is-active .room-bubble-visual {
+          box-shadow:
+            0 -0.06em 0.1em hsl(120,90%,100%) inset,
+            0 -0.15em 0.4em hsl(120,90%,45%) inset,
+            0 0.05em 0.05em hsl(120,90%,45%) inset,
+            0.05em 0 0.1em hsl(120,90%,100%) inset,
+            -0.05em 0 0.1em hsl(120,90%,100%) inset,
+            0 0.1em 0.4em hsl(120,90%,60%) inset;
+        }
+        .room-bubble-action.is-active .room-bubble-visual:before {
+          border-radius: 0.25em;
+          width: 0.5em;
+        }
+        .room-bubble-copy {
+          display: grid;
+          gap: 2px;
+          min-width: 0;
+        }
+        .room-bubble-copy span {
+          color: ${COLORS.text};
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1.1;
+        }
+        .room-bubble-copy small {
+          color: ${COLORS.secondary};
+          font-size: 10px;
+          line-height: 1.1;
+        }
+        @keyframes roomBubbleFloat {
+          from, to { transform: translate(0, 3%); }
+          25% { transform: translate(-3%, 0); }
+          50% { transform: translate(0, -3%); }
+          75% { transform: translate(3%, 0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .room-bubble-visual {
+            animation: none;
+          }
+          .room-bubble-action:hover .room-bubble-visual,
+          .room-bubble-action:active .room-bubble-visual {
+            width: 3em;
+            height: 3em;
+            transform: none;
+          }
+        }
         .ant-splitter { border: none !important; outline: none !important; }
         .ant-splitter-panel { border: none !important; outline: none !important; }
         .room-splitter > .ant-splitter-bar {

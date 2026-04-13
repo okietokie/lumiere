@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+from uuid import uuid4
 from urllib.parse import urlparse
 
 from bson import ObjectId
@@ -14,7 +15,10 @@ from app.core.config import (
     VIDEOS_DIR,
 )
 from app.core.database import projects_collection
+from app.schemas.budget_schema import BudgetRuleCreate, BudgetRuleUpdate
 from app.utils.helpers import serialize_document, utcnow
+from app.utils.budget_estimator import calculate_budget_summary
+from app.utils.measurements import with_scene_measurements
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +31,8 @@ def _project_title(payload_title: str | None, payload_name: str | None) -> str:
     return (payload_title or payload_name or "Untitled Room").strip() or "Untitled Room"
 
 
-def _project_scene(scene_data: dict | None, scene: dict | None) -> dict:
-    return scene_data or scene or {}
+def _project_scene(scene_data: dict | None, scene: dict | None, project_name: str | None = None) -> dict:
+    return _scene_with_budget_summary(scene_data or scene or {}, project_name)
 
 
 def _thumbnail_url(thumbnail_url: str | None, thumbnail: str | None) -> str | None:
@@ -62,6 +66,51 @@ def _object_id(value: str, detail: str = "Invalid project id") -> ObjectId:
     return ObjectId(value)
 
 
+def _scene_with_budget_summary(scene: dict | None, project_name: str | None = None) -> dict:
+    scene_data = with_scene_measurements(scene or {})
+    budget = scene_data.get("budget") or {}
+    calculated_at = utcnow()
+    summary = calculate_budget_summary(scene_data, budget.get("rules") or [], project_name, calculated_at)
+    scene_data["budget"] = {
+        **budget,
+        **summary,
+        "last_calculated_at": calculated_at,
+    }
+    return scene_data
+
+
+def _set_budget_rules(scene_data: dict, rules: list[dict], project_name: str | None = None) -> dict:
+    budget = scene_data.get("budget") or {}
+    calculated_at = utcnow()
+    summary = calculate_budget_summary(scene_data, rules, project_name, calculated_at)
+    scene_data["budget"] = {
+        **budget,
+        "rules": rules,
+        **summary,
+        "last_calculated_at": calculated_at,
+    }
+    return scene_data
+
+
+async def _serialize_project_with_recalculated_budget(doc: dict | None, *, persist: bool = False) -> dict | None:
+    if not doc:
+        return None
+
+    scene_data = _scene_with_budget_summary(doc.get("scene_data") or doc.get("scene") or {}, doc.get("title"))
+    next_doc = {
+        **doc,
+        "scene_data": scene_data,
+    }
+
+    if persist:
+        await projects_collection.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"scene_data": scene_data}},
+        )
+
+    return _serialize_project(next_doc)
+
+
 async def create_project(
     *,
     user_id: str,
@@ -73,10 +122,11 @@ async def create_project(
     thumbnail: str | None = None,
 ) -> dict:
     now = utcnow()
-    scene_payload = _project_scene(scene_data, scene)
+    title_value = _project_title(title, name)
+    scene_payload = _project_scene(scene_data, scene, title_value)
     doc = {
         "user_id": ObjectId(user_id),
-        "title": _project_title(title, name),
+        "title": title_value,
         "thumbnail_url": _thumbnail_url(thumbnail_url, thumbnail),
         "scene_data": scene_payload,
         "preview_video": None,
@@ -117,7 +167,8 @@ async def update_project(
     if title is not None or name is not None:
         updates["title"] = _project_title(title, name)
     if scene_data is not None or scene is not None:
-        next_scene = _project_scene(scene_data, scene)
+        next_title = _project_title(title, name) if title is not None or name is not None else existing.get("title")
+        next_scene = _project_scene(scene_data, scene, next_title)
         updates["scene_data"] = next_scene
     if thumbnail_url is not None or thumbnail is not None:
         updates["thumbnail_url"] = _thumbnail_url(thumbnail_url, thumbnail)
@@ -125,6 +176,136 @@ async def update_project(
     await projects_collection.update_one(
         {"_id": _object_id(project_id), "user_id": ObjectId(user_id)},
         {"$set": updates},
+    )
+    doc = await get_owned_project(project_id, user_id)
+    return _serialize_project(doc) if doc else None
+
+
+async def activate_project_budget(
+    project_id: str,
+    *,
+    user_id: str,
+    enabled: bool,
+    currency: str = "AED",
+) -> dict | None:
+    project = await get_owned_project(project_id, user_id)
+    if not project:
+        return None
+
+    scene_data = _scene_with_budget_summary(project.get("scene_data") or project.get("scene") or {}, project.get("title"))
+    budget = scene_data.get("budget") or {}
+    scene_data["budget"] = {
+        **budget,
+        "enabled": enabled,
+        "currency": budget.get("currency") or currency,
+    }
+
+    await projects_collection.update_one(
+        {"_id": _object_id(project_id), "user_id": ObjectId(user_id)},
+        {"$set": {"scene_data": scene_data, "updated_at": utcnow()}},
+    )
+    doc = await get_owned_project(project_id, user_id)
+    return _serialize_project(doc) if doc else None
+
+
+async def create_project_budget_rule(
+    project_id: str,
+    *,
+    user_id: str,
+    rule: BudgetRuleCreate,
+) -> dict | None:
+    project = await get_owned_project(project_id, user_id)
+    if not project:
+        return None
+
+    scene_data = with_scene_measurements(project.get("scene_data") or project.get("scene") or {})
+    budget = scene_data.get("budget") or {}
+    rules = budget.get("rules") if isinstance(budget.get("rules"), list) else []
+    next_rule = {
+        "id": uuid4().hex,
+        **rule.model_dump(),
+    }
+    scene_data = _set_budget_rules(scene_data, [*rules, next_rule], project.get("title"))
+
+    await projects_collection.update_one(
+        {"_id": _object_id(project_id), "user_id": ObjectId(user_id)},
+        {"$set": {"scene_data": scene_data, "updated_at": utcnow()}},
+    )
+    doc = await get_owned_project(project_id, user_id)
+    return _serialize_project(doc) if doc else None
+
+
+async def update_project_budget_rule(
+    project_id: str,
+    rule_id: str,
+    *,
+    user_id: str,
+    updates: BudgetRuleUpdate,
+) -> dict | None:
+    project = await get_owned_project(project_id, user_id)
+    if not project:
+        return None
+
+    scene_data = with_scene_measurements(project.get("scene_data") or project.get("scene") or {})
+    budget = scene_data.get("budget") or {}
+    rules = budget.get("rules") if isinstance(budget.get("rules"), list) else []
+    existing_rule = next((rule for rule in rules if isinstance(rule, dict) and rule.get("id") == rule_id), None)
+    if not existing_rule:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget rule not found")
+
+    merged_rule = {
+        **existing_rule,
+        **updates.model_dump(exclude_unset=True),
+        "id": rule_id,
+    }
+    validated_rule = BudgetRuleCreate(**{key: value for key, value in merged_rule.items() if key != "id"})
+    next_rule = {
+        "id": rule_id,
+        **validated_rule.model_dump(),
+    }
+
+    scene_data = _set_budget_rules(
+        scene_data,
+        [
+            next_rule if isinstance(rule, dict) and rule.get("id") == rule_id else rule
+            for rule in rules
+        ],
+        project.get("title"),
+    )
+
+    await projects_collection.update_one(
+        {"_id": _object_id(project_id), "user_id": ObjectId(user_id)},
+        {"$set": {"scene_data": scene_data, "updated_at": utcnow()}},
+    )
+    doc = await get_owned_project(project_id, user_id)
+    return _serialize_project(doc) if doc else None
+
+
+async def delete_project_budget_rule(
+    project_id: str,
+    rule_id: str,
+    *,
+    user_id: str,
+) -> dict | None:
+    project = await get_owned_project(project_id, user_id)
+    if not project:
+        return None
+
+    scene_data = with_scene_measurements(project.get("scene_data") or project.get("scene") or {})
+    budget = scene_data.get("budget") or {}
+    rules = budget.get("rules") if isinstance(budget.get("rules"), list) else []
+    next_rules = [
+        rule for rule in rules
+        if not (isinstance(rule, dict) and rule.get("id") == rule_id)
+    ]
+    if len(next_rules) == len(rules):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget rule not found")
+
+    scene_data = _set_budget_rules(scene_data, next_rules, project.get("title"))
+
+    await projects_collection.update_one(
+        {"_id": _object_id(project_id), "user_id": ObjectId(user_id)},
+        {"$set": {"scene_data": scene_data, "updated_at": utcnow()}},
     )
     doc = await get_owned_project(project_id, user_id)
     return _serialize_project(doc) if doc else None
@@ -166,12 +347,12 @@ async def get_latest_project(user_id: str) -> dict | None:
         {"user_id": ObjectId(user_id)},
         sort=[("last_opened_at", -1), ("updated_at", -1)],
     )
-    return _serialize_project(doc) if doc else None
+    return await _serialize_project_with_recalculated_budget(doc, persist=True)
 
 
 async def get_project(project_id: str) -> dict | None:
     doc = await projects_collection.find_one({"_id": _object_id(project_id)})
-    return _serialize_project(doc) if doc else None
+    return await _serialize_project_with_recalculated_budget(doc, persist=False)
 
 
 async def open_owned_project(project_id: str, user_id: str) -> dict | None:
@@ -181,7 +362,7 @@ async def open_owned_project(project_id: str, user_id: str) -> dict | None:
         {"$set": {"last_opened_at": now, "updated_at": now}},
     )
     doc = await get_owned_project(project_id, user_id)
-    return _serialize_project(doc) if doc else None
+    return await _serialize_project_with_recalculated_budget(doc, persist=True)
 
 
 async def delete_project(project_id: str, user_id: str) -> bool:

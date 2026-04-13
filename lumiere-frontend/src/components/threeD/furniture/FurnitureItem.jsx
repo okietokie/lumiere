@@ -264,7 +264,7 @@ class FurnitureErrorBoundary extends React.Component {
 }
 
 const FurnitureInner = forwardRef(({
-  item, resolvedUrl, isSelected, onSelect, setOrbitEnabled,
+  item, resolvedUrl, isSelected, onSelect, onContextMenu, setOrbitEnabled,
 }, ref) => {
   const { scene }             = useGLTF(resolvedUrl);
   const [hovered, setHovered] = useState(false);
@@ -340,6 +340,16 @@ const FurnitureInner = forwardRef(({
       rotation={item.rotation}
       scale={rawScale}
       onClick={(e)       => { e.stopPropagation(); onSelect(); }}
+      onContextMenu={(e) => {
+        e.stopPropagation();
+        const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+        sourceEvent?.preventDefault?.();
+        onContextMenu?.({
+          item,
+          clientX: sourceEvent?.clientX ?? 0,
+          clientY: sourceEvent?.clientY ?? 0,
+        });
+      }}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'pointer'; }}
       onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto';    }}
     >

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { LIGHT_TYPES } from '../../../hooks/useLighting';
 
 export default function PlacedLight({
-  light, isSelected, onSelect, updateLight, setOrbitEnabled,
+  light, isSelected, onSelect, onContextMenu, updateLight, setOrbitEnabled,
 }) {
   const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
@@ -70,6 +70,10 @@ export default function PlacedLight({
 
   const shapes = {
     ceiling: { geo: <cylinderGeometry args={[0.15, 0.2,  0.1,  16]} />, bodyColor: '#E8E8E8' },
+    pendant: { geo: <sphereGeometry args={[0.14, 16, 12]} />, bodyColor: '#D6C4A5' },
+    wall: { geo: <boxGeometry args={[0.2, 0.16, 0.08]} />, bodyColor: '#D8C8B0' },
+    floorLamp: { geo: <cylinderGeometry args={[0.06, 0.12, 0.3, 12]} />, bodyColor: '#C8A870' },
+    strip: { geo: <boxGeometry args={[0.52, 0.05, 0.08]} />, bodyColor: '#E8E8E8' },
     lamp:    { geo: <cylinderGeometry args={[0.06, 0.12, 0.3,  12]} />, bodyColor: '#C8A870' },
     spot:    { geo: <coneGeometry     args={[0.12, 0.25, 12]}       />, bodyColor: '#303030' },
   };
@@ -82,6 +86,16 @@ export default function PlacedLight({
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'grab'; }}
         onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
         onClick={(e)       => { e.stopPropagation(); onSelect(); }}
+        onContextMenu={(e) => {
+          e.stopPropagation();
+          const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+          sourceEvent?.preventDefault?.();
+          onContextMenu?.({
+            light,
+            clientX: sourceEvent?.clientX ?? 0,
+            clientY: sourceEvent?.clientY ?? 0,
+          });
+        }}
         castShadow
       >
         {shape.geo}

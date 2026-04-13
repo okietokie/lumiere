@@ -114,6 +114,35 @@ function RouteShell() {
   const veilRef = useRef(null);
   const previousPathRef = useRef(location.pathname);
 
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+
+    if (isFullscreenRoute) {
+      html.style.overflow = "hidden";
+      html.style.height = "100%";
+      body.style.overflow = "hidden";
+      body.style.height = "100%";
+      body.style.touchAction = "none";
+    } else {
+      html.style.overflowX = "hidden";
+      html.style.overflowY = "auto";
+      html.style.height = "auto";
+      body.style.overflowX = "hidden";
+      body.style.overflowY = "auto";
+      body.style.height = "auto";
+      body.style.touchAction = "";
+    }
+
+    return () => {
+      html.style.overflow = "";
+      html.style.height = "";
+      body.style.overflow = "";
+      body.style.height = "";
+      body.style.touchAction = "";
+    };
+  }, [isFullscreenRoute]);
+
   const handleLogout = () => {
     clearAuthSession();
     window.location.href = "/login";
@@ -222,7 +251,7 @@ function RouteShell() {
           height: isFullscreenRoute ? "100vh" : "auto",
           width: "100vw",
           overflowX: "hidden",
-          overflowY: isFullscreenRoute ? "hidden" : "auto",
+          overflowY: isFullscreenRoute ? "hidden" : "visible",
           background: COLORS.background,
           color: COLORS.text,
         }}

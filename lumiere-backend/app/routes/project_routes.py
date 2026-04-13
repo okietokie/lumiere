@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.core.security import get_current_user
+from app.schemas.budget_schema import BudgetActivationPayload, BudgetRuleCreate, BudgetRuleUpdate
 from app.schemas.project_schema import SaveProjectRequest, UpdateProjectRequest
 from app.services.project_service import (
+    activate_project_budget,
     create_project,
+    create_project_budget_rule,
+    delete_project_budget_rule,
     delete_project,
     get_latest_project,
     get_project,
@@ -12,6 +16,7 @@ from app.services.project_service import (
     open_owned_project,
     save_project_asset,
     save_project_video,
+    update_project_budget_rule,
     update_project,
 )
 
@@ -78,6 +83,73 @@ async def update_project_route(
         scene=body.scene,
         thumbnail_url=body.thumbnail_url,
         thumbnail=body.thumbnail,
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.patch("/{project_id}/budget/activate")
+async def activate_project_budget_route(
+    project_id: str,
+    body: BudgetActivationPayload,
+    current_user: dict = Depends(get_current_user),
+):
+    project = await activate_project_budget(
+        project_id,
+        user_id=str(current_user["_id"]),
+        enabled=body.enabled,
+        currency=body.currency,
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.post("/{project_id}/budget/rules")
+async def create_project_budget_rule_route(
+    project_id: str,
+    body: BudgetRuleCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    project = await create_project_budget_rule(
+        project_id,
+        user_id=str(current_user["_id"]),
+        rule=body,
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.patch("/{project_id}/budget/rules/{rule_id}")
+async def update_project_budget_rule_route(
+    project_id: str,
+    rule_id: str,
+    body: BudgetRuleUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    project = await update_project_budget_rule(
+        project_id,
+        rule_id,
+        user_id=str(current_user["_id"]),
+        updates=body,
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.delete("/{project_id}/budget/rules/{rule_id}")
+async def delete_project_budget_rule_route(
+    project_id: str,
+    rule_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    project = await delete_project_budget_rule(
+        project_id,
+        rule_id,
+        user_id=str(current_user["_id"]),
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")

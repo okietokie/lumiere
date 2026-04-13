@@ -17,6 +17,7 @@ const _hit   = new THREE.Vector3();
 
 const InteractiveWall = React.forwardRef(({
   wall, isSelected, onSelect, updateWall, setOrbitEnabled, cameraMode,
+  onContextMenu,
   selectedOpening, openingPreview, activeOpeningTool,
   onOpeningPreviewMove, onOpeningCommit, onOpeningSelect, onOpeningMenu, updateOpening,
   edgeLinkStart, onEdgeLinkPoint,
@@ -211,6 +212,17 @@ const InteractiveWall = React.forwardRef(({
     openingCommittedOnPointerDown.current = false;
     onSelect?.();
   }, [activeOpeningTool, onOpeningCommit, onOpeningPreviewMove, onSelect, pauseOrbitUntilPointerUp]);
+
+  const handleWallContextMenu = useCallback((e) => {
+    e.stopPropagation();
+    const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+    sourceEvent?.preventDefault?.();
+    onContextMenu?.({
+      wall,
+      clientX: sourceEvent?.clientX ?? 0,
+      clientY: sourceEvent?.clientY ?? 0,
+    });
+  }, [onContextMenu, wall]);
 
   const startDrag = useCallback((e, dragType) => {
     e.stopPropagation();
@@ -679,6 +691,7 @@ const InteractiveWall = React.forwardRef(({
           onClick={handleWallClick}
           onPointerDown={handleWallPointerDown}
           onPointerMove={handleWallPointerMove}
+          onContextMenu={handleWallContextMenu}
           onPointerOver={() => setHovered(true)}
           onPointerOut={() => setHovered(false)}
         >

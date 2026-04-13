@@ -1,12 +1,12 @@
 import React from 'react';
-import { Button, Slider, Switch, Popconfirm, Tooltip } from 'antd';
+import { Button, InputNumber, Select, Slider, Switch, Popconfirm, Tooltip } from 'antd';
 import {
   BulbOutlined,
   DeleteOutlined,
   CameraOutlined,
 } from '@ant-design/icons';
 import { COLORS } from '../../../utils/colors';
-import { TIME_PRESETS, MOOD_PRESETS, LIGHT_TYPES } from '../../../hooks/useLighting';
+import { TIME_PRESETS, MOOD_PRESETS, LIGHT_TYPES, LIGHT_BUDGET_CATEGORIES } from '../../../hooks/useLighting';
 
 export default function LightingPanel({
   timeOfDay, setTimeOfDay,
@@ -141,7 +141,7 @@ export default function LightingPanel({
       {/*  Add lights */}
       <Section title="Add Light">
         <div style={{ display: 'flex', gap: 8 }}>
-          {Object.entries(LIGHT_TYPES).map(([type, config]) => (
+          {Object.entries(LIGHT_TYPES).filter(([, config]) => !config.hidden).map(([type, config]) => (
             <button
               key={type}
               onClick={() => addLight(type)}
@@ -174,7 +174,7 @@ export default function LightingPanel({
       <div id="light-selected" />
       {/*  Selected light controls */}
       {selectedLight && (
-        <Section title={`${LIGHT_TYPES[selectedLight.type].icon} ${LIGHT_TYPES[selectedLight.type].label}`} highlight>
+        <Section title={`${LIGHT_TYPES[selectedLight.type]?.icon ?? 'LT'} ${LIGHT_TYPES[selectedLight.type]?.label ?? 'Light'}`} highlight>
 
           {/* On/Off toggle */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -239,6 +239,32 @@ export default function LightingPanel({
                 style={{ width: 32, height: 24, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
               />
             </div>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ color: COLORS.text, fontSize: 13, marginBottom: 6 }}>Budget category</div>
+            <Select
+              value={selectedLight.budgetCategory ?? LIGHT_TYPES[selectedLight.type]?.budgetCategory ?? 'ceilingLight'}
+              onChange={(value) => updateLight(selectedLight.id, { budgetCategory: value })}
+              style={{ width: '100%' }}
+              options={Object.entries(LIGHT_BUDGET_CATEGORIES).map(([value, item]) => ({
+                value,
+                label: item.label,
+              }))}
+            />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ color: COLORS.text, fontSize: 13, marginBottom: 6 }}>Budget quantity</div>
+            <InputNumber
+              min={1}
+              step={1}
+              precision={0}
+              value={selectedLight.quantity ?? selectedLight.measurements?.quantity ?? 1}
+              onChange={(value) => updateLight(selectedLight.id, { quantity: value ?? 1 })}
+              addonAfter="lights"
+              style={{ width: '100%' }}
+            />
           </div>
 
           {/* Height control */}

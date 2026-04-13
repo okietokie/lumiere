@@ -17,10 +17,28 @@ export const MOOD_PRESETS = [
   { key: 'none',     label: 'No Mood',      emoji: '✕',  tint: null,     ambientColor: null,      ambientBoost: 0    },
 ];
 
-export const LIGHT_TYPES = {
+export const LEGACY_LIGHT_TYPES = {
   ceiling: { label: 'Ceiling',   icon: '💡', defaultPos: [0, 2.8, 0],  intensity: 1.2, color: '#FFF5E6', distance: 8,  angle: Math.PI / 2 },
   lamp:    { label: 'Lamp',      icon: '🕯️', defaultPos: [1, 1.4, 1],  intensity: 0.8, color: '#FFD700', distance: 5,  angle: Math.PI / 3 },
   spot:    { label: 'Spotlight', icon: '🔦', defaultPos: [0, 2.5, -1], intensity: 1.5, color: '#FFFFFF', distance: 10, angle: Math.PI / 6 },
+};
+
+export const LIGHT_TYPES = {
+  ceiling: { label: 'Ceiling light', icon: 'CL', defaultPos: [0, 2.8, 0], intensity: 1.2, color: '#FFF5E6', distance: 8, angle: Math.PI / 2, budgetCategory: 'ceilingLight' },
+  pendant: { label: 'Pendant light', icon: 'PL', defaultPos: [0, 2.35, 0], intensity: 1.0, color: '#FFF1D6', distance: 7, angle: Math.PI / 2, budgetCategory: 'pendantLight' },
+  wall: { label: 'Wall light', icon: 'WL', defaultPos: [-2, 1.8, 0], intensity: 0.75, color: '#FFE6BF', distance: 5, angle: Math.PI / 3, budgetCategory: 'wallLight' },
+  floorLamp: { label: 'Floor lamp', icon: 'FL', defaultPos: [1, 1.4, 1], intensity: 0.8, color: '#FFD700', distance: 5, angle: Math.PI / 3, budgetCategory: 'floorLamp' },
+  strip: { label: 'Strip light', icon: 'SL', defaultPos: [0, 2.15, -1], intensity: 0.65, color: '#FFFFFF', distance: 6, angle: Math.PI / 2, budgetCategory: 'stripLight' },
+  lamp: { label: 'Floor lamp', icon: 'FL', defaultPos: [1, 1.4, 1], intensity: 0.8, color: '#FFD700', distance: 5, angle: Math.PI / 3, budgetCategory: 'floorLamp', hidden: true },
+  spot: { label: 'Ceiling light', icon: 'CL', defaultPos: [0, 2.5, -1], intensity: 1.5, color: '#FFFFFF', distance: 10, angle: Math.PI / 6, budgetCategory: 'ceilingLight', hidden: true },
+};
+
+export const LIGHT_BUDGET_CATEGORIES = {
+  ceilingLight: { label: 'Ceiling light' },
+  pendantLight: { label: 'Pendant light' },
+  wallLight: { label: 'Wall light' },
+  floorLamp: { label: 'Floor lamp' },
+  stripLight: { label: 'Strip light' },
 };
 
 function lerpColor(a, b, t) {
@@ -69,6 +87,8 @@ export default function useLighting() {
     const defaults = LIGHT_TYPES[type];
     const light = {
       id: uuidv4(), type,
+      budgetCategory: defaults.budgetCategory,
+      quantity: 1,
       position:  [...defaults.defaultPos],
       intensity: defaults.intensity,
       color:     defaults.color,
