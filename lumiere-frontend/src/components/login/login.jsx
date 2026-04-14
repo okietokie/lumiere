@@ -1,22 +1,54 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { App, Checkbox, Form, Input, Modal } from "antd";
-import { ArrowLeftOutlined } from "@ant-design/icons";
+import {
+  ArrowLeftOutlined,
+  LockOutlined,
+  MailOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { authApi } from "../../api/auth.js";
 import { getApiErrorMessage } from "../../utils/apiError.js";
 import { storeAuthSession } from "../../utils/authStorage.js";
+import { COLORS } from "../../utils/colors.js";
 import landingBg from "../../assets/landing-page-bg.jpg";
 import "./login.css";
 
-const Login = () => {
+export const AuthExperience = ({ initialMode = "login" }) => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [mode, setMode] = useState(initialMode);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [signupLoading, setSignupLoading] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
+  const [isModalVisible, setIsModalVisible] = useState(false);
   const { message } = App.useApp();
 
-  const onFinish = async (values) => {
-    setLoading(true);
+  const isSignup = mode === "signup";
+  const authVars = useMemo(
+    () => ({
+      "--lm-bg": COLORS.background,
+      "--lm-surface": COLORS.surface,
+      "--lm-surface-low": "#241D19",
+      "--lm-surface-high": "#342A24",
+      "--lm-text": COLORS.text,
+      "--lm-muted": `${COLORS.text}b8`,
+      "--lm-muted-soft": `${COLORS.text}75`,
+      "--lm-action": COLORS.action,
+      "--lm-accent": COLORS.accent,
+      "--lm-secondary": COLORS.secondary,
+      "--lm-grid": COLORS.grid,
+      "--lm-outline": `${COLORS.action}42`,
+    }),
+    []
+  );
+
+  const flipTo = (nextMode) => {
+    setMode(nextMode);
+    window.history.replaceState(null, "", nextMode === "signup" ? "/register" : "/login");
+  };
+
+  const onLoginFinish = async (values) => {
+    setLoginLoading(true);
     try {
       const response = await authApi.login({
         email: values.email,
@@ -28,7 +60,24 @@ const Login = () => {
     } catch (error) {
       message.error(getApiErrorMessage(error, "Invalid login details. Please try again."));
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
+    }
+  };
+
+  const onSignupFinish = async (values) => {
+    setSignupLoading(true);
+    try {
+      await authApi.signup({
+        name: values.fullname,
+        email: values.email,
+        password: values.password,
+      });
+      message.success("Account created successfully!");
+      setTimeout(() => flipTo("login"), 900);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Registration failed. Please try again."));
+    } finally {
+      setSignupLoading(false);
     }
   };
 
@@ -46,88 +95,197 @@ const Login = () => {
   };
 
   return (
-    <div className="lm-login-page">
-      <header className="lm-login-header">
-        <button className="lm-login-back" type="button" onClick={() => navigate("/")}>
+    <div className="lm-auth-page" style={authVars}>
+      <header className="lm-auth-header">
+        <button className="lm-auth-back" type="button" onClick={() => navigate("/")}>
           <ArrowLeftOutlined />
           <span>Back Home</span>
         </button>
-        <div className="lm-login-wordmark">Lumiere Maison</div>
-        <div className="lm-login-header-note">Spatial Design Studio</div>
+        <div className="lm-auth-wordmark">Lumiere Maison</div>
+        <div className="lm-auth-header-note">Spatial Design Studio</div>
       </header>
 
-      <main className="lm-login-shell">
-        <section className="lm-login-visual" aria-hidden="true">
-          <div className="lm-login-visual-image" style={{ backgroundImage: `url(${landingBg})` }} />
-          <div className="lm-login-visual-overlay" />
-          <div className="lm-login-visual-grid" />
-          <div className="lm-login-visual-copy">
-            <span className="lm-login-kicker">Client Portal</span>
-            <h1>
-              Return to your
-              <br />
-              design workspace.
-            </h1>
+      <main className="lm-auth-shell">
+        <section className="lm-auth-visual" aria-hidden="true">
+          <div className="lm-auth-visual-image" style={{ backgroundImage: `url(${landingBg})` }} />
+          <div className="lm-auth-visual-overlay" />
+          <div className="lm-auth-visual-grid" />
+          <div className="lm-auth-visual-copy">
+            <span className="lm-auth-kicker">{isSignup ? "Early Access" : "Client Portal"}</span>
+            <h1>{isSignup ? "Build interiors with cinematic clarity." : "Return to your design workspace."}</h1>
             <p>
-              Access saved concepts, continue room planning, and step back into the same cinematic
-              environment that defines the Lumiere landing experience.
+              {isSignup
+                ? "Create your profile and start shaping presentation-ready spaces."
+                : "Access saved concepts, continue room planning, and step back into your studio."}
             </p>
           </div>
-          <div className="lm-login-visual-line" />
+          <div className="lm-auth-visual-line" />
         </section>
 
-        <section className="lm-login-panel">
-          <div className="lm-login-panel-inner">
-            <div className="lm-login-intro">
-              <span className="lm-login-intro-accent" />
-              <p className="lm-login-eyebrow">Welcome Back</p>
-              <h2>Initialize Session</h2>
-              <p className="lm-login-subcopy">Access your portfolio, projects, and presentation tools.</p>
-            </div>
+        <section className="lm-auth-panel">
+          <div className={`lm-auth-card-shell ${isSignup ? "is-signup" : ""}`}>
+            <div className="lm-auth-glow-card">
+              <div className="lm-auth-glow-card-inner">
+                <div className="lm-auth-flipper" aria-live="polite">
+                  <div
+                    className="lm-auth-face lm-auth-face-front"
+                    aria-hidden={isSignup}
+                    inert={isSignup ? "" : undefined}
+                  >
+                    <div className="lm-auth-intro">
+                      <span className="lm-auth-intro-accent" />
+                      <p className="lm-auth-eyebrow">Welcome Back</p>
+                      <h2>Initialize Session</h2>
+                      <p className="lm-auth-subcopy">Access your portfolio, projects, and presentation tools.</p>
+                    </div>
 
-            <Form className="lm-login-form" layout="vertical" onFinish={onFinish} requiredMark={false}>
-              <Form.Item
-                label="Email Address"
-                name="email"
-                rules={[
-                  { required: true, message: "Please enter your email address." },
-                  { type: "email", message: "Please enter a valid email address." },
-                ]}
-              >
-                <Input placeholder="curator@lumieremaison.com" autoComplete="email" />
-              </Form.Item>
+                    <Form className="lm-auth-form" layout="vertical" onFinish={onLoginFinish} requiredMark={false}>
+                      <Form.Item
+                        label="Email Address"
+                        name="email"
+                        rules={[
+                          { required: true, message: "Please enter your email address." },
+                          { type: "email", message: "Please enter a valid email address." },
+                        ]}
+                      >
+                        <Input prefix={<MailOutlined />} placeholder="curator@lumieremaison.com" autoComplete="email" />
+                      </Form.Item>
 
-              <Form.Item
-                label="Security Key"
-                name="password"
-                rules={[{ required: true, message: "Please enter your password." }]}
-              >
-                <Input.Password placeholder="••••••••" autoComplete="current-password" />
-              </Form.Item>
+                      <Form.Item
+                        label="Security Key"
+                        name="password"
+                        rules={[{ required: true, message: "Please enter your password." }]}
+                      >
+                        <Input.Password
+                          prefix={<LockOutlined />}
+                          placeholder="Password"
+                          autoComplete="current-password"
+                        />
+                      </Form.Item>
 
-              <div className="lm-login-row">
-                <Form.Item className="lm-login-remember-wrap" name="remember" valuePropName="checked">
-                  <Checkbox className="lm-login-remember">Remember this session</Checkbox>
-                </Form.Item>
-                <button
-                  className="lm-login-link"
-                  type="button"
-                  onClick={() => setIsModalVisible(true)}
-                >
-                  Forgot password?
-                </button>
+                      <div className="lm-auth-row">
+                        <Form.Item className="lm-auth-check-wrap" name="remember" valuePropName="checked">
+                          <Checkbox className="lm-auth-check">Remember this session</Checkbox>
+                        </Form.Item>
+                        <button className="lm-auth-text-button" type="button" onClick={() => setIsModalVisible(true)}>
+                          Forgot password?
+                        </button>
+                      </div>
+
+                      <button className="lm-auth-submit" type="submit" disabled={loginLoading}>
+                        {loginLoading ? "Signing In..." : "Enter Studio"}
+                      </button>
+                    </Form>
+
+                    <div className="lm-auth-switch">
+                      <span>New to Lumiere?</span>
+                      <button type="button" onClick={() => flipTo("signup")}>
+                        Request access
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    className="lm-auth-face lm-auth-face-back"
+                    aria-hidden={!isSignup}
+                    inert={!isSignup ? "" : undefined}
+                  >
+                    <div className="lm-auth-intro">
+                      <span className="lm-auth-intro-accent" />
+                      <p className="lm-auth-eyebrow">Create Your Account</p>
+                      <h2>Enter the Studio</h2>
+                      <p className="lm-auth-subcopy">Create your profile and start shaping presentation-ready spaces.</p>
+                    </div>
+
+                    <Form className="lm-auth-form" layout="vertical" onFinish={onSignupFinish} requiredMark={false}>
+                      <Form.Item
+                        label="Full Name"
+                        name="fullname"
+                        rules={[{ required: true, message: "Please enter your full name." }]}
+                      >
+                        <Input prefix={<UserOutlined />} placeholder="Julianne Thorne" autoComplete="name" />
+                      </Form.Item>
+
+                      <Form.Item
+                        label="Email Address"
+                        name="email"
+                        rules={[
+                          { required: true, message: "Please enter your email address." },
+                          { type: "email", message: "Please enter a valid email address." },
+                        ]}
+                      >
+                        <Input prefix={<MailOutlined />} placeholder="curator@lumieremaison.com" autoComplete="email" />
+                      </Form.Item>
+
+                      <Form.Item
+                        label="Password"
+                        name="password"
+                        rules={[
+                          { required: true, message: "Please enter a password." },
+                          { min: 6, message: "Password must be at least 6 characters." },
+                        ]}
+                      >
+                        <Input.Password prefix={<LockOutlined />} placeholder="Password" autoComplete="new-password" />
+                      </Form.Item>
+
+                      <Form.Item
+                        label="Confirm Password"
+                        name="confirm"
+                        dependencies={["password"]}
+                        rules={[
+                          { required: true, message: "Please confirm your password." },
+                          ({ getFieldValue }) => ({
+                            validator(_, value) {
+                              if (!value || getFieldValue("password") === value) {
+                                return Promise.resolve();
+                              }
+                              return Promise.reject(new Error("Passwords do not match."));
+                            },
+                          }),
+                        ]}
+                      >
+                        <Input.Password
+                          prefix={<LockOutlined />}
+                          placeholder="Confirm password"
+                          autoComplete="new-password"
+                        />
+                      </Form.Item>
+
+                      <Form.Item
+                        className="lm-auth-check-wrap lm-auth-terms-wrap"
+                        name="terms"
+                        valuePropName="checked"
+                        rules={[
+                          {
+                            validator: (_, value) =>
+                              value
+                                ? Promise.resolve()
+                                : Promise.reject(new Error("Please accept the terms to continue.")),
+                          },
+                        ]}
+                      >
+                        <Checkbox className="lm-auth-check lm-auth-terms">
+                          <span>
+                            I agree to the <Link to="/">Terms of Service</Link> and{" "}
+                            <Link to="/">Privacy Policy</Link>.
+                          </span>
+                        </Checkbox>
+                      </Form.Item>
+
+                      <button className="lm-auth-submit" type="submit" disabled={signupLoading}>
+                        {signupLoading ? "Creating Account..." : "Complete Registration"}
+                      </button>
+                    </Form>
+
+                    <div className="lm-auth-switch">
+                      <span>Already have access?</span>
+                      <button type="button" onClick={() => flipTo("login")}>
+                        Login here
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-
-              <button className="lm-login-submit" type="submit" disabled={loading}>
-                {loading ? "Signing In..." : "Enter Studio"}
-              </button>
-            </Form>
-
-            <div className="lm-login-footer">
-              <p>
-                New to Lumiere?
-                <Link to="/register">Request access</Link>
-              </p>
             </div>
           </div>
         </section>
@@ -138,9 +296,9 @@ const Login = () => {
         open={isModalVisible}
         onCancel={() => setIsModalVisible(false)}
         footer={null}
-        className="lm-login-modal"
+        className="lm-auth-modal"
       >
-        <Form className="lm-login-modal-form" layout="vertical" onFinish={handleForgotSubmit} requiredMark={false}>
+        <Form className="lm-auth-modal-form" layout="vertical" onFinish={handleForgotSubmit} requiredMark={false}>
           <Form.Item
             label="Email Address"
             name="resetEmail"
@@ -149,9 +307,9 @@ const Login = () => {
               { type: "email", message: "Please enter a valid email address." },
             ]}
           >
-            <Input placeholder="curator@lumieremaison.com" autoComplete="email" />
+            <Input prefix={<MailOutlined />} placeholder="curator@lumieremaison.com" autoComplete="email" />
           </Form.Item>
-          <button className="lm-login-submit" type="submit" disabled={forgotLoading}>
+          <button className="lm-auth-submit" type="submit" disabled={forgotLoading}>
             {forgotLoading ? "Sending Link..." : "Send Reset Link"}
           </button>
         </Form>
@@ -159,5 +317,7 @@ const Login = () => {
     </div>
   );
 };
+
+const Login = () => <AuthExperience initialMode="login" />;
 
 export default Login;
