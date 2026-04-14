@@ -1,0 +1,79 @@
+{
+   "checksum": "5627fe9f3828caf462296cb5e30df630",
+   "roots": {
+      "bookmark_bar": {
+         "children": [ {
+            "date_added": "13357642505701743",
+            "date_last_used": "0",
+            "guid": "dda8fa38-778b-44ef-896d-7b3a450d277d",
+            "id": "7",
+            "meta_info": {
+               "power_bookmark_meta": ""
+            },
+            "name": "Computer Networks (1).pdf-1694105809729.pdf",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "file:///C:/Users/User/Desktop/kalyani%20imp%20files/Times/Computer%20Networks%20(1).pdf-1694105809729.pdf",
+            "visit_count": 0
+         }, {
+            "date_added": "13386405093338464",
+            "date_last_used": "0",
+            "guid": "dbbdf856-2c24-496f-83de-cd47ac707f16",
+            "id": "8",
+            "meta_info": {
+               "power_bookmark_meta": ""
+            },
+            "name": "PM CHAPTER 4.pdf-1685698549315.pdf",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "file:///C:/Users/kalya/Downloads/Documents/PM%20CHAPTER%204.pdf-1685698549315.pdf",
+            "visit_count": 1
+         } ],
+         "date_added": "13420627586892149",
+         "date_last_used": "0",
+         "date_modified": "13386405093338464",
+         "guid": "0bc5d13f-2cba-5d74-951f-3f233fe6c908",
+         "id": "1",
+         "name": "Favorites bar",
+         "source": "unknown",
+         "type": "folder"
+      },
+      "other": {
+         "children": [  ],
+         "date_added": "13420627586892149",
+         "date_last_used": "0",
+         "date_modified": "0",
+         "guid": "82b081ec-3dd3-529c-8475-ab6c344590dd",
+         "id": "2",
+         "name": "Other favorites",
+         "source": "unknown",
+         "type": "folder"
+      },
+      "synced": {
+         "children": [  ],
+         "date_added": "13420627586892149",
+         "date_last_used": "0",
+         "date_modified": "0",
+         "guid": "4cf2e351-0e85-532b-bb37-df045d8f8d0f",
+         "id": "3",
+         "name": "Mobile favorites",
+         "source": "unknown",
+         "type": "folder"
+      },
+      "workspaces_v2": {
+         "children": [  ],
+         "date_added": "13420627586892149",
+         "date_last_used": "0",
+         "date_modified": "0",
+         "guid": "75aa6670-344f-549d-b742-660f029506ab",
+         "id": "5",
+         "name": "Workspaces",
+         "source": "unknown",
+         "type": "folder"
+      }
+   },
+   "sync_metadata": "CjEKDgiIgQISCPl+TIeaAQAAEgAqGEs0Kzd4VStkckkyVm1DTytUQ1dKa3c9PUgDoAYJEo4BCAMSiQEKHG5qZ0R1ODhlQ3J2WHA4NnBEN2ZIR2NxRnA4OD0SJGJjMTc0OTU2LTMxOGYtNWM2MC1iM2MwLTg2NTdkOTNkYjc5YhgAIAAoADC637HyvS8494jNr+wvQPeIza/sL0oceXpOQjAxY241NEE3Y1JVMHVUKy9QZ21UdFVvPVoAZQAAAADCPgJgABKOAQgCEokBChxZY1NUb252RVNQd3FDczRMMmNyVmh2NjhMOTg9EiQ0ZWE5MWE5My0wZTk1LTU4ZmUtOTJhMy03NGU5MTliYjgxNmYYACAAKAAwut+x8r0vOLiIza/sL0C4iM2v7C9KHG9QVmtod0JSYlY2NUtDV1IyK0lPTkhXb091OD1aAGUAAAAAwj4CYAASrQEICBKoAQocMkloS0hFQmlOOUlSU0VrWWxKOGNja0s2MkhvPRIkZGJiZGY4NTYtMmMyNC00OTZmLTgzZGUtY2Q0N2FjNzA3ZjE2GAAgACgAMMmD1ZnZMjjmhdWZ2TJA5oXVmdkyShxPendrZElyVFpWZEpNbWxzSlJXblI4ekdtakU9Wh8iHbtnTWFtdDRCanZQU3lNd0RPRTd4Vmg5Yk9PU0E9ZXdwbKPCPgJgBRKsAQgHEqcBChwxWFdQTU0xRUFKVFNscVV4REgzVVByM1BUdzg9EiRkZGE4ZmEzOC03NzhiLTQ0ZWYtODk2ZC03YjNhNDUwZDI3N2QYACAAKAAwhYLMhu4xOP2DzIbuMUD9g8yG7jFKHGYxVnRGaGd3T1FFbHBnbVZuaDBaMmF3SE1TWT1aHiIcdmtlVmR3c21RdlhNQ1FNZFVJQVA4Nkcyam13PWV3cGyjwj4CYAUSjgEIARKJAQoceXhKLzZmdmtlY3I3a3A1RVF6QjR0V0xwZGJFPRIkYjAxOWIyMWItYWIwNC01ODZmLTlkNGYtZTIzYTIwNGVmNTFiGAAgACgAMLrfsfK9LzjYiM2v7C9A2IjNr+wvShxhUkNXTGdoRjliNUlucUtJRHZ1Si9qdlFrRmM9WgBlAAAAAMI+AmAAEo4BCAUSiQEKHHdSQnJaTCs2UEE5YXZLZ2pOUDdKWERMY2Z2cz0SJDRlNWM3NjBhLTRlOGMtNTNjNC1hYWI1LWIxNjNlNzI4ZWUyMBgAIAAoADD4/bG6qDM4iYCyuqgzQImAsrqoM0ocbm14NjVzUUR2eEk4VGdFZXYrQStudHRvU240PVoAZQAAAADCPgJgADAAOAA=",
+   "version": 1
+}

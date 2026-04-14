@@ -23,7 +23,6 @@ body {
   width: 100%;
   overflow-x: hidden;
   color: #d9c5b2;
-  overscroll-behavior-y: none;
 }
 
 #root {

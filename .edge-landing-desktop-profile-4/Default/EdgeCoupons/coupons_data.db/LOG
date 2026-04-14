@@ -1,0 +1,5 @@
+2026/04/14-12:10:08.189 1134 Creating DB C:\Users\kalya\Lumiere\.edge-landing-desktop-profile-4\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/04/14-12:10:08.465 1134 Reusing MANIFEST C:\Users\kalya\Lumiere\.edge-landing-desktop-profile-4\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/04/14-12:10:10.178 1ad8 Level-0 table #5: started
+2026/04/14-12:10:10.183 1ad8 Level-0 table #5: 682116 bytes OK
+2026/04/14-12:10:10.185 1ad8 Delete type=0 #3

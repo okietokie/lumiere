@@ -6,8 +6,6 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { useNavigate } from "react-router-dom";
 import landingBg from "../assets/landing-page-bg.jpg";
-import landingBg2 from "../assets/landin-page-bg-2.jpg";
-import ScrollExpandMedia from "./blocks/scroll-expansion-hero";
 import { GooeyText } from "./ui/gooey-text-morphing";
 import { Waves } from "./ui/wave-background";
 import { COLORS } from "../utils/colors";
@@ -63,24 +61,45 @@ const NAV_LINKS = [
 const FEATURES = [
   {
     icon: "drag_pan",
-    title: "Real-time Furniture Placement",
-    body: "Compose rooms with drag, drop, and rotation controls that feel editorial instead of technical.",
+    title: "3D Room Planning",
+    body: "Create room layouts from a sketch or floor plan, then refine dimensions in a clear 3D interior design workspace.",
     accent: "primary",
-    cta: "Explore Library",
+    cta: "Plan Rooms",
+  },
+  {
+    icon: "chair",
+    title: "Furniture and Decor Placement",
+    body: "Place furniture, lighting, and decor with drag-and-drop controls so every layout feels balanced before anything is bought.",
+    accent: "secondary",
+    cta: "Place Pieces",
   },
   {
     icon: "light_mode",
-    title: "Smart Spatial Visualization",
-    body: "Preview natural light, material response, and atmosphere with cleaner cinematic feedback.",
-    accent: "secondary",
-    cta: "View Tech Specs",
+    title: "Real-Time Interior Visualization",
+    body: "Visualize interiors in real time with 3D views that show scale, light, surfaces, and mood while you design.",
+    accent: "primary",
+    cta: "See the Room",
   },
   {
-    icon: "group_work",
-    title: "Collaborative Planning",
-    body: "Share scenes, align decisions, and move from concept to presentation with less friction.",
+    icon: "format_paint",
+    title: "Wall and Surface Customization",
+    body: "Customize walls, floors, finishes, and color palettes to compare design directions without rebuilding the room.",
+    accent: "secondary",
+    cta: "Style Surfaces",
+  },
+  {
+    icon: "calculate",
+    title: "Budget and Material Estimation",
+    body: "Estimate materials and project costs as your room planning choices evolve, keeping design decisions grounded.",
     accent: "primary",
-    cta: "Launch Studio",
+    cta: "Estimate Costs",
+  },
+  {
+    icon: "auto_awesome",
+    title: "AI-Assisted Design Ideas",
+    body: "Explore AI-assisted interior design suggestions for layouts, furniture placement, and room styling when you need direction.",
+    accent: "secondary",
+    cta: "Get Ideas",
   },
 ];
 
@@ -89,19 +108,19 @@ const WORKFLOW = [
     num: "01",
     title: "Layout",
     accent: "primary",
-    body: "Upload a floor plan or sketch your room dimensions from scratch in the editor.",
+    body: "Upload a floor plan or sketch your room dimensions from scratch. Your online room designer starts here.",
   },
   {
     num: "02",
     title: "Customize",
     accent: "secondary",
-    body: "Style the scene with materials, furniture, and lighting presets tuned for quick iteration.",
+    body: "Style the 3D interior design scene with materials, furniture, and lighting presets tuned for quick iteration.",
   },
   {
     num: "03",
     title: "Visualize",
     accent: "primary",
-    body: "Generate polished perspectives that feel presentation-ready instead of prototype-only.",
+    body: "Generate polished 3D perspectives that feel presentation-ready - not prototype-only.",
   },
 ];
 
@@ -110,12 +129,6 @@ const FOOTER_GROUPS = {
   Legal: ["Privacy Policy", "Terms of Service", "Contact"],
   Connect: ["Instagram", "Pinterest", "Dribbble"],
 };
-
-const HERO_METRICS = [
-  { value: 120, suffix: "+", label: "Material combinations" },
-  { value: 24, suffix: "/7", label: "Cloud design access" },
-  { value: 3, suffix: "D", label: "Presentation-ready staging" },
-];
 
 const MARQUEE_ITEMS = [
   "Interactive previews",
@@ -178,50 +191,6 @@ function TopNav({ navigate }) {
   );
 }
 
-function HeroMetric({ metric, reducedMotion }) {
-  const valueRef = useRef(null);
-
-  useEffect(() => {
-    if (!valueRef.current) return undefined;
-
-    if (reducedMotion) {
-      valueRef.current.textContent = metric.value;
-      return undefined;
-    }
-
-    const counter = { value: 0 };
-    const tween = gsap.to(counter, {
-      value: metric.value,
-      duration: 1.8,
-      ease: "power2.out",
-      scrollTrigger: {
-        trigger: valueRef.current,
-        start: "top 92%",
-        once: true,
-      },
-      onUpdate: () => {
-        if (valueRef.current) {
-          valueRef.current.textContent = Math.round(counter.value);
-        }
-      },
-    });
-
-    return () => tween.kill();
-  }, [metric.value, reducedMotion]);
-
-  return (
-    <article className="lm-metric-card">
-      <strong>
-        <span ref={valueRef}>0</span>
-        {metric.suffix}
-      </strong>
-      <p>{metric.label}</p>
-    </article>
-  );
-}
-
-import LandingScene from "./landing/LandingScene";
-
 function Hero({ navigate, reducedMotion }) {
   const rootRef = useRef(null);
   const bgRef = useRef(null);
@@ -230,11 +199,7 @@ function Hero({ navigate, reducedMotion }) {
   const titleRef = useRef(null);
   const copyRef = useRef(null);
   const actionsRef = useRef(null);
-  const statsRef = useRef(null);
-  const sceneRef = useRef(null);
-  
-  const [scrollProgress, setScrollProgress] = useState(0);
-  const pointerRef = useRef({ x: 0, y: 0 });
+  const inspectorRef = useRef(null);
 
   useEffect(() => {
     if (reducedMotion) return undefined;
@@ -249,8 +214,7 @@ function Hero({ navigate, reducedMotion }) {
         .from(titleWords, { opacity: 0, yPercent: 120, stagger: 0.12, duration: 0.8 }, 0.72)
         .from(copyRef.current, { opacity: 0, y: 20, duration: 0.7 }, 0.95)
         .from(actionsRef.current, { opacity: 0, y: 24, duration: 0.7 }, 1.08)
-        .from(statsRef.current, { opacity: 0, y: 24, duration: 0.7 }, 1.2)
-        .from(sceneRef.current, { opacity: 0, x: 52, duration: 1.4, ease: "power4.out" }, 1.15);
+        .from(inspectorRef.current, { opacity: 0, y: 32, duration: 0.9, ease: "power4.out" }, 1.2);
 
       gsap.to(auraRef.current, {
         backgroundPosition: "100% 50%",
@@ -274,9 +238,6 @@ function Hero({ navigate, reducedMotion }) {
     const onMove = (event) => {
       const nx = (event.clientX / window.innerWidth - 0.5) * 2;
       const ny = (event.clientY / window.innerHeight - 0.5) * 2;
-      
-      pointerRef.current.x = nx;
-      pointerRef.current.y = ny;
 
       xBg(nx * 12);
       yBg(ny * 8);
@@ -285,35 +246,6 @@ function Hero({ navigate, reducedMotion }) {
     window.addEventListener("mousemove", onMove, { passive: true });
     return () => window.removeEventListener("mousemove", onMove);
   }, [reducedMotion]);
-
-  useEffect(() => {
-    const ctx = gsap.context(() => {
-      gsap.to(bgRef.current, {
-        yPercent: 18,
-        ease: "none",
-        scrollTrigger: {
-          trigger: rootRef.current,
-          start: "top top",
-          end: "bottom top",
-          scrub: true,
-          onUpdate: (self) => setScrollProgress(self.progress)
-        },
-      });
-
-      gsap.to(".lm-hero-metrics", {
-        yPercent: -18,
-        ease: "none",
-        scrollTrigger: {
-          trigger: rootRef.current,
-          start: "top top",
-          end: "bottom top",
-          scrub: true,
-        },
-      });
-    }, rootRef);
-
-    return () => ctx.revert();
-  }, []);
 
   return (
     <section ref={rootRef} className="lm-hero" id="top">
@@ -330,21 +262,20 @@ function Hero({ navigate, reducedMotion }) {
 
           <h1 ref={titleRef} className="lm-hero-title">
             <span className="lm-title-line">
-              <span className="lm-title-word">Visualize</span>
-              <span className="lm-title-word">Your</span>
+              <span className="lm-title-word">Visualize </span>
+              <span className="lm-title-word">Your </span>
               <span className="lm-title-word">Space,</span>
             </span>
             <span className="lm-title-line lm-title-line-accent">
-              <span className="lm-title-word">Redefine</span>
-              <span className="lm-title-word">Your</span>
+              <span className="lm-title-word">Redefine </span>
+              <span className="lm-title-word">Your </span>
               <span className="lm-title-word">World.</span>
             </span>
           </h1>
 
           <p ref={copyRef} className="lm-hero-copy">
             The smartest web-based 3D interior design platform for modern creators. Build your
-            sanctuary with presentation-ready clarity and enough motion to feel alive from the
-            first scroll.
+            sanctuary in high-fidelity pixels.
           </p>
 
           <div ref={actionsRef} className="lm-hero-actions">
@@ -356,18 +287,28 @@ function Hero({ navigate, reducedMotion }) {
               Watch Demo
             </button>
           </div>
-
-          <div ref={statsRef} className="lm-hero-metrics">
-            {HERO_METRICS.map((metric) => (
-              <HeroMetric key={metric.label} metric={metric} reducedMotion={reducedMotion} />
-            ))}
-          </div>
-        </div>
-
-        <div ref={sceneRef} className="lm-hero-3d-container">
-          <LandingScene pointer={pointerRef.current} progress={scrollProgress} />
         </div>
       </div>
+
+      <aside ref={inspectorRef} className="lm-hero-floating-card" aria-label="Material inspector preview">
+        <div className="lm-inspector-head">
+          <h4>Design Snapshot</h4>
+          <SettingOutlined />
+        </div>
+        <div className="lm-inspector-material">
+          <div className="lm-budget-icon">
+            <span className="material-symbols-outlined">view_in_ar</span>
+          </div>
+          <div>
+            <p>Living Room Plan</p>
+            <span>Furniture + lighting ready</span>
+          </div>
+        </div>
+        <div className="lm-inspector-progress">
+          <span />
+        </div>
+        <p className="lm-inspector-status">Preparing real-time room preview...</p>
+      </aside>
     </section>
   );
 }
@@ -770,8 +711,8 @@ function Workflow() {
       <div className="lm-workflow-glow" />
       <div className="lm-shell">
         <div className="lm-workflow-head">
-          <h2>Master Your Vision.</h2>
-          <p>The three-step workflow</p>
+          <h2>Master Your Interior Design Vision.</h2>
+          <p>The three-step room planning workflow - from sketch to stunning 3D visualization.</p>
         </div>
         <div className="lm-workflow-progress">
           <span />
@@ -821,8 +762,8 @@ function CTA({ navigate }) {
       <div className="lm-cta-orb lm-cta-orb-right" />
       <div className="lm-shell">
         <div className="lm-cta-inner">
-          <h2>Ready to bring your vision to life?</h2>
-          <p>Join Lumiere Maison and transform the way you present interior design.</p>
+          <h2>Ready to design your perfect space?</h2>
+          <p>Join Lumiere Maison - the online 3D interior design and room planner built for modern living.</p>
           <div className="lm-hero-actions" style={{ justifyContent: "center" }}>
             <button className="lm-button lm-button-primary" onClick={() => navigate("/register")}>
               Get Started
@@ -864,7 +805,7 @@ function Footer() {
       <div className="lm-shell lm-footer-grid">
         <div className="lm-footer-brand">
           <span>Lumiere Maison</span>
-          <p>Crafted for digital ateliers. Pioneering the future of architectural interaction.</p>
+          <p>A premium 3D interior design and room planning platform. Design, visualize, and customize beautiful spaces online - from layout to fully-rendered room.</p>
         </div>
         {Object.entries(FOOTER_GROUPS).map(([title, items]) => (
           <div key={title} className="lm-footer-column">
@@ -880,7 +821,7 @@ function Footer() {
         ))}
       </div>
       <div className="lm-shell lm-footer-bottom">
-        <p>© 2026 Lumiere Maison. Crafted for digital ateliers.</p>
+        <p>(c) 2026 Lumiere Maison. Crafted for digital ateliers.</p>
         <div className="lm-footer-status">
           <span />
           <strong>System Status: Optimal</strong>
@@ -907,20 +848,15 @@ export default function LandingPage() {
     >
       <TopNav navigate={navigate} />
       <main>
-        <ScrollExpandMedia
-          mediaType="image"
-          mediaSrc={landingBg}
-          bgImageSrc={landingBg2}
-          textBlend={true}
-        >
-          <MotionStrip reducedMotion={reducedMotion} />
-          <Showcase />
-          <Features />
-          <Workflow />
-          <CTA navigate={navigate} />
-        </ScrollExpandMedia>
+        <Hero navigate={navigate} reducedMotion={reducedMotion} />
+        <MotionStrip reducedMotion={reducedMotion} />
+        <Showcase />
+        <Features />
+        <Workflow />
+        <CTA navigate={navigate} />
       </main>
       <Footer />
     </div>
   );
 }
+

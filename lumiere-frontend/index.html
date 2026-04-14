@@ -1,39 +1,70 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Lumiere Maison is an interior design platform for planning rooms, previewing layouts in 3D, and exploring furniture ideas before you buy."
-    />
-    <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://lumiere-maison.site/" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Lumiere Maison" />
-    <meta
-      property="og:description"
-      content="Plan, visualize, and refine your interior design ideas with Lumiere Maison."
-    />
-    <meta property="og:url" content="https://lumiere-maison.site/" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Lumiere Maison" />
-    <meta
-      name="twitter:description"
-      content="Plan, visualize, and refine your interior design ideas with Lumiere Maison."
-    />
-    <title>Lumiere Maison | Interior Design Platform</title>
 
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
 
-  </body>
+  <title>Lumiere Maison &ndash; 3D Interior Design &amp; Room Planner</title>
+  <meta name="description"
+    content="Design, customize, and visualize your interiors online with Lumiere Maison. Plan rooms in 3D, place furniture, explore layouts, and build beautiful spaces with ease." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.lumiere-maison.site/" />
+
+  <meta property="og:title" content="Lumiere Maison - 3D Interior Design &amp; Room Planner" />
+  <meta property="og:description" content="Design, customize, and visualize your interiors online with Lumiere Maison." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.lumiere-maison.site/" />
+  <meta property="og:site_name" content="Lumiere Maison" />
+  <meta property="og:image" content="https://www.lumiere-maison.site/og-preview.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Lumiere Maison interior design and 3D room planning platform" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Lumiere Maison - 3D Interior Design &amp; Room Planner" />
+  <meta name="twitter:description" content="Plan rooms in 3D, place furniture, and visualize beautiful interiors online." />
+  <meta name="twitter:image" content="https://www.lumiere-maison.site/og-preview.png" />
+
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#1f1a17" />
+
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "name": "Lumiere Maison",
+      "alternateName": "Lumiere",
+      "url": "https://www.lumiere-maison.site/"
+    },
+    {
+      "@type": "Organization",
+      "name": "Lumiere Maison",
+      "url": "https://www.lumiere-maison.site/",
+      "logo": "https://www.lumiere-maison.site/logo-512.png"
+    }
+  ]
+}
+  </script>
+
+  <!-- Add Google Search Console verification here after Google provides the token. -->
+  <!-- <meta name="google-site-verification" content="PASTE_YOUR_VERIFICATION_CODE_HERE" /> -->
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+</body>
+
 </html>

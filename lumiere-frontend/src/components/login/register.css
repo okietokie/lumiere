@@ -21,6 +21,8 @@
     var(--lm-bg);
   color: var(--lm-on-surface);
   font-family: "Inter", sans-serif;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .lm-register-header {
@@ -86,6 +88,7 @@
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
+  align-items: stretch;
 }
 
 .lm-register-visual,
@@ -182,6 +185,7 @@
   align-items: center;
   justify-content: center;
   padding: 7rem 1.5rem 3rem;
+  overflow-y: auto;
   background:
     radial-gradient(circle at top, rgba(0, 218, 243, 0.05), transparent 30%),
     linear-gradient(180deg, rgba(19, 19, 19, 0.9), rgba(19, 19, 19, 1));

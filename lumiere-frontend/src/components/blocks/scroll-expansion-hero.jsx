@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useRef, useState } from 'react';
+import { motion as Motion } from 'framer-motion';
 import { MoveRight, PlayCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { COLORS } from "@/utils/colors";
@@ -15,7 +15,6 @@ const titles = [
 ];
 
 const ScrollExpandMedia = ({
-  mediaType = 'image',
   mediaSrc,
   bgImageSrc,
   textBlend = true,
@@ -24,13 +23,12 @@ const ScrollExpandMedia = ({
   const navigate = useNavigate();
   const [scrollProgress, setScrollProgress] = useState(0);
   const [showContent, setShowContent] = useState(false);
-  const [mediaFullyExpanded, setMediaFullyExpanded] = useState(false);
-  const [touchStartY, setTouchStartY] = useState(0);
   const [isMobileState, setIsMobileState] = useState(false);
 
   const [titleNumber, setTitleNumber] = useState(0);
 
   const sectionRef = useRef(null);
+  const runwayRef = useRef(null);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -44,92 +42,43 @@ const ScrollExpandMedia = ({
   }, [titleNumber]);
 
   useEffect(() => {
-    setScrollProgress(0);
-    setShowContent(false);
-    setMediaFullyExpanded(false);
-  }, [mediaType]);
+    let frameId = 0;
 
-  useEffect(() => {
-    const handleWheel = (e) => {
-      if (mediaFullyExpanded && e.deltaY < 0 && window.scrollY <= 5) {
-        setMediaFullyExpanded(false);
-        e.preventDefault();
-      } else if (!mediaFullyExpanded) {
-        e.preventDefault();
-        const scrollDelta = e.deltaY * 0.0009;
-        const newProgress = Math.min(
-          Math.max(scrollProgress + scrollDelta, 0),
-          1
-        );
-        setScrollProgress(newProgress);
+    const updateFromScroll = () => {
+      frameId = 0;
+      const runway = runwayRef.current;
+      const sectionTop = runway?.offsetTop ?? sectionRef.current?.offsetTop ?? 0;
+      const scrollDistance = Math.max(
+        (runway?.offsetHeight ?? window.innerHeight * 1.9) - window.innerHeight,
+        window.innerHeight * 0.85,
+        1
+      );
+      const nextProgress = Math.min(
+        Math.max((window.scrollY - sectionTop) / scrollDistance, 0),
+        1
+      );
 
-        if (newProgress >= 1) {
-          setMediaFullyExpanded(true);
-          setShowContent(true);
-        } else if (newProgress < 0.75) {
-          setShowContent(false);
-        }
-      }
-    };
-
-    const handleTouchStart = (e) => {
-      setTouchStartY(e.touches[0].clientY);
-    };
-
-    const handleTouchMove = (e) => {
-      if (!touchStartY) return;
-
-      const touchY = e.touches[0].clientY;
-      const deltaY = touchStartY - touchY;
-
-      if (mediaFullyExpanded && deltaY < -20 && window.scrollY <= 5) {
-        setMediaFullyExpanded(false);
-        e.preventDefault();
-      } else if (!mediaFullyExpanded) {
-        e.preventDefault();
-        const scrollFactor = deltaY < 0 ? 0.008 : 0.005;
-        const scrollDelta = deltaY * scrollFactor;
-        const newProgress = Math.min(
-          Math.max(scrollProgress + scrollDelta, 0),
-          1
-        );
-        setScrollProgress(newProgress);
-
-        if (newProgress >= 1) {
-          setMediaFullyExpanded(true);
-          setShowContent(true);
-        } else if (newProgress < 0.75) {
-          setShowContent(false);
-        }
-
-        setTouchStartY(touchY);
-      }
-    };
-
-    const handleTouchEnd = () => {
-      setTouchStartY(0);
+      setScrollProgress(nextProgress);
+      setShowContent(nextProgress >= 0.7);
     };
 
     const handleScroll = () => {
-      if (!mediaFullyExpanded) {
-        window.scrollTo(0, 0);
-      }
+      if (frameId) return;
+      frameId = window.requestAnimationFrame(updateFromScroll);
     };
 
-    window.addEventListener('wheel', handleWheel, { passive: false });
-    window.addEventListener('scroll', handleScroll);
-    window.addEventListener('touchstart', handleTouchStart, { passive: false });
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd);
+    updateFromScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
 
     return () => {
-      window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('touchstart', handleTouchStart);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('resize', handleScroll);
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
     };
-  }, [scrollProgress, mediaFullyExpanded, touchStartY]);
+  }, []);
 
   useEffect(() => {
     const checkIfMobile = () => {
@@ -151,9 +100,12 @@ const ScrollExpandMedia = ({
       ref={sectionRef}
       className='transition-colors duration-700 ease-in-out overflow-x-hidden w-full'
     >
-      <section className='relative flex flex-col items-center justify-start min-h-[100dvh]'>
-        <div className='relative w-full flex flex-col items-center min-h-[100dvh]'>
-          <motion.div
+      <section
+        ref={runwayRef}
+        className='relative h-[190dvh] min-h-[1200px]'
+      >
+        <div className='sticky top-0 w-full h-[100dvh] overflow-hidden'>
+          <Motion.div
             className='absolute inset-0 z-0 h-full'
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 - scrollProgress }}
@@ -169,10 +121,10 @@ const ScrollExpandMedia = ({
               }}
             />
             <div className='absolute inset-0 bg-black/60' />
-          </motion.div>
+          </Motion.div>
 
-          <div className='w-full flex flex-col items-center justify-start relative z-10'>
-            <div className='flex flex-col items-center justify-center w-full h-[100dvh] relative'>
+          <div className='w-full h-full flex flex-col items-center justify-start relative z-10'>
+            <div className='flex flex-col items-center justify-center w-full h-full relative'>
 
               <div
                 className='absolute z-0 top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 transition-none rounded-2xl'
@@ -190,7 +142,7 @@ const ScrollExpandMedia = ({
                     alt="Media content"
                     className='w-full h-full object-cover rounded-xl'
                   />
-                  <motion.div
+                  <Motion.div
                     className='absolute inset-0 bg-black/50 rounded-xl'
                     initial={{ opacity: 0.8 }}
                     animate={{ opacity: 0.5 - scrollProgress * 0.4 }}
@@ -204,7 +156,7 @@ const ScrollExpandMedia = ({
                 className="flex items-center justify-center text-center gap-4 md:gap-8 w-full relative z-10 transition-none flex-col"
                 style={{ pointerEvents: scrollProgress > 0.5 ? 'none' : 'auto' }}
               >
-                <motion.div
+                <Motion.div
                   className={`flex flex-col items-center justify-center gap-8 w-full max-w-4xl mx-auto ${textBlend ? 'mix-blend-lighten' : 'mix-blend-normal'}`}
                   style={{ transform: `translateX(-${textTranslateX}vw)` }}
                 >
@@ -214,15 +166,15 @@ const ScrollExpandMedia = ({
                   >
                     Lumiere Maison
                   </h1>
-                </motion.div>
+                </Motion.div>
 
-                <motion.div
+                <Motion.div
                   className='flex flex-col items-center gap-6 mt-4 w-full h-32'
                   style={{ transform: `translateX(${textTranslateX}vw)` }}
                 >
                   <div className={`relative flex w-full justify-center items-center text-center overflow-hidden h-20 px-4 ${textBlend ? 'mix-blend-lighten' : 'mix-blend-normal'}`}>
                     {titles.map((title, index) => (
-                      <motion.h2
+                      <Motion.h2
                         key={index}
                         className="absolute w-full max-w-[calc(100vw-2rem)] px-4 text-lg sm:text-2xl md:text-4xl lg:text-5xl font-medium tracking-normal leading-tight"
                         style={{ color: COLORS.text }}
@@ -235,7 +187,7 @@ const ScrollExpandMedia = ({
                         }
                       >
                         {title}
-                      </motion.h2>
+                      </Motion.h2>
                     ))}
                   </div>
 
@@ -283,23 +235,23 @@ const ScrollExpandMedia = ({
                       </span>
                     </button>
                   </div>
-                </motion.div>
+                </Motion.div>
               </div>
             </div>
-
-            <motion.section
-              className='flex flex-col w-full'
-              initial={{ opacity: 0, y: 100 }}
-              animate={{ opacity: showContent ? 1 : 0, y: showContent ? 0 : 100 }}
-              transition={{ duration: 0.8, delay: 0.2 }}
-            >
-              <div className="w-full min-h-screen pt-20" style={{ backgroundColor: COLORS.background }}>
-                {children}
-              </div>
-            </motion.section>
           </div>
         </div>
       </section>
+
+      <Motion.section
+        className='flex flex-col w-full'
+        initial={{ opacity: 0, y: 100 }}
+        animate={{ opacity: showContent ? 1 : 0, y: showContent ? 0 : 100 }}
+        transition={{ duration: 0.8, delay: 0.2 }}
+      >
+        <div className="w-full min-h-screen pt-20" style={{ backgroundColor: COLORS.background }}>
+          {children}
+        </div>
+      </Motion.section>
     </div>
   );
 };
