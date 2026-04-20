@@ -302,7 +302,7 @@ const InteractiveWall = React.forwardRef(({
     }
     setOrbitEnabled(false);
 
-    const origin = getGroundPos(e.clientX, e.clientY);
+    const origin = getWallPlanePos(e.clientX, e.clientY);
     if (!origin) return;
 
     openingDragState.current = {
@@ -317,7 +317,7 @@ const InteractiveWall = React.forwardRef(({
     const onMove = (ev) => {
       const ds = openingDragState.current;
       if (!ds) return;
-      const pos = getGroundPos(ev.clientX, ev.clientY);
+      const pos = getWallPlanePos(ev.clientX, ev.clientY);
       if (!pos) return;
       const rawOffset = projectOffsetAlongWall(pos);
 

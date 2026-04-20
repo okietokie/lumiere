@@ -23,6 +23,7 @@ import {
   DownOutlined,
   LoginOutlined,
   LogoutOutlined,
+  SwapOutlined,
   CheckOutlined,
   CloseOutlined,
   LoadingOutlined,
@@ -134,6 +135,12 @@ const DOOR_STYLE_OPTIONS = [
   { key: 'sliding', label: 'Single Sliding Door' },
   { key: 'double', label: 'Double Hinged Door' },
 ];
+const WINDOW_STYLE_OPTIONS = [
+  { key: 'sliding', label: 'Sliding Window' },
+  { key: 'triple-sliding', label: '3-Panel Sliding Window' },
+  { key: 'casement', label: 'Casement Window' },
+  { key: 'fixed', label: 'Fixed Window' },
+];
 
 const ROOM_ACTION_BUTTONS = [
   { key: 'wall', icon: SpaceDashboardRoundedIcon, label: 'Add Wall' },
@@ -171,6 +178,29 @@ function formatMeasurement(value, suffix = '') {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return `0${suffix}`;
   return `${Number(numericValue.toFixed(2))}${suffix}`;
+}
+
+function getDoorStyleUpdates(opening, nextStyle) {
+  if (nextStyle === 'sliding') {
+    return {
+      doorStyle: nextStyle,
+      panelCount: 1,
+      slideDirection: opening?.slideDirection ?? 'right',
+    };
+  }
+
+  if (nextStyle === 'double') {
+    return {
+      doorStyle: nextStyle,
+      panelCount: 2,
+    };
+  }
+
+  return {
+    doorStyle: nextStyle,
+    panelCount: 1,
+    hingeSide: opening?.hingeSide ?? 'left',
+  };
 }
 
 function hasTooManyBudgetDecimals(value) {
@@ -587,7 +617,6 @@ export default function RoomScene({ initialScene = null }) {
   const [budgetSummaryExpanded, setBudgetSummaryExpanded] = useState(false);
   const [wallsHidden,         setWallsHidden]         = useState(false);
   const [ceilingHidden,       setCeilingHidden]       = useState(false);
-  const [sceneControlsMenuOpen, setSceneControlsMenuOpen] = useState(false);
   const [wallToolbarPinned,   setWallToolbarPinned]   = useState(false);
   const [furnitureToolbarPinned, setFurnitureToolbarPinned] = useState(false);
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
@@ -937,10 +966,6 @@ export default function RoomScene({ initialScene = null }) {
   const toggleCeilingHidden = useCallback(() => {
     setCeilingHidden((prev) => !prev);
   }, []);
-  const handleSwitchTo2DFromMenu = useCallback(() => {
-    setSceneControlsMenuOpen(false);
-    switchTo2D();
-  }, [switchTo2D]);
   const recorder = useRecorder({
     canvasWrapperRef,         
     orbitControlsRef,         
@@ -1685,13 +1710,6 @@ export default function RoomScene({ initialScene = null }) {
   }, [desktopPanelOpen, isMobile]);
 
   useEffect(() => {
-    if (!sceneControlsMenuOpen) return undefined;
-    const onPointerDown = () => setSceneControlsMenuOpen(false);
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [sceneControlsMenuOpen]);
-
-  useEffect(() => {
     if (!roomCreation.pendingRoomCreation) return undefined;
 
     const onPointerDown = (event) => {
@@ -1791,6 +1809,26 @@ export default function RoomScene({ initialScene = null }) {
     ).toFixed(2));
     updateWallOpening(openingContextMenu.wallId, openingContextMenu.type, openingContextMenu.id, { width: nextWidth });
   }, [contextMenuOpeningEntity, getOpeningBounds, openingContextMenu, updateWallOpening]);
+
+  const contextMenuStyleOptions = useMemo(() => {
+    if (!openingContextMenu) return [];
+    return openingContextMenu.type === 'door' ? DOOR_STYLE_OPTIONS : WINDOW_STYLE_OPTIONS;
+  }, [openingContextMenu]);
+
+  const contextMenuActiveStyle = openingContextMenu?.type === 'door'
+    ? (contextMenuOpeningEntity?.doorStyle ?? 'hinged')
+    : (contextMenuOpeningEntity?.windowStyle ?? 'sliding');
+
+  const applyOpeningStyleFromContext = useCallback((styleKey) => {
+    if (!openingContextMenu || !contextMenuOpeningEntity) return;
+
+    const updates = openingContextMenu.type === 'door'
+      ? getDoorStyleUpdates(contextMenuOpeningEntity, styleKey)
+      : { windowStyle: styleKey };
+
+    updateWallOpening(openingContextMenu.wallId, openingContextMenu.type, openingContextMenu.id, updates);
+    setOpeningContextMenu(null);
+  }, [contextMenuOpeningEntity, openingContextMenu, updateWallOpening]);
 
   const updateOpeningNumericField = useCallback((field, rawValue) => {
     if (!selectedOpening || !selectedOpeningEntity) return;
@@ -2041,15 +2079,6 @@ export default function RoomScene({ initialScene = null }) {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'door') return null;
 
     const selectedDoorStyle = selectedOpeningEntity.doorStyle ?? 'hinged';
-    const getDoorStyleUpdates = (nextStyle) => {
-      if (nextStyle === 'sliding') {
-        return { doorStyle: nextStyle, panelCount: 1, slideDirection: selectedOpeningEntity.slideDirection ?? 'right' };
-      }
-      if (nextStyle === 'double') {
-        return { doorStyle: nextStyle, panelCount: 2 };
-      }
-      return { doorStyle: nextStyle, panelCount: 1, hingeSide: selectedOpeningEntity.hingeSide ?? 'left' };
-    };
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
@@ -2077,7 +2106,7 @@ export default function RoomScene({ initialScene = null }) {
                 lineHeight: 1.2,
                 whiteSpace: 'normal',
               }}
-              onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, getDoorStyleUpdates(option.key))}
+              onClick={() => updateWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id, getDoorStyleUpdates(selectedOpeningEntity, option.key))}
             >
               {option.label}
             </button>
@@ -2090,20 +2119,13 @@ export default function RoomScene({ initialScene = null }) {
   const renderWindowTypeControls = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
 
-    const options = [
-      { key: 'sliding', label: 'Sliding' },
-      { key: 'triple-sliding', label: '3-Panel Sliding' },
-      { key: 'casement', label: 'Casement' },
-      { key: 'fixed', label: 'Fixed' },
-    ];
-
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
           Window Type
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-          {options.map((option) => (
+          {WINDOW_STYLE_OPTIONS.map((option) => (
             <button
               key={option.key}
               type="button"
@@ -3013,9 +3035,13 @@ export default function RoomScene({ initialScene = null }) {
     }
     setActiveTool(openingType);
     setSelectedOpening(null);
+    setMobileDoorEditorSection(null);
     setOpeningPreview(buildOpeningPreview(selectedWall, openingType));
     setActiveTab('walls');
-  }, [buildOpeningPreview, selectedWall, toast]);
+    if (isMobile) {
+      setMobilePanelOpen(false);
+    }
+  }, [buildOpeningPreview, isMobile, selectedWall, toast]);
 
   const updateOpeningPreview = useCallback((wall, openingType, point) => {
     if (!wall || activeTool !== openingType) return;
@@ -3612,7 +3638,7 @@ export default function RoomScene({ initialScene = null }) {
           bottom: isMobile ? 84 : 'auto',
           transform: isMobile ? 'none' : 'translateX(-50%)',
           zIndex: 80,
-          display: isMobile ? 'flex' : 'none',
+          display: isMobile ? 'none' : 'flex',
           flexDirection: isMobile ? 'column-reverse' : 'column',
           alignItems: isMobile ? 'flex-end' : 'center',
           gap: isMobile ? 8 : 10,
@@ -4453,6 +4479,8 @@ export default function RoomScene({ initialScene = null }) {
           <MobileTopBar
             projectName={projectSave.projectName}
             cameraMode={cameraMode}
+            editorMode="3D"
+            onSwitchEditor={() => { if (!isSaving) switchTo2D(); }}
             onCameraToggle={() => {
               if (isSaving) return;
               if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }
@@ -4465,13 +4493,6 @@ export default function RoomScene({ initialScene = null }) {
           <BottomNav
             activeTab={activeTab}
             onTabChange={(tab) => { if (!isSaving) openMobilePanel(tab); }}
-            onSave={() => { if (!isSaving) setSaveModalOpen(true); }}
-            onDashboard={() => { if (!isSaving) handleDashboard(); }}
-            onLogout={() => { if (!isSaving) handleLogout(); }}
-            canUndo={canUndo && !isSaving} canRedo={canRedo && !isSaving}
-            onUndo={() => { if (!isSaving) undo(); }}
-            onRedo={() => { if (!isSaving) redo(); }}
-            showRoomTab={Boolean(selectedRoom)}
           />
           {selectedOpeningEntity && (
             <div
@@ -4482,13 +4503,14 @@ export default function RoomScene({ initialScene = null }) {
                 bottom: 92,
                 zIndex: 1000,
                 padding: '12px',
-                borderRadius: 20,
+                borderRadius: 8,
                 maxWidth: 420,
-                maxHeight: selectedOpening?.type === 'door' ? 'auto' : '22vh',
+                maxHeight: 'min(42vh, calc(100dvh - 180px))',
                 margin: '0 auto',
                 ...openingPanelTone,
                 backdropFilter: 'blur(14px)',
-                overflow: 'hidden',
+                overflowY: 'auto',
+                WebkitOverflowScrolling: 'touch',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 8,
@@ -4511,7 +4533,7 @@ export default function RoomScene({ initialScene = null }) {
               {selectedOpening?.type === 'door' ? (
                 renderMobileDoorEditor()
               ) : (
-                <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {renderOpeningDimensionInputs()}
                   {renderWindowTypeControls()}
                   {renderWindowBehaviorControls()}
@@ -4527,9 +4549,10 @@ export default function RoomScene({ initialScene = null }) {
               activeTab === 'walls'     ? 'Walls' :
               activeTab === 'materials' ? 'Materials & Style' :
               activeTab === 'lighting'  ? 'Lighting' :
-              activeTab === 'projects'  ? 'Projects' : 'Furniture'
+              activeTab === 'projects'  ? 'Projects' :
+              activeTab === 'more'      ? 'More' : 'Furniture'
             }
-            height={activeTab === 'furniture' || activeTab === 'projects' ? '82vh' : activeTab === 'room' ? '76vh' : '72vh'}
+            height={activeTab === 'furniture' || activeTab === 'projects' || activeTab === 'more' ? '82vh' : activeTab === 'room' ? '76vh' : '72vh'}
           >
             {activeTab === 'room' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -4583,6 +4606,117 @@ export default function RoomScene({ initialScene = null }) {
                 deleteProject={projectSave.deleteProject}
                 createNewProject={handleCreateNewProject}
               />
+            )}
+            {activeTab === 'more' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                  <button type="button" className="room-mobile-action-tile" onClick={() => setSaveModalOpen(true)}>
+                    <SaveOutlined />
+                    <span>Save</span>
+                  </button>
+                  <button type="button" className="room-mobile-action-tile" onClick={switchTo2D}>
+                    <SpaceDashboardRoundedIcon style={{ fontSize: 18 }} />
+                    <span>2D Plan</span>
+                  </button>
+                  <button type="button" className="room-mobile-action-tile" disabled={!canUndo || isSaving} onClick={undo}>
+                    <UndoOutlined />
+                    <span>Undo</span>
+                  </button>
+                  <button type="button" className="room-mobile-action-tile" disabled={!canRedo || isSaving} onClick={redo}>
+                    <RedoOutlined />
+                    <span>Redo</span>
+                  </button>
+                </div>
+
+                {selectedRoom && renderRoomActionPanel('mobile')}
+
+                <div className="room-mobile-section">
+                  <div className="room-mobile-section-title">View</div>
+                  <div className="room-segmented room-segmented-compact">
+                    <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
+                      Orbit
+                    </button>
+                    <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}>
+                      Walk
+                    </button>
+                  </div>
+                  <div className="room-view-strip">
+                    {Object.keys(CAMERA_PRESETS).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
+                        onClick={() => applyCameraPreset(k)}
+                      >
+                        {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="room-mobile-section">
+                  <div className="room-mobile-section-title">Scene</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                    <button type="button" className={wallsHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleWallsHidden}>
+                      <ColumnWidthOutlined />
+                      <span>{wallsHidden ? 'Show walls' : 'Hide walls'}</span>
+                    </button>
+                    <button type="button" className={ceilingHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleCeilingHidden}>
+                      <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
+                      <span>{ceilingHidden ? 'Show ceiling' : 'Hide ceiling'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="room-mobile-section">
+                  <div className="room-mobile-section-title">Budget</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                    <button type="button" className={budgetEnabled ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={() => handleBudgetActivationChange(!budgetEnabled)}>
+                      <WalletOutlined />
+                      <span>{budgetEnabled ? 'Budget on' : 'Budget off'}</span>
+                    </button>
+                    <button type="button" className="room-mobile-action-tile" disabled={!budgetEnabled} onClick={() => setBudgetSummaryOpen((open) => !open)}>
+                      <WalletOutlined />
+                      <span>{formatMoney(budgetGrandTotal, budgetSummary.currency)}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {budgetEnabled && budgetSummaryOpen && (
+                  <div className="room-mobile-section">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                      <span style={{ color: `${COLORS.text}B8` }}>Unpriced items</span>
+                      <strong style={{ color: budgetUnpricedCount > 0 ? '#ffd09a' : COLORS.text }}>{budgetUnpricedCount}</strong>
+                    </div>
+                    <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+                      {budgetCategoryRows.map(([label, total]) => (
+                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                          <span style={{ color: `${COLORS.text}B8` }}>{label}</span>
+                          <strong style={{ color: COLORS.text }}>{formatMoney(total, budgetSummary.currency)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="room-mobile-section">
+                  <div className="room-mobile-section-title">Project</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                    <button type="button" className="room-mobile-action-tile" onClick={() => setActiveTab('projects')}>
+                      <FolderOpenOutlined />
+                      <span>Projects</span>
+                    </button>
+                    <button type="button" className="room-mobile-action-tile" onClick={handleDashboard}>
+                      <AppstoreOutlined />
+                      <span>Dashboard</span>
+                    </button>
+                    <button type="button" className="room-mobile-action-tile is-danger" onClick={handleLogout}>
+                      <LogoutOutlined />
+                      <span>Logout</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </SlidePanel>
         </>
@@ -5049,82 +5183,12 @@ export default function RoomScene({ initialScene = null }) {
         <PreviewPortal />
   
       {/*  Spatial score panel  */}
-      <ScorePanel
-        score={spatial.score}
-        suggestions={spatial.suggestions}
-        visible={placedItems.length > 0}
-      />
-
-      {isMobile && (
-        <div
-          className="room-scene-controls-menu"
-          onPointerDown={(event) => event.stopPropagation()}
-          style={{
-            right: placedItems.length > 0 ? 248 : 16,
-          }}
-        >
-          {sceneControlsMenuOpen && (
-            <div className="room-scene-controls-popover" role="menu" aria-label="Scene visibility controls">
-              <button
-                type="button"
-                className={wallsHidden ? 'room-bubble-action is-active' : 'room-bubble-action'}
-                onClick={toggleWallsHidden}
-                disabled={isSaving}
-                role="menuitem"
-              >
-                <span className="room-bubble-visual">
-                  <ColumnWidthOutlined />
-                </span>
-                <span className="room-bubble-copy">
-                  <span>{wallsHidden ? 'Show walls' : 'Hide walls'}</span>
-                  <small>Wall visibility</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={ceilingHidden ? 'room-bubble-action is-active' : 'room-bubble-action'}
-                onClick={toggleCeilingHidden}
-                disabled={isSaving}
-                role="menuitem"
-              >
-                <span className="room-bubble-visual">
-                  <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
-                </span>
-                <span className="room-bubble-copy">
-                  <span>{ceilingHidden ? 'Show ceiling' : 'Hide ceiling'}</span>
-                  <small>Ceiling visibility</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className="room-bubble-action"
-                onClick={handleSwitchTo2DFromMenu}
-                disabled={isSaving}
-                role="menuitem"
-              >
-                <span className="room-bubble-visual">
-                  <SpaceDashboardRoundedIcon style={{ fontSize: 18 }} />
-                </span>
-                <span className="room-bubble-copy">
-                  <span>Switch to 2D</span>
-                  <small>Plan editor</small>
-                </span>
-              </button>
-            </div>
-          )}
-          <button
-            type="button"
-            className={sceneControlsMenuOpen ? 'room-three-dot-menu is-open' : 'room-three-dot-menu'}
-            aria-label={sceneControlsMenuOpen ? 'Close scene controls' : 'Open scene controls'}
-            aria-expanded={sceneControlsMenuOpen}
-            onClick={() => setSceneControlsMenuOpen((open) => !open)}
-            disabled={isSaving}
-          >
-            <span />
-            <span />
-            <span />
-          </button>
-        </div>
+      {!isMobile && (
+        <ScorePanel
+          score={spatial.score}
+          suggestions={spatial.suggestions}
+          visible={placedItems.length > 0}
+        />
       )}
 
       {elementContextMenu && (
@@ -5246,6 +5310,89 @@ export default function RoomScene({ initialScene = null }) {
               +
             </button>
           </div>
+          <button
+            type="button"
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={Boolean(openingContextMenu.styleMenuOpen)}
+            onClick={() => {
+              setOpeningContextMenu((prev) => (
+                prev ? { ...prev, styleMenuOpen: !prev.styleMenuOpen } : prev
+              ));
+            }}
+            style={{
+              width: '100%',
+              minHeight: 38,
+              border: 0,
+              borderRadius: 8,
+              background: openingContextMenu.styleMenuOpen ? 'rgba(196,154,108,0.22)' : 'rgba(255,255,255,0.07)',
+              color: COLORS.text,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              padding: '0 12px',
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: 'pointer',
+              marginBottom: 8,
+            }}
+          >
+            <span>Choose different style</span>
+            <RightOutlined style={{ fontSize: 11 }} />
+          </button>
+          {openingContextMenu.styleMenuOpen && (
+            <div
+              role="menu"
+              aria-label={`Choose ${openingContextMenu.type} style`}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                position: 'fixed',
+                left: Math.max(12, Math.min(openingContextMenu.x + 178, window.innerWidth - 236)),
+                top: Math.max(12, Math.min(openingContextMenu.y + 54, window.innerHeight - ((contextMenuStyleOptions.length * 42) + 28))),
+                zIndex: 1701,
+                minWidth: 220,
+                padding: 8,
+                borderRadius: 12,
+                background: `${COLORS.background}FA`,
+                border: `1px solid ${COLORS.secondary}66`,
+                boxShadow: '0 18px 44px rgba(0,0,0,0.36)',
+                backdropFilter: 'blur(16px)',
+              }}
+            >
+              {contextMenuStyleOptions.map((option) => {
+                const active = contextMenuActiveStyle === option.key;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => applyOpeningStyleFromContext(option.key)}
+                    style={{
+                      width: '100%',
+                      minHeight: 38,
+                      border: 0,
+                      borderRadius: 8,
+                      background: active ? 'rgba(196,154,108,0.2)' : 'transparent',
+                      color: COLORS.text,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                      padding: '0 12px',
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span>{option.label}</span>
+                    {active && <CheckOutlined style={{ color: COLORS.action, fontSize: 12 }} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {budgetEnabled && (
             <button
               type="button"
@@ -6322,6 +6469,51 @@ export default function RoomScene({ initialScene = null }) {
         .room-secondary-chip.is-danger:hover {
           border-color: rgba(255, 107, 107, 0.8);
           color: #ff8d8d;
+        }
+        .room-mobile-section {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          padding: 12px;
+          border-radius: 8px;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(196, 154, 108, 0.18);
+        }
+        .room-mobile-section-title {
+          color: ${COLORS.action};
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .room-mobile-action-tile {
+          min-height: 48px;
+          border: 1px solid rgba(196, 154, 108, 0.24);
+          border-radius: 8px;
+          background: rgba(255,255,255,0.055);
+          color: ${COLORS.text};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 8px 10px;
+          font-size: 12px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .room-mobile-action-tile.is-active {
+          color: ${COLORS.action};
+          background: rgba(196, 154, 108, 0.16);
+          border-color: rgba(196, 154, 108, 0.5);
+        }
+        .room-mobile-action-tile.is-danger {
+          color: #ffb3ad;
+          border-color: rgba(255, 91, 91, 0.28);
+          background: rgba(255, 91, 91, 0.1);
+        }
+        .room-mobile-action-tile:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
         }
         .room-input-unit {
           display: inline-flex;

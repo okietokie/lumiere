@@ -21,6 +21,27 @@ import axiosClient from "../../api/axiosClient";
 import { clearAuthSession } from "../../utils/authStorage";
 import "./RoomCanvas.css";
 
+const MIN_STAGE_SCALE = 0.25;
+const MAX_STAGE_SCALE = 4;
+const FIT_PADDING = 56;
+
+function clampStageScale(value) {
+  return Math.max(MIN_STAGE_SCALE, Math.min(MAX_STAGE_SCALE, value));
+}
+
+function getTouchDistance(touches) {
+  const [a, b] = touches;
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+function getTouchCenter(touches, rect) {
+  const [a, b] = touches;
+  return {
+    x: ((a.clientX + b.clientX) / 2) - rect.left,
+    y: ((a.clientY + b.clientY) / 2) - rect.top,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Procedural floor texture — drawn on a hidden canvas, used as Konva pattern
 // No external image files needed.
@@ -350,23 +371,30 @@ function FurnitureShape({ item, isSelected, onSelect, onDragMove, onDragEnd }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid
 // ─────────────────────────────────────────────────────────────────────────────
-function GridLayer({ width, height, gridPx, snapEnabled }) {
+function GridLayer({ width, height, gridPx, snapEnabled, view = { x: 0, y: 0, scale: 1 } }) {
   const MAJOR = gridPx * 5, lines = [], dots = [];
-  for (let x = 0; x <= width; x += gridPx) {
+  const scale = view.scale || 1;
+  const margin = gridPx * 4;
+  const startX = Math.floor(((-view.x / scale) - margin) / gridPx) * gridPx;
+  const endX = Math.ceil((((width - view.x) / scale) + margin) / gridPx) * gridPx;
+  const startY = Math.floor(((-view.y / scale) - margin) / gridPx) * gridPx;
+  const endY = Math.ceil((((height - view.y) / scale) + margin) / gridPx) * gridPx;
+
+  for (let x = startX; x <= endX; x += gridPx) {
     const maj = x % MAJOR === 0;
-    lines.push(<Line key={`v${x}`} points={[x,0,x,height]}
+    lines.push(<Line key={`v${x}`} points={[x,startY,x,endY]}
       stroke={maj ? "rgba(201,169,110,0.18)" : "rgba(58,52,46,0.28)"}
       strokeWidth={maj ? 0.8 : 0.35} listening={false}/>);
   }
-  for (let y = 0; y <= height; y += gridPx) {
+  for (let y = startY; y <= endY; y += gridPx) {
     const maj = y % MAJOR === 0;
-    lines.push(<Line key={`h${y}`} points={[0,y,width,y]}
+    lines.push(<Line key={`h${y}`} points={[startX,y,endX,y]}
       stroke={maj ? "rgba(201,169,110,0.18)" : "rgba(58,52,46,0.28)"}
       strokeWidth={maj ? 0.8 : 0.35} listening={false}/>);
   }
   if (snapEnabled) {
-    for (let x = 0; x <= width; x += gridPx)
-      for (let y = 0; y <= height; y += gridPx)
+    for (let x = startX; x <= endX; x += gridPx)
+      for (let y = startY; y <= endY; y += gridPx)
         dots.push(<Circle key={`d${x}_${y}`} x={x} y={y} radius={0.8}
           fill="rgba(201,169,110,0.35)" listening={false}/>);
   }
@@ -1026,6 +1054,14 @@ export default function RoomCanvas({ initialPlan = null }) {
   const containerRef = useRef(null);
   const stageRef     = useRef(null);
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
+  const [stageView, setStageView] = useState({ x: 0, y: 0, scale: 1 });
+  const stageGestureRef = useRef({
+    lastPinchDistance: null,
+    lastPinchCenter: null,
+    lastPanPoint: null,
+    didMove: false,
+    userAdjusted: false,
+  });
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState(selectedProjectId);
   const [projectName, setProjectName] = useState("Untitled Room");
@@ -1098,14 +1134,103 @@ export default function RoomCanvas({ initialPlan = null }) {
     return () => ro.disconnect();
   }, []);
 
+  const planBounds = useMemo(() => {
+    const xs = [];
+    const ys = [];
+
+    rooms.forEach((room) => {
+      room.points?.forEach((point) => {
+        xs.push(point.x);
+        ys.push(point.y);
+      });
+      room.walls?.forEach((wall) => {
+        xs.push(wall.start.x, wall.end.x);
+        ys.push(wall.start.y, wall.end.y);
+      });
+    });
+
+    furniture.forEach((item) => {
+      const halfW = (item.w ?? 40) / 2;
+      const halfH = (item.h ?? 40) / 2;
+      xs.push(item.x - halfW, item.x + halfW);
+      ys.push(item.y - halfH, item.y + halfH);
+    });
+
+    draftPts.forEach((point) => {
+      xs.push(point.x);
+      ys.push(point.y);
+    });
+
+    if (!xs.length || !ys.length) return null;
+
+    return {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
+    };
+  }, [draftPts, furniture, rooms]);
+
+  const fitPlanToStage = useCallback((force = false) => {
+    if (!planBounds || stageSize.width <= 0 || stageSize.height <= 0) return;
+    if (!force && stageGestureRef.current.userAdjusted) return;
+
+    const planWidth = Math.max(planBounds.maxX - planBounds.minX, PX_PER_M * 2);
+    const planHeight = Math.max(planBounds.maxY - planBounds.minY, PX_PER_M * 2);
+    const availableWidth = Math.max(stageSize.width - (FIT_PADDING * 2), 120);
+    const availableHeight = Math.max(stageSize.height - (FIT_PADDING * 2), 120);
+    const nextScale = clampStageScale(Math.min(availableWidth / planWidth, availableHeight / planHeight, 1.75));
+    const centerX = (planBounds.minX + planBounds.maxX) / 2;
+    const centerY = (planBounds.minY + planBounds.maxY) / 2;
+
+    setStageView({
+      scale: nextScale,
+      x: (stageSize.width / 2) - (centerX * nextScale),
+      y: (stageSize.height / 2) - (centerY * nextScale),
+    });
+  }, [planBounds, stageSize.height, stageSize.width]);
+
+  useEffect(() => {
+    fitPlanToStage(false);
+  }, [fitPlanToStage]);
+
   useEffect(() => {
     const c = stageRef.current?.container();
     if (c) c.style.cursor = mode==="select" ? "default" : "crosshair";
   }, [mode]);
 
-  const getPos = useCallback(() => stageRef.current?.getPointerPosition() ?? {x:0,y:0}, []);
+  const screenToPlanPoint = useCallback((point) => ({
+    x: (point.x - stageView.x) / stageView.scale,
+    y: (point.y - stageView.y) / stageView.scale,
+  }), [stageView.scale, stageView.x, stageView.y]);
+
+  const zoomStageAt = useCallback((screenPoint, nextScale) => {
+    setStageView((prev) => {
+      const scale = clampStageScale(nextScale);
+      const planPoint = {
+        x: (screenPoint.x - prev.x) / prev.scale,
+        y: (screenPoint.y - prev.y) / prev.scale,
+      };
+      stageGestureRef.current.userAdjusted = true;
+      return {
+        scale,
+        x: screenPoint.x - (planPoint.x * scale),
+        y: screenPoint.y - (planPoint.y * scale),
+      };
+    });
+  }, []);
+
+  const getPos = useCallback(() => {
+    const point = stageRef.current?.getPointerPosition() ?? { x: 0, y: 0 };
+    return screenToPlanPoint(point);
+  }, [screenToPlanPoint]);
   const onPointerMove = useCallback(() => { const {x,y}=getPos(); handleMouseMove(x,y); }, [getPos, handleMouseMove]);
   const onStageClick = useCallback(e => {
+    if (stageGestureRef.current.didMove) {
+      stageGestureRef.current.didMove = false;
+      return;
+    }
+    if (stageGestureRef.current.lastPanPoint || stageGestureRef.current.lastPinchDistance) return;
     if (e.evt.button != null && e.evt.button !== 0) return;
     setOpeningContextMenu(null);
     setGeometryContextMenu(null);
@@ -1113,6 +1238,88 @@ export default function RoomCanvas({ initialPlan = null }) {
     else if (mode==="select") { setSelectedCorner(null); setSelectedFurnitureId(null); setSelectedOpening(null); }
   }, [mode, getPos, handleCanvasClick, setSelectedCorner, setSelectedFurnitureId, setSelectedOpening]);
   const onDblClick = useCallback(() => handleDoubleClick(), [handleDoubleClick]);
+
+  const handleStageWheel = useCallback((event) => {
+    event.evt.preventDefault();
+    const pointer = stageRef.current?.getPointerPosition();
+    if (!pointer) return;
+    const direction = event.evt.deltaY > 0 ? -1 : 1;
+    const factor = direction > 0 ? 1.08 : 1 / 1.08;
+    zoomStageAt(pointer, stageView.scale * factor);
+  }, [stageView.scale, zoomStageAt]);
+
+  const handleStageTouchStart = useCallback((event) => {
+    const touches = event.evt.touches;
+    if (!touches?.length) return;
+
+    if (touches.length >= 2) {
+      event.evt.preventDefault();
+      const rect = stageRef.current.container().getBoundingClientRect();
+      stageGestureRef.current.lastPinchDistance = getTouchDistance(touches);
+      stageGestureRef.current.lastPinchCenter = getTouchCenter(touches, rect);
+      stageGestureRef.current.lastPanPoint = null;
+      return;
+    }
+
+    if (event.target === event.target.getStage()) {
+      stageGestureRef.current.lastPanPoint = {
+        x: touches[0].clientX,
+        y: touches[0].clientY,
+      };
+    }
+  }, []);
+
+  const handleStageTouchMove = useCallback((event) => {
+    const touches = event.evt.touches;
+    if (!touches?.length) return;
+
+    if (touches.length >= 2) {
+      event.evt.preventDefault();
+      const rect = stageRef.current.container().getBoundingClientRect();
+      const nextDistance = getTouchDistance(touches);
+      const nextCenter = getTouchCenter(touches, rect);
+      const previousDistance = stageGestureRef.current.lastPinchDistance ?? nextDistance;
+      const previousCenter = stageGestureRef.current.lastPinchCenter ?? nextCenter;
+      const distanceRatio = previousDistance > 0 ? nextDistance / previousDistance : 1;
+
+      setStageView((prev) => {
+        const scale = clampStageScale(prev.scale * distanceRatio);
+        const planPoint = {
+          x: (previousCenter.x - prev.x) / prev.scale,
+          y: (previousCenter.y - prev.y) / prev.scale,
+        };
+        stageGestureRef.current.userAdjusted = true;
+        stageGestureRef.current.didMove = true;
+        return {
+          scale,
+          x: nextCenter.x - (planPoint.x * scale),
+          y: nextCenter.y - (planPoint.y * scale),
+        };
+      });
+
+      stageGestureRef.current.lastPinchDistance = nextDistance;
+      stageGestureRef.current.lastPinchCenter = nextCenter;
+      stageGestureRef.current.lastPanPoint = null;
+      return;
+    }
+
+    const lastPanPoint = stageGestureRef.current.lastPanPoint;
+    if (!lastPanPoint || event.target !== event.target.getStage()) return;
+    event.evt.preventDefault();
+    const touch = touches[0];
+    const dx = touch.clientX - lastPanPoint.x;
+    const dy = touch.clientY - lastPanPoint.y;
+    stageGestureRef.current.userAdjusted = true;
+    stageGestureRef.current.didMove = true;
+    setStageView((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+    stageGestureRef.current.lastPanPoint = { x: touch.clientX, y: touch.clientY };
+  }, []);
+
+  const handleStageTouchEnd = useCallback(() => {
+    stageGestureRef.current.lastPinchDistance = null;
+    stageGestureRef.current.lastPinchCenter = null;
+    stageGestureRef.current.lastPanPoint = null;
+  }, []);
 
   // Export
   const exportImage = useCallback(() => {
@@ -1785,14 +1992,27 @@ export default function RoomCanvas({ initialPlan = null }) {
             </div>
           )}
 
-          <Stage ref={stageRef} width={stageSize.width} height={stageSize.height}
+          <Stage
+            ref={stageRef}
+            width={stageSize.width}
+            height={stageSize.height}
+            x={stageView.x}
+            y={stageView.y}
+            scaleX={stageView.scale}
+            scaleY={stageView.scale}
             onPointerMove={onPointerMove}
             onClick={onStageClick}
             onTap={onStageClick}
             onDblClick={onDblClick}
-            onDblTap={onDblClick}>
+            onDblTap={onDblClick}
+            onWheel={handleStageWheel}
+            onTouchStart={handleStageTouchStart}
+            onTouchMove={handleStageTouchMove}
+            onTouchEnd={handleStageTouchEnd}
+            onTouchCancel={handleStageTouchEnd}
+          >
             <Layer listening={false}>
-              <GridLayer width={stageSize.width} height={stageSize.height} gridPx={gridPx} snapEnabled={snapEnabled}/>
+              <GridLayer width={stageSize.width} height={stageSize.height} gridPx={gridPx} snapEnabled={snapEnabled} view={stageView}/>
             </Layer>
             <Layer>
               {rooms.map(room=>(
@@ -1834,6 +2054,29 @@ export default function RoomCanvas({ initialPlan = null }) {
             </Layer>
           </Stage>
 
+          <div className="canvas-viewport-controls" onPointerDown={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="viewport-control-btn"
+              onClick={() => fitPlanToStage(true)}
+            >
+              Fit
+            </button>
+            <button
+              type="button"
+              className="viewport-control-btn"
+              onClick={() => zoomStageAt({ x: stageSize.width / 2, y: stageSize.height / 2 }, stageView.scale * 1.18)}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className="viewport-control-btn"
+              onClick={() => zoomStageAt({ x: stageSize.width / 2, y: stageSize.height / 2 }, stageView.scale / 1.18)}
+            >
+              -
+            </button>
+          </div>
         </div>
 
         <div className="canvas-statusbar">

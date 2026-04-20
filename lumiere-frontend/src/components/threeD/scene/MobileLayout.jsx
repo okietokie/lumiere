@@ -15,6 +15,7 @@ const ICONS = {
   materials: 'M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37-1.34-1.34a1 1 0 0 0-1.41 0L9 12.25 11.75 15l8.96-8.96a1 1 0 0 0 0-1.41z',
   lighting:  'M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z',
   furniture: 'M7 13c1.66 0 3-1.34 3-3S8.66 7 7 7s-3 1.34-3 3 1.34 3 3 3zm12-6h-8v7H3V5H1v15h2v-3h18v3h2v-9c0-2.21-1.79-4-4-4z',
+  more:      'M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
   dashboard: 'M3 3h8v8H3zm10 0h8v5h-8zm0 7h8v11h-8zM3 13h8v8H3z',
   projects:  'M10 4H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z',
   save:      'M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z',
@@ -111,14 +112,13 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
     </>
   );
 }
-export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogout, canUndo, canRedo, onUndo, onRedo, showRoomTab = false }) {
+export function BottomNav({ activeTab, onTabChange }) {
   const tabs = [
-    { key: 'walls',     label: 'Build',     icon: ICONS.walls     },
-    ...(showRoomTab ? [{ key: 'room', label: 'Room', icon: ICONS.room }] : []),
-    { key: 'materials', label: 'Style',     icon: ICONS.materials },
-    { key: 'furniture', label: 'Furnish',   icon: ICONS.furniture  },
-    { key: 'projects',  label: 'Projects',  icon: ICONS.projects  },
-    { key: 'lighting',  label: 'Light',     icon: ICONS.lighting  },
+    { key: 'walls', label: 'Build', icon: ICONS.walls },
+    { key: 'materials', label: 'Style', icon: ICONS.materials },
+    { key: 'furniture', label: 'Furnish', icon: ICONS.furniture },
+    { key: 'lighting', label: 'Light', icon: ICONS.lighting },
+    { key: 'more', label: 'More', icon: ICONS.more },
   ];
 
   return (
@@ -133,18 +133,15 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
       backdropFilter: 'blur(20px)',
       display:        'flex',
       alignItems:     'center',
-      justifyContent: 'flex-start',
-      gap:            4,
-      overflowX:      'auto',
-      overscrollBehaviorX: 'contain',
-      WebkitOverflowScrolling: 'touch',
-      scrollbarWidth: 'none',
-      padding:        '8px 8px',
+      justifyContent: 'space-between',
+      gap:            6,
+      overflow:       'hidden',
+      padding:        '8px 10px',
       paddingBottom:  'env(safe-area-inset-bottom, 8px)',
       boxShadow:      '0 -8px 28px rgba(0,0,0,0.35)',
     }}>
       {tabs.map((tab) => {
-        const active = activeTab === tab.key;
+        const active = activeTab === tab.key || (tab.key === 'more' && (activeTab === 'projects' || activeTab === 'room'));
         return (
           <button
             key={tab.key}
@@ -155,8 +152,8 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
               alignItems:     'center',
               gap:            3,
               padding:        '6px 8px',
-              flex:           '0 0 62px',
-              minWidth:       62,
+              flex:           '1 1 0',
+              minWidth:       0,
               minHeight:      48,
               background:     active ? `${COLORS.surface}CC` : 'transparent',
               border:         'none',
@@ -180,57 +177,10 @@ export function BottomNav({ activeTab, onTabChange, onSave, onDashboard, onLogou
           </button>
         );
       })}
-
-      {/* Divider */}
-      <div style={{ width: 1, height: 32, flex: '0 0 1px', background: `${COLORS.secondary}40` }} />
-
-      {/* Undo */}
-      <button onClick={onUndo} disabled={!canUndo} style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 8px', flex: '0 0 54px', minWidth: 54, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 8,
-        color: canUndo ? COLORS.secondary : `${COLORS.secondary}30`, cursor: canUndo ? 'pointer' : 'default',
-      }}>
-        <Icon d={ICONS.undo} size={18} color={canUndo ? COLORS.secondary : `${COLORS.secondary}30`} />
-        <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif' }}>Undo</span>
-      </button>
-
-      {/* Save */}
-      <button onClick={onSave} style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 8px', flex: '0 0 54px', minWidth: 54, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 8,
-        color: COLORS.action, cursor: 'pointer',
-      }}>
-        <Icon d={ICONS.save} size={18} color={COLORS.action} />
-        <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif', color: COLORS.action }}>Save</span>
-      </button>
-
-      {/* Dashboard */}
-      <button onClick={onDashboard} style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 8px', flex: '0 0 64px', minWidth: 64, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 8,
-        color: COLORS.text, cursor: 'pointer',
-      }}>
-        <Icon d={ICONS.dashboard} size={18} color={COLORS.text} />
-        <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif', color: COLORS.text }}>Dashboard</span>
-      </button>
-
-      {/* Logout */}
-      <button onClick={onLogout} style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '6px 8px', flex: '0 0 58px', minWidth: 58, minHeight: 48,
-        background: 'transparent', border: 'none', borderRadius: 8,
-        color: COLORS.text, cursor: 'pointer',
-      }}>
-        <Icon d={ICONS.close} size={18} color={COLORS.text} />
-        <span style={{ fontSize: 9, fontFamily: 'Inter, sans-serif', color: COLORS.text }}>Logout</span>
-      </button>
     </div>
   );
 }
-export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
+export function MobileTopBar({ onCameraToggle, cameraMode, projectName, editorMode = '3D', onSwitchEditor }) {
   return (
     <div style={{
       position:       'fixed',
@@ -244,38 +194,65 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName }) {
       display:        'flex',
       alignItems:     'center',
       justifyContent: 'space-between',
-      padding:        '10px 16px',
+      gap:            10,
+      padding:        '10px 12px',
       paddingTop:     'calc(10px + env(safe-area-inset-top, 0px))',
     }}>
-      <div>
+      <div style={{ minWidth: 0, flex: '1 1 auto' }}>
         <div style={{ color: COLORS.action, fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', fontFamily: '"Plus Jakarta Sans", Inter, sans-serif' }}>Lumiere</div>
-        <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, fontFamily: '"Plus Jakarta Sans", Inter, sans-serif' }}>
+        <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, fontFamily: '"Plus Jakarta Sans", Inter, sans-serif', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {projectName || 'My Room'}
         </div>
       </div>
 
-      {/* Camera toggle */}
-      <button
-        onClick={onCameraToggle}
-        style={{
-          display:        'flex',
-          alignItems:     'center',
-          gap:            6,
-          padding:        '8px 14px',
-          background:     cameraMode === 'firstPerson' ? `${COLORS.surface}` : `${COLORS.background}CC`,
-          border:         `1px solid ${cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary}66`,
-          borderRadius:   8,
-          color:          cameraMode === 'firstPerson' ? COLORS.action : COLORS.text,
-          fontSize:       12,
-          fontFamily:     '"Plus Jakarta Sans", Inter, sans-serif',
-          fontWeight:     600,
-          cursor:         'pointer',
-          minHeight:      40,
-        }}
-      >
-        <Icon d={ICONS.camera} size={16} color={cameraMode === 'firstPerson' ? COLORS.action : COLORS.text} />
-        {cameraMode === 'firstPerson' ? 'Walkthrough' : 'Orbit'}
-      </button>
+      {onSwitchEditor && (
+        <button
+          onClick={onSwitchEditor}
+          style={{
+            display:        'flex',
+            alignItems:     'center',
+            justifyContent: 'center',
+            padding:        '8px 12px',
+            background:     `${COLORS.surface}`,
+            border:         `1px solid ${COLORS.action}66`,
+            borderRadius:   8,
+            color:          COLORS.action,
+            fontSize:       12,
+            fontFamily:     '"Plus Jakarta Sans", Inter, sans-serif',
+            fontWeight:     700,
+            cursor:         'pointer',
+            minHeight:      40,
+            whiteSpace:     'nowrap',
+          }}
+        >
+          {editorMode === '3D' ? '2D Plan' : '3D View'}
+        </button>
+      )}
+
+      {onCameraToggle && (
+        <button
+          onClick={onCameraToggle}
+          style={{
+            display:        'flex',
+            alignItems:     'center',
+            gap:            5,
+            padding:        '8px 10px',
+            background:     cameraMode === 'firstPerson' ? `${COLORS.surface}` : `${COLORS.background}CC`,
+            border:         `1px solid ${cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary}66`,
+            borderRadius:   8,
+            color:          cameraMode === 'firstPerson' ? COLORS.action : COLORS.text,
+            fontSize:       12,
+            fontFamily:     '"Plus Jakarta Sans", Inter, sans-serif',
+            fontWeight:     600,
+            cursor:         'pointer',
+            minHeight:      40,
+            whiteSpace:     'nowrap',
+          }}
+        >
+          <Icon d={ICONS.camera} size={16} color={cameraMode === 'firstPerson' ? COLORS.action : COLORS.text} />
+          {cameraMode === 'firstPerson' ? 'Walk' : 'Orbit'}
+        </button>
+      )}
     </div>
   );
 }
