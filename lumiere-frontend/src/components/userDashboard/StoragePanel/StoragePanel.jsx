@@ -5,7 +5,7 @@ import './StoragePanel.css';
 const StoragePanel = ({ storage }) => {
   const {
     used_mb   = 0,
-    total_mb  = 500,
+    total_mb  = 20,
     projects  = { used: 0, max: 50 },
     rooms     = { used: 0, max: 200 },
   } = storage ?? {};

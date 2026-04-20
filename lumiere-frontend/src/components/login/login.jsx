@@ -6,7 +6,7 @@ import {
   MailOutlined,
   UserOutlined,
 } from "@ant-design/icons";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { authApi } from "../../api/auth.js";
 import { getApiErrorMessage } from "../../utils/apiError.js";
 import { storeAuthSession } from "../../utils/authStorage.js";
@@ -16,6 +16,7 @@ import "./login.css";
 
 export const AuthExperience = ({ initialMode = "login" }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [mode, setMode] = useState(initialMode);
   const [loginLoading, setLoginLoading] = useState(false);
   const [signupLoading, setSignupLoading] = useState(false);
@@ -44,7 +45,8 @@ export const AuthExperience = ({ initialMode = "login" }) => {
 
   const flipTo = (nextMode) => {
     setMode(nextMode);
-    window.history.replaceState(null, "", nextMode === "signup" ? "/register" : "/login");
+    const query = location.search || "";
+    window.history.replaceState(null, "", `${nextMode === "signup" ? "/register" : "/login"}${query}`);
   };
 
   const onLoginFinish = async (values) => {
@@ -56,7 +58,9 @@ export const AuthExperience = ({ initialMode = "login" }) => {
       });
       storeAuthSession(response.data);
       message.success("Login Successful!");
-      navigate("/user/dashboard", { replace: true });
+      const redirect = new URLSearchParams(location.search).get("redirect");
+      const safeRedirect = redirect?.startsWith("/") && !redirect.startsWith("//") ? redirect : "/user/dashboard";
+      navigate(safeRedirect, { replace: true });
     } catch (error) {
       message.error(getApiErrorMessage(error, "Invalid login details. Please try again."));
     } finally {

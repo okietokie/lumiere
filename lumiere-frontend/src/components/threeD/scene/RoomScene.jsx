@@ -518,13 +518,6 @@ export default function RoomScene({ initialScene = null }) {
     () => (initialScene?.walls?.length ? initialScene.walls : generateLayoutWalls(rooms)),
     [initialScene, rooms]
   );
-  const handleLogout = useCallback(() => {
-    clearAuthSession();
-    navigate("/login", { replace: true });
-  }, [navigate]);
-  const handleDashboard = useCallback(() => {
-    navigate("/user/dashboard");
-  }, [navigate]);
   const {
     state: walls, set: setWalls,
     undo, redo, canUndo, canRedo,
@@ -670,7 +663,8 @@ export default function RoomScene({ initialScene = null }) {
   const sidebarRef = useRef(null);
   const desktopPanelInitRef = useRef(false);
 
-  const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs);
+  const [ignoredSpatialSuggestionKeys, setIgnoredSpatialSuggestionKeys] = useState(() => new Set());
+  const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs, ignoredSpatialSuggestionKeys);
 
   const projectSave = useProjectSave({
     rooms, setRooms,
@@ -687,6 +681,32 @@ export default function RoomScene({ initialScene = null }) {
   });
   const { loadProject, saveProject, projectName } = projectSave;
   const isSaving = projectSave.saveStatus === 'saving';
+
+  const leaveEditorWithSavePrompt = useCallback(async (nextAction, label) => {
+    if (isSaving) return;
+    const shouldSave = window.confirm(`Save progress before ${label}?`);
+    if (shouldSave) {
+      try {
+        await saveProject(projectName, true);
+      } catch (error) {
+        window.alert(error?.response?.data?.detail || error?.message || 'Could not save progress. Please try again.');
+        return;
+      }
+    }
+    nextAction();
+  }, [isSaving, projectName, saveProject]);
+
+  const handleLogout = useCallback(() => {
+    leaveEditorWithSavePrompt(() => {
+      clearAuthSession();
+      navigate("/login", { replace: true });
+    }, "logging out");
+  }, [leaveEditorWithSavePrompt, navigate]);
+
+  const handleDashboard = useCallback(() => {
+    leaveEditorWithSavePrompt(() => navigate("/user/dashboard"), "going to the dashboard");
+  }, [leaveEditorWithSavePrompt, navigate]);
+
   const budgetEnabled = useBudgetStore((state) => state.budgetEnabled);
   const budgetSummary = useBudgetStore((state) => state.summary);
   const budgetUnsavedChanges = useBudgetStore((state) => state.unsavedChanges);
@@ -3182,6 +3202,33 @@ export default function RoomScene({ initialScene = null }) {
     });
   }, []);
 
+  const contextSpatialSuggestions = useMemo(() => {
+    if (elementContextMenu?.kind !== 'furniture') return [];
+    const suggestions = spatial.allSuggestions ?? spatial.suggestions ?? [];
+    return suggestions.filter((suggestion) => (
+      suggestion.severity !== 'tip' &&
+      Array.isArray(suggestion.itemIds) &&
+      suggestion.itemIds.includes(elementContextMenu.targetId)
+    ));
+  }, [elementContextMenu, spatial.allSuggestions, spatial.suggestions]);
+
+  const ignoreContextSpatialSuggestions = useCallback(() => {
+    if (!contextSpatialSuggestions.length) return;
+    setIgnoredSpatialSuggestionKeys((current) => {
+      const next = new Set(current);
+      contextSpatialSuggestions.forEach((suggestion) => {
+        if (suggestion.key) next.add(suggestion.key);
+      });
+      return next;
+    });
+    setElementContextMenu(null);
+    toast?.success?.(
+      contextSpatialSuggestions.length === 1
+        ? 'Spatial suggestion ignored.'
+        : `${contextSpatialSuggestions.length} spatial suggestions ignored.`
+    );
+  }, [contextSpatialSuggestions, toast]);
+
   const openBudgetDraftForTarget = useCallback((target, overrides = {}) => {
     if (!budgetEnabled) return;
     openBudgetPanel(target, overrides);
@@ -3565,7 +3612,7 @@ export default function RoomScene({ initialScene = null }) {
           bottom: isMobile ? 84 : 'auto',
           transform: isMobile ? 'none' : 'translateX(-50%)',
           zIndex: 80,
-          display: 'flex',
+          display: isMobile ? 'flex' : 'none',
           flexDirection: isMobile ? 'column-reverse' : 'column',
           alignItems: isMobile ? 'flex-end' : 'center',
           gap: isMobile ? 8 : 10,
@@ -4631,6 +4678,181 @@ export default function RoomScene({ initialScene = null }) {
                   </div>
                 </div>
 
+                <div
+                  className="room-desktop-budget-controls"
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      aria-label="Activate Budget Estimation"
+                      aria-pressed={budgetEnabled}
+                      onClick={() => handleBudgetActivationChange(!budgetEnabled)}
+                      style={{
+                        position: 'relative',
+                        minHeight: 42,
+                        padding: '10px 18px',
+                        border: 0,
+                        borderRadius: 50,
+                        zIndex: 1,
+                        cursor: isSaving ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 10,
+                        color: '#fff',
+                        fontSize: 13,
+                        fontWeight: 800,
+                        background: budgetEnabled ? COLORS.action : 'rgb(46, 46, 46)',
+                        boxShadow: budgetEnabled ? '0 0 34px rgba(196, 154, 108, 0.42)' : '0 14px 34px rgba(0,0,0,0.26)',
+                        transition: 'background 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease',
+                        opacity: isSaving ? 0.62 : 1,
+                      }}
+                    >
+                      {budgetEnabled ? 'Active' : 'Start'}
+                      <svg viewBox="0 0 512 512" height={15} width={15} aria-hidden="true">
+                        <path
+                          fill="currentColor"
+                          d="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32v224c0 17.7 14.3 32 32 32s32-14.3 32-32V32zM143.5 120.6c13.6-11.3 15.4-31.5 4.1-45.1s-31.5-15.4-45.1-4.1C49.7 115.4 16 181.8 16 256c0 132.5 107.5 240 240 240s240-107.5 240-240c0-74.2-33.8-140.6-86.6-184.6c-13.6-11.3-33.8-9.4-45.1 4.1s-9.4 33.8 4.1 45.1c38.9 32.3 63.5 81 63.5 135.4c0 97.2-78.8 176-176 176s-176-78.8-176-176c0-54.4 24.7-103.1 63.5-135.4z"
+                        />
+                      </svg>
+                    </button>
+                    {budgetEnabled && (
+                      <button
+                        type="button"
+                        aria-label={budgetSummaryOpen ? 'Hide Budget Summary' : 'Show Budget Summary'}
+                        onClick={() => {
+                          setBudgetSummaryOpen((open) => !open);
+                          setBudgetSummaryExpanded(false);
+                        }}
+                        style={{
+                          width: 42,
+                          height: 42,
+                          border: 0,
+                          borderRadius: 50,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: budgetSummaryOpen ? COLORS.background : COLORS.text,
+                          background: budgetSummaryOpen ? COLORS.action : 'rgb(46, 46, 46)',
+                          boxShadow: budgetSummaryOpen ? '0 0 28px rgba(196, 154, 108, 0.38)' : '0 12px 28px rgba(0,0,0,0.24)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <WalletOutlined style={{ fontSize: 16 }} />
+                      </button>
+                    )}
+                  </div>
+                  {budgetEnabled && budgetSummaryOpen && (
+                    <div
+                      style={{
+                        width: 286,
+                        maxHeight: 'calc(100vh - 180px)',
+                        overflowY: 'auto',
+                        padding: 14,
+                        borderRadius: 8,
+                        background: `${COLORS.background}F2`,
+                        border: `1px solid ${COLORS.action}77`,
+                        boxShadow: '0 18px 42px rgba(0,0,0,0.28)',
+                        color: COLORS.text,
+                        backdropFilter: 'blur(18px)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <div>
+                          <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>
+                            Budget Summary
+                          </div>
+                          <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.2 }}>
+                            {formatMoney(budgetGrandTotal, budgetSummary.currency)}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {budgetUnsavedChanges && (
+                            <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>
+                              Unsaved
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {budgetUnpricedCount > 0 && (
+                        <div
+                          style={{
+                            marginTop: 10,
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            background: 'rgba(255, 156, 92, 0.14)',
+                            color: '#ffce9a',
+                            fontSize: 12,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {budgetUnpricedCount} item{budgetUnpricedCount === 1 ? '' : 's'} need pricing
+                        </div>
+                      )}
+
+                      <>
+                        <div style={{ marginTop: 12 }}>
+                          <div style={{ marginBottom: 6, color: COLORS.action, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>
+                            Categories
+                          </div>
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            {budgetCategoryRows.map(([label, total]) => (
+                              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                                <span style={{ color: `${COLORS.text}B8` }}>{label}</span>
+                                <span style={{ color: COLORS.text, fontWeight: 800 }}>{formatMoney(total, budgetSummary.currency)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <div style={{ marginBottom: 6, color: COLORS.action, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>
+                            Rooms
+                          </div>
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            {budgetRoomRows.length ? budgetRoomRows.map(([label, total]) => (
+                              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                                <span style={{ color: `${COLORS.text}B8`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                                <span style={{ color: COLORS.text, fontWeight: 800 }}>{formatMoney(total, budgetSummary.currency)}</span>
+                              </div>
+                            )) : (
+                              <div style={{ color: `${COLORS.text}88`, fontSize: 12 }}>No priced rooms yet.</div>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <div style={{ padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}>
+                            <div style={{ color: `${COLORS.text}99`, fontSize: 11 }}>Rules</div>
+                            <div style={{ fontSize: 15, fontWeight: 800 }}>{budgetSummary.rules_count ?? 0}</div>
+                          </div>
+                          <div style={{ padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}>
+                            <div style={{ color: `${COLORS.text}99`, fontSize: 11 }}>Items</div>
+                            <div style={{ fontSize: 15, fontWeight: 800 }}>{budgetSummary.snapshots_count ?? 0}</div>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ marginBottom: 6, color: `${COLORS.text}99`, fontSize: 11, fontWeight: 800 }}>
+                            Scene badges
+                          </div>
+                          <Select
+                            size="small"
+                            value={budgetBadgeMode}
+                            onChange={setBudgetBadgeMode}
+                            style={{ width: '100%' }}
+                            options={[
+                              { value: 'cost', label: 'Show final costs' },
+                              { value: 'rate', label: 'Show rates' },
+                              { value: 'hidden', label: 'Hide badges' },
+                            ]}
+                          />
+                        </div>
+                      </>
+                    </div>
+                  )}
+                </div>
+
                 <div className={desktopPanelOpen ? 'room-floating-panel is-open' : 'room-floating-panel'}>
                   <div className={desktopPanelOpen ? 'room-floating-panel-inner is-open' : 'room-floating-panel-inner'}>
                     <div className="room-floating-panel-header">
@@ -4939,6 +5161,20 @@ export default function RoomScene({ initialScene = null }) {
               disabled: elementContextMenu.kind === 'floor' || elementContextMenu.kind === 'ceiling',
             })}
           </div>
+          {contextSpatialSuggestions.length > 0 && (
+            <>
+              <div style={{ height: 1, margin: '8px 2px', background: `${COLORS.secondary}44` }} />
+              <div style={{ display: 'grid', gap: 6 }}>
+                {renderElementContextButton(
+                  contextSpatialSuggestions.length === 1
+                    ? 'Ignore spatial issue'
+                    : `Ignore ${contextSpatialSuggestions.length} spatial issues`,
+                  ignoreContextSpatialSuggestions,
+                  { icon: <CloseOutlined /> }
+                )}
+              </div>
+            </>
+          )}
           <div style={{ height: 1, margin: '8px 2px', background: `${COLORS.secondary}44` }} />
           <div style={{ display: 'grid', gap: 6 }}>
             {renderElementBudgetActions()}
@@ -5833,6 +6069,14 @@ export default function RoomScene({ initialScene = null }) {
           background: linear-gradient(135deg, ${COLORS.text} 0%, #dbc0a2 100%);
           border-color: rgba(255,255,255,0.55);
           box-shadow: 0 0 0 6px rgba(196, 154, 108, 0.12), 0 0 24px rgba(196, 154, 108, 0.26), 0 12px 26px rgba(0,0,0,0.28);
+        }
+        .room-desktop-budget-controls {
+          pointer-events: auto;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 10px;
+          flex: 0 0 auto;
         }
         .room-floating-panel {
           pointer-events: none;

@@ -66,6 +66,68 @@ export const FURNITURE_CATALOGUE = [
   { type: "sink",      label: "Sink",       category: "Bathroom", w: 24, h: 20, color: "#c0c8cc", shape: "round" },
 ];
 
+const MODEL_TO_2D_HINTS = [
+  { match: ["sofa", "couch", "sectional"], type: "sofa" },
+  { match: ["armchair", "accent chair", "chair"], type: "armchair" },
+  { match: ["single bed", "twin bed"], type: "bed_s" },
+  { match: ["double bed", "queen bed", "king bed", "bed"], type: "bed_d" },
+  { match: ["round table", "circular table"], type: "table_c" },
+  { match: ["dining table", "coffee table", "table"], type: "table_r" },
+  { match: ["desk", "workstation"], type: "desk" },
+  { match: ["wardrobe", "closet", "cabinet"], type: "wardrobe" },
+  { match: ["bookshelf", "book shelf", "shelf", "bookcase"], type: "bookshelf" },
+  { match: ["counter"], type: "counter" },
+  { match: ["island"], type: "island" },
+  { match: ["bathtub", "tub"], type: "bathtub" },
+  { match: ["toilet", "wc"], type: "toilet" },
+  { match: ["sink", "basin", "vanity"], type: "sink" },
+];
+
+function getModelSearchText(model) {
+  return [model?.name, model?.category, model?.filename, model?.url]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+export function getFurnitureDefinitionForModel(model) {
+  if (!model || typeof model !== "object") return null;
+
+  const haystack = getModelSearchText(model);
+  const found = MODEL_TO_2D_HINTS.find(({ match }) => match.some((token) => haystack.includes(token)));
+  const base = FURNITURE_CATALOGUE.find((entry) => entry.type === found?.type) ?? {
+    type: "custom",
+    label: "Furniture",
+    category: "Furniture",
+    w: 48,
+    h: 48,
+    color: "#8b7355",
+    shape: "rect",
+  };
+
+  return {
+    ...base,
+    label: model.name || base.label,
+    category: model.category || base.category,
+    model,
+  };
+}
+
+function getPendingFurnitureDefinition(pendingFurniture) {
+  if (!pendingFurniture) return null;
+  if (typeof pendingFurniture === "string") {
+    return FURNITURE_CATALOGUE.find((entry) => entry.type === pendingFurniture) ?? null;
+  }
+  return getFurnitureDefinitionForModel(pendingFurniture.model ?? pendingFurniture) ?? pendingFurniture;
+}
+
+function getPendingFurnitureKey(pendingFurniture) {
+  if (!pendingFurniture) return "";
+  if (typeof pendingFurniture === "string") return pendingFurniture;
+  const model = pendingFurniture.model ?? pendingFurniture;
+  return model.id || model.filename || model.url || model.name || pendingFurniture.type || "";
+}
+
 const DEFAULT_ROOM_FLOOR = {
   type: "custom",
   color: "#c9a96e",
@@ -156,7 +218,7 @@ export function useFloorPlan(initialState = null) {
   // ── furniture (global list, each item has roomId for ownership) ───────────
   const [furniture, setFurniture] = useState(initialFurniture);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState(null);
-  const [pendingFurniture,    setPendingFurniture]    = useState(null); // type being placed
+  const [pendingFurniture,    setPendingFurniture]    = useState(null); // type or backend model being placed
 
   // ── drawing ───────────────────────────────────────────────────────────────
   const [draftPts,    setDraftPts]    = useState([]);
@@ -258,19 +320,31 @@ export function useFloorPlan(initialState = null) {
       // Find which room this point is in
       const room = rooms.find(r => pointInPolygon(x, y, r.points));
       pushHistory();
-      const def  = FURNITURE_CATALOGUE.find(f => f.type === pendingFurniture);
+      const def = getPendingFurnitureDefinition(pendingFurniture);
+      const model = def?.model ?? (typeof pendingFurniture === "object" ? pendingFurniture : null);
+      const type = def?.type ?? getPendingFurnitureKey(pendingFurniture) ?? "custom";
       setFurniture(prev => [...prev, {
         id:       `f_${Date.now()}`,
-        type:     pendingFurniture,
+        type,
         roomId:   room?.id ?? null,
         x, y,
         w:        def?.w ?? 40,
         h:        def?.h ?? 40,
         rotation: 0,
         color:    def?.color ?? "#8b7355",
-        label:    def?.label ?? "",
+        label:    def?.label ?? model?.name ?? "",
         shape:    def?.shape ?? "rect",
         locked:   false,
+        filename: model?.filename ?? null,
+        name:     model?.name ?? def?.label ?? "",
+        url:      model?.url ?? null,
+        category: model?.category ?? def?.category ?? null,
+        source3D: model ? {
+          filename: model.filename,
+          name: model.name,
+          url: model.url,
+          category: model.category || null,
+        } : null,
       }]);
       return;
     }

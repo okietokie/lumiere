@@ -27,7 +27,7 @@ To build an easy-to-use interior design platform that combines:
 
 ## 2. What the project actually does
 
-From the codebase, the project currently supports:
+The project currently supports:
 - user registration, login, token-based authentication, and password reset
 - a dashboard showing projects, storage usage, and recent activity
 - a 2D floor planner built with `react-konva`

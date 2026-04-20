@@ -22,7 +22,8 @@ from app.utils.measurements import with_scene_measurements
 
 logger = logging.getLogger(__name__)
 
-MAX_STORAGE_MB = 500
+MAX_STORAGE_MB = 20
+MAX_STORAGE_BYTES = MAX_STORAGE_MB * 1024 * 1024
 MAX_PROJECTS = 50
 MAX_ROOMS = 200
 
@@ -64,6 +65,13 @@ def _object_id(value: str, detail: str = "Invalid project id") -> ObjectId:
     if not ObjectId.is_valid(value):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     return ObjectId(value)
+
+
+def _raise_storage_limit_exceeded() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail=f"Storage limit exceeded (max {MAX_STORAGE_MB} MB per user)",
+    )
 
 
 def _scene_with_budget_summary(scene: dict | None, project_name: str | None = None) -> dict:
@@ -140,6 +148,10 @@ async def create_project(
         "updated_at": now,
         "last_opened_at": now,
     }
+    await _ensure_storage_capacity(
+        user_id,
+        _estimate_project_bytes(doc)[0],
+    )
     result = await projects_collection.insert_one(doc)
     doc["_id"] = result.inserted_id
     return _serialize_project(doc)
@@ -163,6 +175,9 @@ async def update_project(
     thumbnail: str | None = None,
 ) -> dict | None:
     existing = await get_owned_project(project_id, user_id)
+    if not existing:
+        return None
+
     updates = {"updated_at": utcnow()}
     if title is not None or name is not None:
         updates["title"] = _project_title(title, name)
@@ -172,6 +187,16 @@ async def update_project(
         updates["scene_data"] = next_scene
     if thumbnail_url is not None or thumbnail is not None:
         updates["thumbnail_url"] = _thumbnail_url(thumbnail_url, thumbnail)
+
+    next_doc = {
+        **existing,
+        **updates,
+    }
+    await _ensure_storage_capacity(
+        user_id,
+        _estimate_project_bytes(next_doc)[0],
+        exclude_project_id=project_id,
+    )
 
     await projects_collection.update_one(
         {"_id": _object_id(project_id), "user_id": ObjectId(user_id)},
@@ -378,12 +403,22 @@ async def save_project_video(project_id: str, user_id: str, data: bytes) -> str 
         return None
 
     filename = f"{project_id}_{int(utcnow().timestamp())}.webm"
+    video_url = f"{VIDEO_SERVE_URL.rstrip('/')}/api/videos/{filename}"
+    next_project = {
+        **project,
+        "preview_video": video_url,
+    }
+    await _ensure_storage_capacity(
+        user_id,
+        _estimate_project_bytes(next_project, {"preview_video": len(data)})[0],
+        exclude_project_id=project["_id"],
+    )
+
     try:
         os.makedirs(VIDEOS_DIR, exist_ok=True)
         path = os.path.join(VIDEOS_DIR, filename)
         with open(path, "wb") as file_obj:
             file_obj.write(data)
-        video_url = f"{VIDEO_SERVE_URL.rstrip('/')}/api/videos/{filename}"
         logger.info("Video saved locally: %s", path)
     except Exception as exc:
         logger.error("save_project_video failed: %s", exc)
@@ -421,7 +456,7 @@ def _resolve_local_asset_size(url: str | None, base_dir: str) -> int:
         return 0
 
 
-def _estimate_project_bytes(doc: dict) -> tuple[int, int]:
+def _estimate_project_bytes(doc: dict, asset_size_overrides: dict[str, int] | None = None) -> tuple[int, int]:
     scene_data = doc.get("scene_data") or doc.get("scene") or {}
     payload = {
         "title": doc.get("title"),
@@ -433,22 +468,27 @@ def _estimate_project_bytes(doc: dict) -> tuple[int, int]:
 
     scene_bytes = len(json.dumps(payload, default=str).encode("utf-8"))
     rooms_used = len(scene_data.get("rooms") or [])
+    overrides = asset_size_overrides or {}
     asset_bytes = 0
     model_assets = doc.get("model_assets") or {}
-    asset_bytes += _resolve_local_asset_size(doc.get("preview_video"), VIDEOS_DIR)
-    asset_bytes += _resolve_local_asset_size(model_assets.get("glb_url"), PROJECT_ASSETS_DIR)
-    asset_bytes += _resolve_local_asset_size(model_assets.get("usdz_url"), PROJECT_ASSETS_DIR)
+    asset_bytes += overrides.get("preview_video", _resolve_local_asset_size(doc.get("preview_video"), VIDEOS_DIR))
+    asset_bytes += overrides.get("glb", _resolve_local_asset_size(model_assets.get("glb_url"), PROJECT_ASSETS_DIR))
+    asset_bytes += overrides.get("usdz", _resolve_local_asset_size(model_assets.get("usdz_url"), PROJECT_ASSETS_DIR))
 
     return scene_bytes + asset_bytes, rooms_used
 
 
-async def get_storage_usage(user_id: str) -> dict:
+async def _get_storage_totals(user_id: str, exclude_project_id: str | ObjectId | None = None) -> dict:
+    query = {"user_id": ObjectId(user_id)}
+    if exclude_project_id is not None:
+        query["_id"] = {"$ne": _object_id(str(exclude_project_id))}
+
     cursor = projects_collection.find(
-        {"user_id": ObjectId(user_id)},
+        query,
         {
             "title": 1,
             "thumbnail_url": 1,
-            "scene_data.rooms": 1,
+            "scene_data": 1,
             "model_assets": 1,
             "preview_video": 1,
         },
@@ -464,18 +504,35 @@ async def get_storage_usage(user_id: str) -> dict:
         total_bytes += project_bytes
         total_rooms += rooms_used
 
-    used_mb = round(total_bytes / 1024 / 1024, 2)
-    total_mb = MAX_STORAGE_MB
+    return {
+        "total_bytes": total_bytes,
+        "total_projects": total_projects,
+        "total_rooms": total_rooms,
+    }
+
+
+async def _ensure_storage_capacity(
+    user_id: str,
+    incoming_project_bytes: int,
+    exclude_project_id: str | ObjectId | None = None,
+) -> None:
+    totals = await _get_storage_totals(user_id, exclude_project_id)
+    if totals["total_bytes"] + incoming_project_bytes > MAX_STORAGE_BYTES:
+        _raise_storage_limit_exceeded()
+
+
+async def get_storage_usage(user_id: str) -> dict:
+    totals = await _get_storage_totals(user_id)
 
     return {
-        "used_mb": used_mb,
-        "total_mb": total_mb,
+        "used_mb": round(totals["total_bytes"] / 1024 / 1024, 2),
+        "total_mb": MAX_STORAGE_MB,
         "projects": {
-            "used": total_projects,
+            "used": totals["total_projects"],
             "max": MAX_PROJECTS,
         },
         "rooms": {
-            "used": total_rooms,
+            "used": totals["total_rooms"],
             "max": MAX_ROOMS,
         },
     }
@@ -500,12 +557,26 @@ async def save_project_asset(
         original_name = f"{os.path.splitext(original_name)[0]}{extension}"
 
     stamped_name = f"{project_id}_{asset_kind}_{int(utcnow().timestamp())}_{original_name}"
+    asset_url = f"{PROJECT_ASSET_SERVE_URL.rstrip('/')}/api/project-assets/{stamped_name}"
+    next_project = {
+        **project,
+        "model_assets": {
+            **(project.get("model_assets") or {}),
+            f"{asset_kind}_url": asset_url,
+            f"{asset_kind}_filename": original_name,
+        },
+    }
+    await _ensure_storage_capacity(
+        user_id,
+        _estimate_project_bytes(next_project, {asset_kind: len(data)})[0],
+        exclude_project_id=project["_id"],
+    )
+
     try:
         os.makedirs(PROJECT_ASSETS_DIR, exist_ok=True)
         path = os.path.join(PROJECT_ASSETS_DIR, stamped_name)
         with open(path, "wb") as file_obj:
             file_obj.write(data)
-        asset_url = f"{PROJECT_ASSET_SERVE_URL.rstrip('/')}/api/project-assets/{stamped_name}"
         logger.info("Project %s asset saved locally: %s", asset_kind, path)
     except Exception as exc:
         logger.error("save_project_asset failed: %s", exc)

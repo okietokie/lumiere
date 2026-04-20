@@ -1526,7 +1526,9 @@ const AntOverviewHero = ({
   onCreateNew,
   onOpenLastProject,
 }) => {
-  const storageLimit = Number(storage?.limit_mb ?? storage?.limitMb ?? 500);
+  const storageLimit = Number(
+    storage?.total_mb ?? storage?.totalMb ?? storage?.limit_mb ?? storage?.limitMb ?? 20
+  );
   const storageUsed = Number(storage?.used_mb ?? storage?.usedMb ?? 0);
   const storagePercent = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0;
   const activeProjects = Number(stats?.active_projects ?? stats?.active ?? stats?.projects ?? 0);

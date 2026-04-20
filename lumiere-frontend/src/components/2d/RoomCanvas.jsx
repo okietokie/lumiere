@@ -3,11 +3,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { Stage, Layer, Line, Circle, Rect, Arc, Group, Text, RegularPolygon } from "react-konva";
-import { DeleteOutlined, SaveOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, DeleteOutlined, LogoutOutlined, SaveOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   useFloorPlan, buildWalls, PX_PER_M, GRID_SIZES,
-  ROOM_PRESETS, FLOOR_PATTERNS, FURNITURE_CATALOGUE,
+  ROOM_PRESETS, FLOOR_PATTERNS, FURNITURE_CATALOGUE, getFurnitureDefinitionForModel,
 } from "../../utils/useFloorPlan";
 import { saveLive2DPlanSnapshot } from "../../utils/editorSceneBridge";
 import {
@@ -18,6 +18,7 @@ import {
 import { fetchModelManifest } from "../../hooks/useModelPrefetch";
 import SaveModal from "../threeD/ui/SaveModal";
 import axiosClient from "../../api/axiosClient";
+import { clearAuthSession } from "../../utils/authStorage";
 import "./RoomCanvas.css";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -868,8 +869,8 @@ function FurniturePanel({ item, onRotate, onDelete, onColorChange }) {
   const def = FURNITURE_CATALOGUE.find(f=>f.type===item.type);
   return (
     <div className="furniture-panel">
-      <div className="furniture-panel-name">{def?.label ?? item.type}</div>
-      <div className="furniture-panel-hint">{def?.category}</div>
+      <div className="furniture-panel-name">{item.label || item.name || def?.label || item.type}</div>
+      <div className="furniture-panel-hint">{item.category || def?.category}</div>
       <div className="furniture-panel-row">
         <button className="furn-action-btn" onClick={onRotate} title="Rotate 90°">
           <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -902,22 +903,76 @@ function FurniturePanel({ item, onRotate, onDelete, onColorChange }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Furniture Catalogue Panel
 // ─────────────────────────────────────────────────────────────────────────────
+function getModelKey(model) {
+  return model?.id || model?.filename || model?.url || model?.name || "";
+}
+
+function getPendingKey(pending) {
+  if (!pending) return "";
+  if (typeof pending === "string") return pending;
+  return getModelKey(pending.model ?? pending);
+}
+
 function FurnitureCatalogue({ onSelect, pending }) {
-  const categories = [...new Set(FURNITURE_CATALOGUE.map(f=>f.category))];
+  const [models, setModels] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const pendingKey = getPendingKey(pending);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadModels() {
+      setLoading(true);
+      setError("");
+      try {
+        const data = await fetchModelManifest();
+        if (!cancelled) setModels(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) {
+          setModels([]);
+          setError("Could not reach backend furniture.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadModels();
+    return () => { cancelled = true; };
+  }, []);
+
+  const catalogueItems = useMemo(
+    () => models.map((model) => ({
+      ...getFurnitureDefinitionForModel(model),
+      model,
+      key: getModelKey(model),
+      previewUrl: model.preview_url || model.thumbnail_url || null,
+    })).filter((item) => item.key),
+    [models]
+  );
+  const categories = [...new Set(catalogueItems.map(f=>f.category || "Furniture"))];
+
   return (
     <div className="catalogue-panel">
       <div className="catalogue-hint">Click an item, then click the canvas to place it</div>
+      {loading && <div className="catalogue-hint">Loading backend furniture...</div>}
+      {error && <div className="catalogue-error">{error}</div>}
       {categories.map(cat=>(
         <div key={cat}>
           <div className="catalogue-cat-label">{cat}</div>
           <div className="catalogue-grid">
-            {FURNITURE_CATALOGUE.filter(f=>f.category===cat).map(f=>(
-              <button key={f.type}
-                className={`catalogue-item${pending===f.type?" active":""}`}
-                onClick={()=>onSelect(f.type)}
+            {catalogueItems.filter(f=>f.category===cat).map(f=>(
+              <button key={f.key}
+                className={`catalogue-item${pendingKey===f.key?" active":""}`}
+                onClick={()=>onSelect(f)}
                 title={f.label}
               >
-                <span className="catalogue-color-chip" style={{background:f.color}}/>
+                {f.previewUrl ? (
+                  <img className="catalogue-thumb" src={f.previewUrl} alt="" loading="lazy" decoding="async"/>
+                ) : (
+                  <span className="catalogue-color-chip" style={{background:f.color}}/>
+                )}
                 <span className="catalogue-item-label">{f.label}</span>
               </button>
             ))}
@@ -987,6 +1042,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: "idle", usdz: "idle" });
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
   const autosaveRef = useRef(null);
+  const isSaving = saveStatus === "saving";
 
   const isTypingTarget = useCallback((target) => {
     if (!target) return false;
@@ -1197,6 +1253,31 @@ export default function RoomCanvas({ initialPlan = null }) {
     }
     return currentProjectId;
   }, [currentProjectId, projectName, saveProject]);
+
+  const leaveEditorWithSavePrompt = useCallback(async (nextAction, label) => {
+    if (isSaving) return;
+    const shouldSave = window.confirm(`Save progress before ${label}?`);
+    if (shouldSave) {
+      try {
+        await saveProject(projectName, true);
+      } catch (error) {
+        window.alert(error?.response?.data?.detail || error?.message || "Could not save progress. Please try again.");
+        return;
+      }
+    }
+    nextAction();
+  }, [isSaving, projectName, saveProject]);
+
+  const handleDashboard = useCallback(() => {
+    leaveEditorWithSavePrompt(() => navigate("/user/dashboard"), "going to the dashboard");
+  }, [leaveEditorWithSavePrompt, navigate]);
+
+  const handleLogout = useCallback(() => {
+    leaveEditorWithSavePrompt(() => {
+      clearAuthSession();
+      navigate("/login", { replace: true });
+    }, "logging out");
+  }, [leaveEditorWithSavePrompt, navigate]);
 
   const loadProject = useCallback(async (projectId) => {
     const { data } = await axiosClient.get(`/api/projects/me/open/${projectId}`);
@@ -1482,7 +1563,14 @@ export default function RoomCanvas({ initialPlan = null }) {
           <>
             <div className="sidebar-section">
               <div className="sidebar-section-title">Furniture</div>
-              <FurnitureCatalogue onSelect={t=>setPendingFurniture(t===pendingFurniture?null:t)} pending={pendingFurniture}/>
+              <FurnitureCatalogue
+                onSelect={(item) => {
+                  const currentKey = getPendingKey(pendingFurniture);
+                  const nextKey = getModelKey(item.model ?? item);
+                  setPendingFurniture(currentKey === nextKey ? null : item);
+                }}
+                pending={pendingFurniture}
+              />
             </div>
             <div className="sidebar-divider"/>
           </>
@@ -1643,49 +1731,42 @@ export default function RoomCanvas({ initialPlan = null }) {
               {snapEnabled ? `⊹ ${GRID_SIZES.find(g=>g.px===gridPx)?.label}` : "⊹ Free"}
             </span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="canvas-topbar-actions">
             <div className="topbar-hint">{modeHint[mode]}</div>
             <button
               type="button"
               onClick={() => setSaveModalOpen(true)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                height: 36,
-                padding: "0 14px",
-                borderRadius: 999,
-                border: "1px solid rgba(201,169,110,0.28)",
-                background: "rgba(23,20,18,0.78)",
-                color: "#f3ede4",
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                cursor: "pointer",
-              }}
+              disabled={isSaving}
+              className="canvas-action-btn canvas-action-btn-save"
             >
               <SaveOutlined />
               {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
             </button>
+            <div className="canvas-nav-segment" role="group" aria-label="Editor navigation">
+              <button
+                type="button"
+                onClick={handleDashboard}
+                disabled={isSaving}
+                className="canvas-segment-btn"
+              >
+                <AppstoreOutlined />
+                Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={isSaving}
+                className="canvas-segment-btn canvas-segment-btn-danger"
+              >
+                <LogoutOutlined />
+                Logout
+              </button>
+            </div>
             <button
               type="button"
               onClick={switchTo3D}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                height: 36,
-                padding: "0 14px",
-                borderRadius: 999,
-                border: "1px solid rgba(201,169,110,0.32)",
-                background: "linear-gradient(135deg, rgba(201,169,110,0.18), rgba(23,20,18,0.9))",
-                color: "#f3ede4",
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                cursor: "pointer",
-              }}
+              disabled={isSaving}
+              className="canvas-action-btn canvas-action-btn-view"
             >
               Switch to 3D View
             </button>

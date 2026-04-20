@@ -4,7 +4,7 @@ import {
   SaveOutlined, CameraOutlined, ExportOutlined,
   ImportOutlined, ClockCircleOutlined, CheckCircleOutlined,
   LoadingOutlined, WarningOutlined, VideoCameraOutlined,
-  LinkOutlined, MobileOutlined, AppleOutlined, AndroidOutlined,
+  LinkOutlined, MobileOutlined,
 } from '@ant-design/icons';
 import { gsap } from 'gsap';
 import { COLORS } from '../../../utils/colors';
@@ -48,16 +48,13 @@ export default function SaveModal({
   projectName, setProjectName,
   saveStatus, saveProject,
   downloadSnapshot, exportJSON, importJSON,
-  shareUrl, modelAssets, assetUploadStatus,
-  uploadModelAsset, copyShareLink, openSharePage,
+  shareUrl, copyShareLink,
   autosaveEnabled, setAutosaveEnabled,
   recorderProps,
 }) {
   const [localName, setLocalName] = useState(projectName);
   const [renameChoiceOpen, setRenameChoiceOpen] = useState(false);
   const btnRef = useRef(null);
-  const glbInputRef = useRef(null);
-  const usdzInputRef = useRef(null);
 
   useEffect(() => {
     if (open) setLocalName(projectName || 'Untitled Room');
@@ -88,17 +85,6 @@ export default function SaveModal({
     }
 
     await performSave();
-  };
-
-  const handleAssetPick = async (kind, event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    try {
-      await uploadModelAsset(kind, file);
-    } catch (error) {
-      alert(error?.message || `Failed to upload ${kind.toUpperCase()} file.`);
-    }
   };
 
   const hasRecorder = !!recorderProps;
@@ -223,12 +209,9 @@ export default function SaveModal({
             background: C.bgDeep,
           }}>
             <div style={{ color: C.subtext, fontSize: 12, lineHeight: 1.55 }}>
-              Publish a phone-ready viewer page and attach room exports for Android AR (GLB) and iPhone/iPad Quick Look (USDZ).
+              Create a public viewer link for this model.
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <GhostButton icon={<LinkOutlined />} onClick={copyShareLink}>Copy 3D Link</GhostButton>
-              <GhostButton icon={<MobileOutlined />} onClick={openSharePage}>Open Viewer</GhostButton>
-            </div>
+            <GhostButton icon={<LinkOutlined />} onClick={copyShareLink}>Create Viewer Link</GhostButton>
             <div style={{
               color: shareUrl ? COLORS.text : C.subtext,
               fontSize: 11,
@@ -241,38 +224,6 @@ export default function SaveModal({
             }}>
               {shareUrl || 'Save once to generate a public viewer link.'}
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <GhostButton
-                icon={assetUploadStatus?.glb === 'uploading' ? <LoadingOutlined spin /> : <AndroidOutlined />}
-                onClick={() => glbInputRef.current?.click()}
-              >
-                {modelAssets?.glb_filename ? 'Replace GLB' : 'Upload GLB'}
-              </GhostButton>
-              <GhostButton
-                icon={assetUploadStatus?.usdz === 'uploading' ? <LoadingOutlined spin /> : <AppleOutlined />}
-                onClick={() => usdzInputRef.current?.click()}
-              >
-                {modelAssets?.usdz_filename ? 'Replace USDZ' : 'Upload USDZ'}
-              </GhostButton>
-            </div>
-            <div style={{ display: 'flex', gap: 12, color: C.subtext, fontSize: 11, flexWrap: 'wrap' }}>
-              <span>{modelAssets?.glb_url ? `Android ready: ${modelAssets.glb_filename}` : 'Android GLB pending'}</span>
-              <span>{modelAssets?.usdz_url ? `iPhone ready: ${modelAssets.usdz_filename}` : 'iPhone USDZ pending'}</span>
-            </div>
-            <input
-              ref={glbInputRef}
-              type="file"
-              accept=".glb,model/gltf-binary"
-              style={{ display: 'none' }}
-              onChange={(event) => handleAssetPick('glb', event)}
-            />
-            <input
-              ref={usdzInputRef}
-              type="file"
-              accept=".usdz,model/vnd.usdz+zip"
-              style={{ display: 'none' }}
-              onChange={(event) => handleAssetPick('usdz', event)}
-            />
           </div>
         </div>
 
