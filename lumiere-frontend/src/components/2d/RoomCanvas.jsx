@@ -19,6 +19,7 @@ import { fetchModelManifest } from "../../hooks/useModelPrefetch";
 import SaveModal from "../threeD/ui/SaveModal";
 import axiosClient from "../../api/axiosClient";
 import { clearAuthSession } from "../../utils/authStorage";
+import { normalizeShareUrl } from "../../utils/shareUrl";
 import "./RoomCanvas.css";
 
 const MIN_STAGE_SCALE = 0.25;
@@ -201,7 +202,7 @@ function hexToRgbArr(hex) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Furniture shape renderer — draws each piece as a stylised floor-plan symbol
 // ─────────────────────────────────────────────────────────────────────────────
-function FurnitureShape({ item, isSelected, onSelect, onDragMove, onDragEnd }) {
+function FurnitureShape({ item, isSelected, onSelect, onDragStart, onDragMove, onDragEnd }) {
   const { x, y, w, h, rotation, color, shape, label } = item;
   const stroke    = isSelected ? "#e8c98a" : "rgba(255,255,255,0.35)";
   const shadowBlr = isSelected ? 12 : 4;
@@ -213,6 +214,7 @@ function FurnitureShape({ item, isSelected, onSelect, onDragMove, onDragEnd }) {
     offsetY: h / 2,
     draggable: true,
     onClick: onSelect,
+    onDragStart,
     onDragMove,
     onDragEnd,
     onMouseEnter: e => { e.target.getStage().container().style.cursor = "move"; },
@@ -609,7 +611,7 @@ function WindowOpening({ wall, opening, isSelected, onSelect, onMenu }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function DragHandle({
   x, y, isSelected,
-  onMouseDown, onDragMove, onDragEnd, onMenu,
+  onMouseDown, onDragStart, onDragMove, onDragEnd, onMenu,
 }) {
   const radius = isSelected ? 10 : 7;
   return (
@@ -619,7 +621,7 @@ function DragHandle({
       onDblClick={e=>{ e.cancelBubble = true; onMenu?.(e); }}
       onDblTap={e=>{ e.cancelBubble = true; onMenu?.(e); }}
       onContextMenu={e=>{ e.evt.preventDefault(); e.cancelBubble = true; onMenu?.(e); }}
-      onDragStart={e=>{ e.target.getStage().container().style.cursor="grabbing"; }}
+      onDragStart={e=>{ e.target.getStage().container().style.cursor="grabbing"; onDragStart?.(e); }}
       onDragMove={onDragMove}
       onDragEnd={e=>{ e.target.getStage().container().style.cursor="grab"; onDragEnd(e); }}
       onMouseEnter={e=>{ e.target.getStage().container().style.cursor="grab"; }}
@@ -651,7 +653,7 @@ function RoomShape({
   onRoomClick, onWallClick, onWallHover, onWallHoverOut,
   selectedOpening, onOpeningClick, onOpeningMenu,
   onGeometryMenu,
-  onCornerMouseDown, onCornerDragMove, onCornerDragEnd,
+  onCornerMouseDown, onCornerDragStart, onCornerDragMove, onCornerDragEnd,
 }) {
   const flat = room.points.flatMap(p=>[p.x,p.y]);
   const cx   = room.points.reduce((s,p)=>s+p.x,0)/room.points.length;
@@ -731,6 +733,7 @@ function RoomShape({
         const isSel = selectedCorner?.roomId===room.id && selectedCorner?.ptIdx===ptIdx;
         return <DragHandle key={ptIdx} x={p.x} y={p.y} isSelected={isSel}
           onMouseDown={()=>onCornerMouseDown(room.id,ptIdx)}
+          onDragStart={()=>onCornerDragStart(room.id,ptIdx)}
           onMenu={(e)=>onGeometryMenu({ type: "point", roomId: room.id, pointIndex: ptIdx, event: e })}
           onDragMove={e=>{
             const sn=onCornerDragMove(room.id,ptIdx,e.target.x(),e.target.y());
@@ -1077,8 +1080,13 @@ export default function RoomCanvas({ initialPlan = null }) {
   });
   const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: "idle", usdz: "idle" });
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
+  const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const autosaveRef = useRef(null);
   const isSaving = saveStatus === "saving";
+
+  const collapseMobileControls = useCallback(() => {
+    setMobileControlsOpen(false);
+  }, []);
 
   const isTypingTarget = useCallback((target) => {
     if (!target) return false;
@@ -1092,7 +1100,7 @@ export default function RoomCanvas({ initialPlan = null }) {
     snapEnabled, setSnapEnabled, gridPx, setGridPx,
     draftPts, mousePos, snappedPos, closingSnap,
     handleCanvasClick, handleMouseMove, handleDoubleClick,
-    undo, redo, cancelDraft, clearAll,
+    undo, redo, canUndo, canRedo, beginHistoryAction, cancelDraft, clearAll,
     rooms, deleteRoom, renameRoom, dragCorner, deleteCorner, deleteWallEdge,
     updateFloor, applyRoomPreset,
     furniture, selectedFurnitureId, setSelectedFurnitureId,
@@ -1249,6 +1257,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   }, [stageView.scale, zoomStageAt]);
 
   const handleStageTouchStart = useCallback((event) => {
+    collapseMobileControls();
     const touches = event.evt.touches;
     if (!touches?.length) return;
 
@@ -1267,7 +1276,7 @@ export default function RoomCanvas({ initialPlan = null }) {
         y: touches[0].clientY,
       };
     }
-  }, []);
+  }, [collapseMobileControls]);
 
   const handleStageTouchMove = useCallback((event) => {
     const touches = event.evt.touches;
@@ -1375,7 +1384,7 @@ export default function RoomCanvas({ initialPlan = null }) {
     replacePlan(plan);
     setProjectName(data.title || data.name || "Untitled Room");
     setCurrentProjectId(data.id);
-    setShareUrl(data.share_url || "");
+    setShareUrl(normalizeShareUrl(data.share_url));
     setModelAssets(data.model_assets || {
       glb_url: null,
       usdz_url: null,
@@ -1435,7 +1444,7 @@ export default function RoomCanvas({ initialPlan = null }) {
       const data = response.data;
       setCurrentProjectId(data.id);
       setProjectName(data.title || name);
-      setShareUrl(data.share_url || "");
+      setShareUrl(normalizeShareUrl(data.share_url));
       setModelAssets(data.model_assets || {
         glb_url: null,
         usdz_url: null,
@@ -1694,10 +1703,65 @@ export default function RoomCanvas({ initialPlan = null }) {
 
   return (
     <div className="lumiere-wrapper">
+      <button
+        type="button"
+        className={`mobile-editor-menu-button${mobileControlsOpen ? " is-open" : ""}`}
+        aria-label={mobileControlsOpen ? "Close editor controls" : "Open editor controls"}
+        aria-expanded={mobileControlsOpen}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => setMobileControlsOpen((open) => !open)}
+      >
+        <span />
+        <span />
+        <span />
+      </button>
       {/* ══════════════════════════════ SIDEBAR */}
-      <aside className="lumiere-sidebar">
+      <aside
+        className={`lumiere-sidebar${mobileControlsOpen ? " mobile-open" : ""}`}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="sidebar-header">
           <div className="sidebar-logo">Lumière <span>Maison Studio</span></div>
+        </div>
+
+        <div className="mobile-editor-menu-actions">
+          <button
+            type="button"
+            onClick={() => setSaveModalOpen(true)}
+            disabled={isSaving}
+            className="canvas-action-btn canvas-action-btn-save"
+          >
+            <SaveOutlined />
+            {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={switchTo3D}
+            disabled={isSaving}
+            className="canvas-action-btn canvas-action-btn-view"
+          >
+            Switch to 3D
+          </button>
+          <div className="canvas-nav-segment" role="group" aria-label="Editor navigation">
+            <button
+              type="button"
+              onClick={handleDashboard}
+              disabled={isSaving}
+              className="canvas-segment-btn"
+            >
+              <AppstoreOutlined />
+              Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={isSaving}
+              className="canvas-segment-btn canvas-segment-btn-danger"
+            >
+              <LogoutOutlined />
+              Logout
+            </button>
+          </div>
         </div>
 
         {/* Tools */}
@@ -1731,8 +1795,8 @@ export default function RoomCanvas({ initialPlan = null }) {
         <div className="sidebar-section">
           <div className="sidebar-section-title">History</div>
           <div style={{display:"flex",gap:4}}>
-            <ToolBtn label="Undo" shortcut="⌘Z" icon="M9 14L4 9l5-5M4 9h10.5a4.5 4.5 0 0 1 0 9H11" onClick={undo}/>
-            <ToolBtn label="Redo" shortcut="⌘Y" icon="M15 14l5-5-5-5M19 9H8.5a4.5 4.5 0 0 0 0 9H13" onClick={redo}/>
+            <ToolBtn label="Undo" shortcut="⌘Z" icon="M9 14L4 9l5-5M4 9h10.5a4.5 4.5 0 0 1 0 9H11" onClick={undo} disabled={!canUndo}/>
+            <ToolBtn label="Redo" shortcut="⌘Y" icon="M15 14l5-5-5-5M19 9H8.5a4.5 4.5 0 0 0 0 9H13" onClick={redo} disabled={!canRedo}/>
           </div>
         </div>
 
@@ -1927,7 +1991,7 @@ export default function RoomCanvas({ initialPlan = null }) {
       </aside>
 
       {/* ══════════════════════════════ CANVAS */}
-      <div className="canvas-area">
+      <div className="canvas-area" onPointerDown={collapseMobileControls}>
         <div className="canvas-topbar">
           <div className="topbar-breadcrumb">
             <strong>Floor Plan</strong>
@@ -2028,6 +2092,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                   onWallHover={(rId,wId)=>setHoveredWall({roomId:rId,wallId:wId})}
                   onWallHoverOut={()=>setHoveredWall(null)}
                   onCornerMouseDown={(rId,ptIdx)=>setSelectedCorner({roomId:rId,ptIdx})}
+                  onCornerDragStart={()=>beginHistoryAction()}
                   onCornerDragMove={(rId,ptIdx,x,y)=>dragCorner(rId,ptIdx,x,y)}
                   onCornerDragEnd={(rId,ptIdx,x,y)=>dragCorner(rId,ptIdx,x,y)}
                 />
@@ -2038,6 +2103,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                 <FurnitureShape key={item.id} item={item}
                   isSelected={selectedFurnitureId===item.id}
                   onSelect={e=>{e.cancelBubble=true;setSelectedFurnitureId(item.id);setSelectedRoom(null);}}
+                  onDragStart={()=>beginHistoryAction()}
                   onDragMove={e=>{
                     const sn=moveFurniture(item.id,e.target.x(),e.target.y());
                     if(sn){e.target.x(sn.x);e.target.y(sn.y);}
@@ -2278,3 +2344,4 @@ export default function RoomCanvas({ initialPlan = null }) {
     </div>
   );
 }
+

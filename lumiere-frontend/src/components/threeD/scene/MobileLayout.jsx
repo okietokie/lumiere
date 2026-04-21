@@ -40,6 +40,23 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose?.();
+    };
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose, open]);
+
   return (
     <>
       {/* Backdrop */}
@@ -47,9 +64,10 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
         <div
           onClick={onClose}
           style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
+            position: 'fixed', inset: 0, zIndex: 1300,
             background: 'rgba(12, 9, 7, 0.56)',
             backdropFilter: 'blur(8px)',
+            touchAction: 'none',
           }}
         />
       )}
@@ -57,13 +75,17 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
       {/* Panel */}
       <div
         ref={panelRef}
+        role="dialog"
+        aria-modal={open ? 'true' : undefined}
+        aria-hidden={!open}
         style={{
           position:        'fixed',
           bottom:          0,
           left:            0,
           right:           0,
           height,
-          zIndex:          1001,
+          maxHeight:       'calc(100dvh - env(safe-area-inset-top, 0px) - 12px)',
+          zIndex:          1301,
           background:      `linear-gradient(180deg, ${COLORS.surface}F7 0%, ${COLORS.background}FC 100%)`,
           borderRadius:    '8px 8px 0 0',
           borderTop:       `1px solid ${COLORS.secondary}66`,
@@ -72,12 +94,28 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
           display:         'flex',
           flexDirection:   'column',
           overflow:        'hidden',
+          pointerEvents:    open ? 'auto' : 'none',
+          touchAction:      'pan-y',
         }}
       >
         {/* Drag handle */}
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px' }}>
-          <div style={{ width: 42, height: 5, borderRadius: 999, background: `linear-gradient(90deg, ${COLORS.action}CC, ${COLORS.accent}CC)` }} />
-        </div>
+        <button
+          type="button"
+          aria-label="Close panel"
+          onClick={onClose}
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            minHeight: 30,
+            padding: '12px 0 4px',
+            border: 0,
+            background: 'transparent',
+            cursor: 'pointer',
+          }}
+        >
+          <span style={{ width: 52, height: 5, borderRadius: 999, background: `linear-gradient(90deg, ${COLORS.action}CC, ${COLORS.accent}CC)` }} />
+        </button>
 
         {/* Header */}
         <div style={{
@@ -95,7 +133,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
             style={{
               background: `${COLORS.background}CC`,
               border: `1px solid ${COLORS.secondary}55`, borderRadius: 8,
-              width: 32, height: 32,
+              width: 44, height: 44,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: COLORS.text, cursor: 'pointer',
             }}
@@ -105,7 +143,7 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
         </div>
 
         {/* Scrollable content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 24px', WebkitOverflowScrolling: 'touch', background: 'linear-gradient(180deg, rgba(58,48,43,0.16) 0%, rgba(44,36,32,0) 100%)' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '16px 20px calc(28px + env(safe-area-inset-bottom, 0px))', WebkitOverflowScrolling: 'touch', background: 'linear-gradient(180deg, rgba(58,48,43,0.16) 0%, rgba(44,36,32,0) 100%)' }}>
           {children}
         </div>
       </div>
@@ -127,7 +165,7 @@ export function BottomNav({ activeTab, onTabChange }) {
       bottom:         0,
       left:           0,
       right:          0,
-      zIndex:         999,
+      zIndex:         1200,
       background:     `${COLORS.background}F2`,
       borderTop:      `1px solid ${COLORS.secondary}55`,
       backdropFilter: 'blur(20px)',
@@ -137,8 +175,11 @@ export function BottomNav({ activeTab, onTabChange }) {
       gap:            6,
       overflow:       'hidden',
       padding:        '8px 10px',
-      paddingBottom:  'env(safe-area-inset-bottom, 8px)',
+      paddingBottom:  'calc(8px + env(safe-area-inset-bottom, 0px))',
       boxShadow:      '0 -8px 28px rgba(0,0,0,0.35)',
+      minHeight:      'calc(64px + env(safe-area-inset-bottom, 0px))',
+      transform:      'translateZ(0)',
+      WebkitTransform:'translateZ(0)',
     }}>
       {tabs.map((tab) => {
         const active = activeTab === tab.key || (tab.key === 'more' && (activeTab === 'projects' || activeTab === 'room'));
@@ -180,7 +221,15 @@ export function BottomNav({ activeTab, onTabChange }) {
     </div>
   );
 }
-export function MobileTopBar({ onCameraToggle, cameraMode, projectName, editorMode = '3D', onSwitchEditor }) {
+export function MobileTopBar({
+  onCameraToggle,
+  cameraMode,
+  projectName,
+  editorMode = '3D',
+  onSwitchEditor,
+  cameraToggleLabel,
+  cameraToggleActive,
+}) {
   return (
     <div style={{
       position:       'fixed',
@@ -237,10 +286,10 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName, editorMo
             alignItems:     'center',
             gap:            5,
             padding:        '8px 10px',
-            background:     cameraMode === 'firstPerson' ? `${COLORS.surface}` : `${COLORS.background}CC`,
-            border:         `1px solid ${cameraMode === 'firstPerson' ? COLORS.action : COLORS.secondary}66`,
+            background:     cameraToggleActive ? `${COLORS.surface}` : `${COLORS.background}CC`,
+            border:         `1px solid ${cameraToggleActive ? COLORS.action : COLORS.secondary}66`,
             borderRadius:   8,
-            color:          cameraMode === 'firstPerson' ? COLORS.action : COLORS.text,
+            color:          cameraToggleActive ? COLORS.action : COLORS.text,
             fontSize:       12,
             fontFamily:     '"Plus Jakarta Sans", Inter, sans-serif',
             fontWeight:     600,
@@ -249,8 +298,8 @@ export function MobileTopBar({ onCameraToggle, cameraMode, projectName, editorMo
             whiteSpace:     'nowrap',
           }}
         >
-          <Icon d={ICONS.camera} size={16} color={cameraMode === 'firstPerson' ? COLORS.action : COLORS.text} />
-          {cameraMode === 'firstPerson' ? 'Walk' : 'Orbit'}
+          <Icon d={ICONS.camera} size={16} color={cameraToggleActive ? COLORS.action : COLORS.text} />
+          {cameraToggleLabel ?? (cameraMode === 'firstPerson' ? 'Walk' : 'Orbit')}
         </button>
       )}
     </div>

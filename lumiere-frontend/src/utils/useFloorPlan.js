@@ -244,7 +244,7 @@ export function useFloorPlan(initialState = null) {
   // Store snapshots of { rooms, furniture } only (not UI state)
   const historyRef  = useRef([]);
   const futureRef   = useRef([]);
-  const MAX_HISTORY = 50;
+  const MAX_HISTORY = 10;
 
   const snapshot = useCallback(() => {
     return {
@@ -254,7 +254,7 @@ export function useFloorPlan(initialState = null) {
   }, [rooms, furniture]);
 
   const pushHistory = useCallback(() => {
-    historyRef.current = [...historyRef.current.slice(-MAX_HISTORY), snapshot()];
+    historyRef.current = [...historyRef.current.slice(-(MAX_HISTORY - 1)), snapshot()];
     futureRef.current  = [];
   }, [snapshot]);
 
@@ -265,7 +265,7 @@ export function useFloorPlan(initialState = null) {
     }
     const prev = historyRef.current.pop();
     if (!prev) return;
-    futureRef.current = [snapshot(), ...futureRef.current];
+    futureRef.current = [snapshot(), ...futureRef.current].slice(0, MAX_HISTORY);
     setRooms(prev.rooms);
     setFurniture(prev.furniture);
   }, [mode, draftPts, snapshot]);
@@ -273,10 +273,13 @@ export function useFloorPlan(initialState = null) {
   const redo = useCallback(() => {
     const next = futureRef.current.shift();
     if (!next) return;
-    historyRef.current = [...historyRef.current, snapshot()];
+    historyRef.current = [...historyRef.current.slice(-(MAX_HISTORY - 1)), snapshot()];
     setRooms(next.rooms);
     setFurniture(next.furniture);
   }, [snapshot]);
+
+  const canUndo = historyRef.current.length > 0 || (mode === "draw" && draftPts.length > 0);
+  const canRedo = futureRef.current.length > 0;
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const isNearFirst = useCallback((x, y, pts) => {
@@ -407,6 +410,7 @@ export function useFloorPlan(initialState = null) {
   }, [pushHistory]);
 
   const updateOpening = useCallback((roomId, wallId, openingId, updates) => {
+    pushHistory();
     setRooms(prev => prev.map(room => {
       if (room.id !== roomId) return room;
       return {
@@ -426,7 +430,7 @@ export function useFloorPlan(initialState = null) {
         }),
       };
     }));
-  }, []);
+  }, [pushHistory]);
 
   // ── drag corner ───────────────────────────────────────────────────────────
   const dragCorner = useCallback((roomId, ptIdx, rawX, rawY) => {
@@ -439,6 +443,10 @@ export function useFloorPlan(initialState = null) {
     }));
     return { x, y };
   }, [snap]);
+
+  const beginHistoryAction = useCallback(() => {
+    pushHistory();
+  }, [pushHistory]);
 
   const deleteCorner = useCallback((roomId, ptIdx) => {
     pushHistory();
@@ -498,17 +506,20 @@ export function useFloorPlan(initialState = null) {
   }, [pushHistory]);
 
   const updateFurnitureColor = useCallback((id, color) => {
+    pushHistory();
     setFurniture(prev => prev.map(f => f.id === id ? { ...f, color } : f));
-  }, []);
+  }, [pushHistory]);
 
   // ── floor ─────────────────────────────────────────────────────────────────
   const updateFloor = useCallback((roomId, props) => {
+    pushHistory();
     setRooms(prev => prev.map(r =>
       r.id !== roomId ? r : { ...r, floor: { ...r.floor, ...props } }
     ));
-  }, []);
+  }, [pushHistory]);
 
   const applyRoomPreset = useCallback((roomId, presetType) => {
+    pushHistory();
     const p = ROOM_PRESETS.find(x => x.type === presetType) ?? ROOM_PRESETS.at(-1);
     setRooms(prev => prev.map(r =>
       r.id !== roomId ? r : {
@@ -516,19 +527,21 @@ export function useFloorPlan(initialState = null) {
         floor: { ...r.floor, type: p.type, color: p.color, opacity: p.opacity },
       }
     ));
-  }, []);
+  }, [pushHistory]);
 
   // ── wall thickness ────────────────────────────────────────────────────────
   const applyGlobalThickness = useCallback((t) => {
+    pushHistory();
     setWallThickness(t);
     setRooms(prev => prev.map(r => ({
       ...r, walls: r.walls.map(w => ({ ...w, thickness: t })),
     })));
-  }, []);
+  }, [pushHistory]);
 
-  const renameRoom = useCallback((roomId, name) =>
-    setRooms(prev => prev.map(r => r.id === roomId ? { ...r, name } : r))
-  , []);
+  const renameRoom = useCallback((roomId, name) => {
+    pushHistory();
+    setRooms(prev => prev.map(r => r.id === roomId ? { ...r, name } : r));
+  }, [pushHistory]);
 
   const deleteRoom = useCallback((roomId) => {
     pushHistory();
@@ -594,7 +607,7 @@ export function useFloorPlan(initialState = null) {
     snapEnabled, setSnapEnabled, gridPx, setGridPx, snap,
     draftPts, mousePos, snappedPos, closingSnap,
     handleCanvasClick, handleMouseMove, handleDoubleClick,
-    undo, redo, cancelDraft, clearAll,
+    undo, redo, canUndo, canRedo, beginHistoryAction, cancelDraft, clearAll,
     rooms, closeRoom, deleteRoom, renameRoom, dragCorner, deleteCorner, deleteWallEdge,
     updateFloor, applyRoomPreset,
     furniture, selectedFurnitureId, setSelectedFurnitureId,

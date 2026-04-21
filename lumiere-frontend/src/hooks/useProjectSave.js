@@ -12,6 +12,7 @@ import {
   getRoomIdForPosition,
 } from '../utils/measurements';
 import { createEmptySceneBudget } from '../utils/budgetContract';
+import { normalizeShareUrl } from '../utils/shareUrl';
 import { useBudgetStore } from '../stores/useBudgetStore';
 
 const AUTOSAVE_MS = 30_000;
@@ -343,7 +344,7 @@ export default function useProjectSave({
       hydrateBudgetFromScene(data.scene_data?.budget ?? data.scene?.budget ?? scene.budget);
       setCurrentProjectId(data.id);
       setProjectName(data.title || name);
-      setShareUrl(data.share_url || '');
+      setShareUrl(normalizeShareUrl(data.share_url));
       setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2500);
@@ -437,7 +438,7 @@ export default function useProjectSave({
       });
       setProjectName(data.title || data.name);
       setCurrentProjectId(data.id);
-      setShareUrl(data.share_url || '');
+      setShareUrl(normalizeShareUrl(data.share_url));
       setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
     }
     return data;
@@ -464,7 +465,7 @@ export default function useProjectSave({
       });
       setProjectName(data.title || data.name || DEFAULT_PROJECT_NAME);
       setCurrentProjectId(data.id);
-      setShareUrl(data.share_url || '');
+      setShareUrl(normalizeShareUrl(data.share_url));
       setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
       return data;
     } catch (error) {

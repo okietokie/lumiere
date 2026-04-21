@@ -4,6 +4,7 @@ export default function useHistory(initialState) {
   const [state, setState] = useState(initialState);
   const [past, setPast] = useState([]);
   const [future, setFuture] = useState([]);
+  const HISTORY_LIMIT = 10;
 
   const set = useCallback((newS, overwrite = false) => {
     const newState = typeof newS === 'function' ? newS(state) : newS;
@@ -13,7 +14,7 @@ export default function useHistory(initialState) {
       return;
     }
 
-    setPast((prevPast) => [...prevPast, state]);
+    setPast((prevPast) => [...prevPast.slice(-(HISTORY_LIMIT - 1)), state]);
     setState(newState);
     setFuture([]);
   }, [state]);
@@ -24,7 +25,7 @@ export default function useHistory(initialState) {
     const previous = past[past.length - 1];
     const newPast = past.slice(0, past.length - 1);
 
-    setFuture((prevFuture) => [state, ...prevFuture]);
+    setFuture((prevFuture) => [state, ...prevFuture].slice(0, HISTORY_LIMIT));
     setPast(newPast);
     setState(previous);
   }, [past, state]);
@@ -35,7 +36,7 @@ export default function useHistory(initialState) {
     const next = future[0];
     const newFuture = future.slice(1);
 
-    setPast((prevPast) => [...prevPast, state]);
+    setPast((prevPast) => [...prevPast.slice(-(HISTORY_LIMIT - 1)), state]);
     setFuture(newFuture);
     setState(next);
   }, [future, state]);

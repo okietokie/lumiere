@@ -31,6 +31,7 @@ export default function RevealActionButton({
   };
 
   const isPill = variant === "pill";
+  const isPanel = variant === "panel";
   const isSidebar = variant === "sidebar";
   const expanded = isPill ? true : revealed;
   const showIcon = !isPill && !!Icon;
@@ -113,6 +114,67 @@ export default function RevealActionButton({
         >
           {label}
         </span>
+      </button>
+    );
+  }
+
+  if (isPanel) {
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onClick}
+        style={{
+          position: "relative",
+          width: "100%",
+          minWidth: 0,
+          minHeight: 62,
+          padding: "0 18px",
+          borderRadius: 999,
+          border: `1px solid ${borderColor}`,
+          background: active
+            ? `linear-gradient(135deg, ${COLORS.action} 0%, ${COLORS.accent} 100%)`
+            : `linear-gradient(180deg, rgba(62, 48, 41, 0.94) 0%, rgba(41, 31, 27, 0.96) 100%)`,
+          color: active ? COLORS.background : textColor,
+          boxShadow: active
+            ? "0 16px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.14)"
+            : `0 0 0 4px ${ringColor}, inset 0 1px 0 rgba(255,255,255,0.05)`,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: "0.01em",
+          transition: "transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease, background 0.24s ease, color 0.24s ease",
+          outline: "none",
+        }}
+        onMouseEnter={() => setRevealed(true)}
+        onMouseLeave={() => setRevealed(false)}
+        onFocus={() => setRevealed(true)}
+        onBlur={() => setRevealed(false)}
+      >
+        {Icon && (
+          <span
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: "50%",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: active ? "rgba(28, 22, 18, 0.16)" : "rgba(196, 154, 108, 0.12)",
+              color: active ? COLORS.background : COLORS.action,
+              boxShadow: active ? "none" : "inset 0 1px 0 rgba(255,255,255,0.05)",
+              transform: revealed ? "scale(1.04)" : "scale(1)",
+              transition: "transform 0.2s ease",
+            }}
+          >
+            <Icon style={{ fontSize: 16 }} />
+          </span>
+        )}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       </button>
     );
   }

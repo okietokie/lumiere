@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Html, Text } from '@react-three/drei';
 import * as THREE from 'three';
@@ -28,6 +28,10 @@ const InteractiveWall = React.forwardRef(({
   const dragState = useRef(null);   // { type, origin, initStart, initEnd }
   const openingDragState = useRef(null);
   const openingCommittedOnPointerDown = useRef(false);
+  const wallLongPressTimer = useRef(null);
+  const openingTouchHoldRef = useRef(null);
+  const suppressWallClickRef = useRef(false);
+  const suppressOpeningClickRef = useRef(null);
   const meshRef   = useRef();
 
   const {
@@ -183,13 +187,25 @@ const InteractiveWall = React.forwardRef(({
   }, [releaseOrbitOnPointerUp, setOrbitEnabled]);
 
   const handleWallPointerMove = useCallback((e) => {
+    if (wallLongPressTimer.current) {
+      window.clearTimeout(wallLongPressTimer.current);
+      wallLongPressTimer.current = null;
+    }
     if (!activeOpeningTool) return;
     e.stopPropagation();
     onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
   }, [activeOpeningTool, onOpeningPreviewMove]);
 
   const handleWallClick = useCallback((e) => {
+    if (wallLongPressTimer.current) {
+      window.clearTimeout(wallLongPressTimer.current);
+      wallLongPressTimer.current = null;
+    }
     e.stopPropagation();
+    if (suppressWallClickRef.current) {
+      suppressWallClickRef.current = false;
+      return;
+    }
     if (activeOpeningTool) {
       if (openingCommittedOnPointerDown.current) {
         openingCommittedOnPointerDown.current = false;
@@ -204,6 +220,19 @@ const InteractiveWall = React.forwardRef(({
   const handleWallPointerDown = useCallback((e) => {
     e.stopPropagation();
     pauseOrbitUntilPointerUp();
+    const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+    const pointerType = sourceEvent?.pointerType ?? e.pointerType;
+    const isTouchPointer = pointerType ? pointerType !== 'mouse' : false;
+    if (!activeOpeningTool && isTouchPointer) {
+      if (wallLongPressTimer.current) window.clearTimeout(wallLongPressTimer.current);
+      const clientX = sourceEvent?.clientX ?? e.clientX ?? 0;
+      const clientY = sourceEvent?.clientY ?? e.clientY ?? 0;
+      wallLongPressTimer.current = window.setTimeout(() => {
+        wallLongPressTimer.current = null;
+        suppressWallClickRef.current = true;
+        onContextMenu?.({ wall, clientX, clientY });
+      }, 520);
+    }
     if (activeOpeningTool) {
       onOpeningPreviewMove?.(activeOpeningTool, [e.point.x, e.point.z]);
       openingCommittedOnPointerDown.current = Boolean(onOpeningCommit?.([e.point.x, e.point.z]));
@@ -211,7 +240,7 @@ const InteractiveWall = React.forwardRef(({
     }
     openingCommittedOnPointerDown.current = false;
     onSelect?.();
-  }, [activeOpeningTool, onOpeningCommit, onOpeningPreviewMove, onSelect, pauseOrbitUntilPointerUp]);
+  }, [activeOpeningTool, onContextMenu, onOpeningCommit, onOpeningPreviewMove, onSelect, pauseOrbitUntilPointerUp, wall]);
 
   const handleWallContextMenu = useCallback((e) => {
     e.stopPropagation();
@@ -364,6 +393,75 @@ const InteractiveWall = React.forwardRef(({
     window.addEventListener('pointerup', onUp);
   }, [clampOpening, getWallPlanePos, gl, length, projectOffsetAlongWall, setOrbitEnabled, updateOpening]);
 
+  const clearOpeningTouchHold = useCallback(() => {
+    const state = openingTouchHoldRef.current;
+    if (!state) return;
+    if (state.timer) window.clearTimeout(state.timer);
+    window.removeEventListener('pointermove', state.onMove);
+    window.removeEventListener('pointerup', state.onUp);
+    window.removeEventListener('pointercancel', state.onCancel);
+    openingTouchHoldRef.current = null;
+  }, []);
+
+  const beginOpeningTouchGesture = useCallback((e, openingType, opening) => {
+    const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+    const pointerType = sourceEvent?.pointerType ?? e.pointerType;
+    const isTouchPointer = pointerType ? pointerType !== 'mouse' : false;
+    if (!isTouchPointer) {
+      onOpeningSelect?.({ id: opening.id, type: openingType });
+      startOpeningDrag(e, openingType, opening, 'move');
+      return;
+    }
+
+    e.stopPropagation();
+    onOpeningSelect?.({ id: opening.id, type: openingType });
+    clearOpeningTouchHold();
+
+    const clientX = sourceEvent?.clientX ?? e.clientX ?? 0;
+    const clientY = sourceEvent?.clientY ?? e.clientY ?? 0;
+    const pointerId = sourceEvent?.pointerId ?? e.pointerId;
+    const openingKey = `${openingType}:${opening.id}`;
+
+    const onUp = () => clearOpeningTouchHold();
+    const onCancel = () => clearOpeningTouchHold();
+    const onMove = (moveEvent) => {
+      const dx = (moveEvent.clientX ?? clientX) - clientX;
+      const dy = (moveEvent.clientY ?? clientY) - clientY;
+      if (Math.hypot(dx, dy) < 10) return;
+      clearOpeningTouchHold();
+      startOpeningDrag({
+        stopPropagation: () => {},
+        pointerId,
+        clientX,
+        clientY,
+      }, openingType, opening, 'move');
+    };
+
+    const timer = window.setTimeout(() => {
+      clearOpeningTouchHold();
+      suppressOpeningClickRef.current = openingKey;
+      onOpeningMenu?.({
+        id: opening.id,
+        type: openingType,
+        clientX,
+        clientY,
+      });
+    }, 520);
+
+    openingTouchHoldRef.current = { timer, onMove, onUp, onCancel };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  }, [clearOpeningTouchHold, onOpeningMenu, onOpeningSelect, startOpeningDrag]);
+
+  useEffect(() => () => {
+    if (wallLongPressTimer.current) {
+      window.clearTimeout(wallLongPressTimer.current);
+      wallLongPressTimer.current = null;
+    }
+    clearOpeningTouchHold();
+  }, [clearOpeningTouchHold]);
+
   const handleOpeningDoubleClick = useCallback((e, openingType, opening) => {
     e.stopPropagation();
     onOpeningSelect?.({ id: opening.id, type: openingType });
@@ -492,13 +590,14 @@ const InteractiveWall = React.forwardRef(({
             frameColor={preview ? tint : (selected ? '#8b6a4f' : '#7b5e47')}
             doorColor={preview ? tint : '#d8c2a8'}
             handleColor={preview ? '#2d2d2d' : '#1f1f1f'}
-            onDoorPointerDown={preview ? undefined : (e) => {
-              onOpeningSelect?.({ id: opening.id, type: openingType });
-              startOpeningDrag(e, openingType, opening, 'move');
-            }}
+            onDoorPointerDown={preview ? undefined : (e) => beginOpeningTouchGesture(e, openingType, opening)}
             onClick={(e) => {
               if (preview) return;
               e.stopPropagation();
+              if (suppressOpeningClickRef.current === `${openingType}:${opening.id}`) {
+                suppressOpeningClickRef.current = null;
+                return;
+              }
               onOpeningSelect?.({ id: opening.id, type: openingType });
             }}
           />
@@ -592,13 +691,14 @@ const InteractiveWall = React.forwardRef(({
           frameColor={preview ? tint : (selected ? '#8b6a4f' : '#7b5e47')}
           glassColor={preview ? tint : '#9cc7da'}
           windowStyle={opening.windowStyle ?? 'sliding'}
-          onWindowPointerDown={preview ? undefined : (e) => {
-            onOpeningSelect?.({ id: opening.id, type: openingType });
-            startOpeningDrag(e, openingType, opening, 'move');
-          }}
+          onWindowPointerDown={preview ? undefined : (e) => beginOpeningTouchGesture(e, openingType, opening)}
           onClick={(e) => {
             if (preview) return;
             e.stopPropagation();
+            if (suppressOpeningClickRef.current === `${openingType}:${opening.id}`) {
+              suppressOpeningClickRef.current = null;
+              return;
+            }
             onOpeningSelect?.({ id: opening.id, type: openingType });
           }}
         />
@@ -691,6 +791,18 @@ const InteractiveWall = React.forwardRef(({
           onClick={handleWallClick}
           onPointerDown={handleWallPointerDown}
           onPointerMove={handleWallPointerMove}
+          onPointerUp={() => {
+            if (wallLongPressTimer.current) {
+              window.clearTimeout(wallLongPressTimer.current);
+              wallLongPressTimer.current = null;
+            }
+          }}
+          onPointerLeave={() => {
+            if (wallLongPressTimer.current) {
+              window.clearTimeout(wallLongPressTimer.current);
+              wallLongPressTimer.current = null;
+            }
+          }}
           onContextMenu={handleWallContextMenu}
           onPointerOver={() => setHovered(true)}
           onPointerOut={() => setHovered(false)}

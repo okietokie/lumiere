@@ -120,9 +120,9 @@ function RouteShell() {
 
     if (isFullscreenRoute) {
       html.style.overflow = "hidden";
-      html.style.height = "100%";
+      html.style.height = "100dvh";
       body.style.overflow = "hidden";
-      body.style.height = "100%";
+      body.style.height = "100dvh";
       body.style.touchAction = "none";
     } else {
       html.style.overflowX = "hidden";
@@ -247,8 +247,8 @@ function RouteShell() {
         data-barba-namespace={routeNamespace}
         data-route-shell
         style={{
-          minHeight: "100vh",
-          height: isFullscreenRoute ? "100vh" : "auto",
+          minHeight: isFullscreenRoute ? "100dvh" : "100vh",
+          height: isFullscreenRoute ? "100dvh" : "auto",
           width: "100vw",
           overflowX: "hidden",
           overflowY: isFullscreenRoute ? "hidden" : "visible",

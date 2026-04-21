@@ -148,6 +148,12 @@ const ROOM_ACTION_BUTTONS = [
   { key: 'direction', icon: KeyboardDoubleArrowRightRoundedIcon, label: 'Change Side' },
   { key: 'delete', icon: DeleteOutlined, label: 'Delete Room' },
 ];
+const CAMERA_PRESET_OPTIONS = [
+  { key: 'orbit', label: 'Orbit', shortLabel: 'Free', icon: EyeOutlined },
+  { key: 'front', label: 'Front', shortLabel: 'Front', icon: SpaceDashboardRoundedIcon },
+  { key: 'side', label: 'Side', shortLabel: 'Side', icon: VerticalRightOutlined },
+  { key: 'top', label: 'Top', shortLabel: 'Top', icon: VerticalLeftOutlined, iconStyle: { transform: 'rotate(-90deg)' } },
+];
 const ROOM_CREATION_ROOT_SELECTOR = '[data-room-creation-root="true"]';
 const BUDGET_SCOPE_LABELS = {
   [BUDGET_RULE_SCOPES.SINGLE_ITEM]: 'This item only',
@@ -550,7 +556,6 @@ export default function RoomScene({ initialScene = null }) {
   );
   const {
     state: walls, set: setWalls,
-    undo, redo, canUndo, canRedo,
   } = useHistory(initialWalls);
   const {
     floorMaterial, ceilingMaterial,
@@ -632,6 +637,9 @@ export default function RoomScene({ initialScene = null }) {
   const loadingProjectIdRef = useRef(null);
   const loadProjectRef = useRef(null);
   const desktopFloatingRef = useRef(null);
+  const sceneHistoryPastRef = useRef([]);
+  const sceneHistoryFutureRef = useRef([]);
+  const [, setSceneHistoryVersion] = useState(0);
 
   const screens = Grid.useBreakpoint();
   const { navigateTo } = useContextNav(setActiveTab);
@@ -642,22 +650,63 @@ export default function RoomScene({ initialScene = null }) {
 
   // Mobile detection 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [isTouchDevice, setIsTouchDevice] = useState(() => (
+    window.matchMedia?.('(pointer: coarse)')?.matches
+    || (navigator.maxTouchPoints ?? 0) > 0
+  ));
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [mobileDoorEditorSection, setMobileDoorEditorSection] = useState(null);
+  const supportsFirstPersonWalk = !isTouchDevice;
+  const gizmoHelperPlacement = useMemo(() => {
+    if (isMobile) {
+      return { alignment: 'top-right', margin: [30, 50], viewportScale: 34 };
+    }
+
+    if (!screens.lg) {
+      return { alignment: 'bottom-center', margin: [0, 28], viewportScale: 38 };
+    }
+
+    return { alignment: 'bottom-center', margin: [0, 32], viewportScale: 40 };
+  }, [isMobile, screens.lg]);
   const isTypingTarget = useCallback((target) => {
     if (!target) return false;
     const tagName = target.tagName?.toLowerCase();
     return tagName === 'input' || tagName === 'textarea' || target.isContentEditable;
   }, []);
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
+    const coarseQuery = window.matchMedia?.('(pointer: coarse)');
+    const handler = () => {
+      setIsMobile(window.innerWidth < 768);
+      setIsTouchDevice(
+        coarseQuery?.matches
+        || (navigator.maxTouchPoints ?? 0) > 0
+      );
+    };
+
+    handler();
     window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
+    coarseQuery?.addEventListener?.('change', handler);
+
+    return () => {
+      window.removeEventListener('resize', handler);
+      coarseQuery?.removeEventListener?.('change', handler);
+    };
   }, []);
 
   useEffect(() => {
+    if (!supportsFirstPersonWalk && cameraMode === 'firstPerson') {
+      setCameraMode('orbit');
+      if (document.pointerLockElement) document.exitPointerLock();
+      setCurrentViewPreset((prev) => (prev === 'top' ? prev : 'perspective'));
+    }
+  }, [cameraMode, supportsFirstPersonWalk]);
+
+  useEffect(() => {
     if (!openingContextMenu) return undefined;
-    const closeMenu = () => setOpeningContextMenu(null);
+    const closeMenu = (event) => {
+      if (event?.target?.closest?.('[data-opening-context-menu-root="true"]')) return;
+      setOpeningContextMenu(null);
+    };
     const handleKey = (event) => {
       if (event.key === 'Escape') closeMenu();
     };
@@ -671,7 +720,10 @@ export default function RoomScene({ initialScene = null }) {
 
   useEffect(() => {
     if (!elementContextMenu) return undefined;
-    const closeMenu = () => setElementContextMenu(null);
+    const closeMenu = (event) => {
+      if (event?.target?.closest?.('[data-element-context-menu-root="true"]')) return;
+      setElementContextMenu(null);
+    };
     const handleKey = (event) => {
       if (event.key === 'Escape') closeMenu();
     };
@@ -1757,10 +1809,104 @@ export default function RoomScene({ initialScene = null }) {
       gsap.from(sceneRef.current, { opacity: 0, scale: 0.98, duration: 1, delay: 0.3, ease: "expo.out" });
   }, []);
 
+  const cloneSceneHistoryValue = useCallback((value) => {
+    if (typeof structuredClone === 'function') return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+  }, []);
+
+  const createSceneHistorySnapshot = useCallback(() => cloneSceneHistoryValue({
+    rooms,
+    walls,
+    placedItems,
+    floorMaterial,
+    ceilingMaterial,
+    placedLights,
+  }), [ceilingMaterial, cloneSceneHistoryValue, floorMaterial, placedItems, placedLights, rooms, walls]);
+
+  const bumpSceneHistoryVersion = useCallback(() => {
+    setSceneHistoryVersion((version) => version + 1);
+  }, []);
+
+  const pushSceneHistory = useCallback(() => {
+    sceneHistoryPastRef.current = [
+      ...sceneHistoryPastRef.current.slice(-9),
+      createSceneHistorySnapshot(),
+    ];
+    sceneHistoryFutureRef.current = [];
+    bumpSceneHistoryVersion();
+  }, [bumpSceneHistoryVersion, createSceneHistorySnapshot]);
+
+  const restoreSceneHistorySnapshot = useCallback((snapshot) => {
+    if (!snapshot) return;
+    setRooms(snapshot.rooms ?? []);
+    setWalls(snapshot.walls ?? [], true);
+    setPlacedItems(snapshot.placedItems ?? []);
+    setFloorMaterial(snapshot.floorMaterial);
+    setCeilingMaterial(snapshot.ceilingMaterial);
+    lightingState.setPlacedLights(snapshot.placedLights ?? []);
+    setSelectedWallId(null);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+    setSelectedOpening(null);
+    setOpeningPreview(null);
+    setOpeningContextMenu(null);
+    setElementContextMenu(null);
+    localMutationVersionRef.current += 1;
+  }, [
+    lightingState,
+    setCeilingMaterial,
+    setFloorMaterial,
+    setPlacedItems,
+    setRooms,
+    setSelectedLightId,
+    setWalls,
+  ]);
+
+  const undo = useCallback(() => {
+    const previous = sceneHistoryPastRef.current.pop();
+    if (!previous) return;
+    sceneHistoryFutureRef.current = [
+      createSceneHistorySnapshot(),
+      ...sceneHistoryFutureRef.current,
+    ].slice(0, 10);
+    restoreSceneHistorySnapshot(previous);
+    bumpSceneHistoryVersion();
+  }, [bumpSceneHistoryVersion, createSceneHistorySnapshot, restoreSceneHistorySnapshot]);
+
+  const redo = useCallback(() => {
+    const next = sceneHistoryFutureRef.current.shift();
+    if (!next) return;
+    sceneHistoryPastRef.current = [
+      ...sceneHistoryPastRef.current.slice(-9),
+      createSceneHistorySnapshot(),
+    ];
+    restoreSceneHistorySnapshot(next);
+    bumpSceneHistoryVersion();
+  }, [bumpSceneHistoryVersion, createSceneHistorySnapshot, restoreSceneHistorySnapshot]);
+
+  const canUndo = sceneHistoryPastRef.current.length > 0;
+  const canRedo = sceneHistoryFutureRef.current.length > 0;
+
   // Wall helpers
   const markSceneMutation = useCallback(() => {
+    pushSceneHistory();
     localMutationVersionRef.current += 1;
-  }, []);
+  }, [pushSceneHistory]);
+
+  const trackedApplyTexture = useCallback((...args) => {
+    markSceneMutation();
+    applyTexture(...args);
+  }, [applyTexture, markSceneMutation]);
+
+  const trackedUpdateSurface = useCallback((...args) => {
+    markSceneMutation();
+    updateSurface(...args);
+  }, [markSceneMutation, updateSurface]);
+
+  const trackedApplyTheme = useCallback((...args) => {
+    markSceneMutation();
+    applyTheme(...args);
+  }, [applyTheme, markSceneMutation]);
 
   const updateWall = (id, updates) => {
     markSceneMutation();
@@ -1818,6 +1964,17 @@ export default function RoomScene({ initialScene = null }) {
   const contextMenuActiveStyle = openingContextMenu?.type === 'door'
     ? (contextMenuOpeningEntity?.doorStyle ?? 'hinged')
     : (contextMenuOpeningEntity?.windowStyle ?? 'sliding');
+  const contextMenuDoorOpenSideLabel = useMemo(() => {
+    if (openingContextMenu?.type !== 'door' || !contextMenuOpeningEntity) return null;
+    const style = contextMenuOpeningEntity.doorStyle ?? 'hinged';
+    if (style === 'sliding') {
+      return (contextMenuOpeningEntity.slideDirection ?? 'right') === 'left' ? 'Slides Left' : 'Slides Right';
+    }
+    if (style === 'double') {
+      return (contextMenuOpeningEntity.opensInward ?? true) ? 'Opens Inward' : 'Opens Outward';
+    }
+    return (contextMenuOpeningEntity.hingeSide ?? 'left') === 'left' ? 'Hinge Left' : 'Hinge Right';
+  }, [contextMenuOpeningEntity, openingContextMenu]);
 
   const applyOpeningStyleFromContext = useCallback((styleKey) => {
     if (!openingContextMenu || !contextMenuOpeningEntity) return;
@@ -1829,6 +1986,22 @@ export default function RoomScene({ initialScene = null }) {
     updateWallOpening(openingContextMenu.wallId, openingContextMenu.type, openingContextMenu.id, updates);
     setOpeningContextMenu(null);
   }, [contextMenuOpeningEntity, openingContextMenu, updateWallOpening]);
+  const updateOpeningOpenSideFromContext = useCallback((updates) => {
+    if (!openingContextMenu || !contextMenuOpeningEntity) return;
+    updateWallOpening(openingContextMenu.wallId, openingContextMenu.type, openingContextMenu.id, updates);
+  }, [contextMenuOpeningEntity, openingContextMenu, updateWallOpening]);
+  const openingContextMenuPosition = useMemo(() => {
+    if (!openingContextMenu) return null;
+    const estimatedWidth = 244;
+    const estimatedHeight = openingContextMenu.type === 'door' ? 420 : 320;
+    const padding = 12;
+    const maxLeft = Math.max(padding, window.innerWidth - estimatedWidth - padding);
+    const maxTop = Math.max(padding, window.innerHeight - estimatedHeight - padding);
+    return {
+      left: Math.min(Math.max(openingContextMenu.x, padding), maxLeft),
+      top: Math.min(Math.max(openingContextMenu.y, padding), maxTop),
+    };
+  }, [openingContextMenu]);
 
   const updateOpeningNumericField = useCallback((field, rawValue) => {
     if (!selectedOpening || !selectedOpeningEntity) return;
@@ -2178,6 +2351,7 @@ export default function RoomScene({ initialScene = null }) {
     const removedLightCount = placedLights.length - nextPlacedLights.length;
     const removedAssetCount = removedFurnitureCount + removedLightCount;
 
+    markSceneMutation();
     setRooms(nextRooms);
     setWalls(nextWalls);
     setPlacedItems(nextPlacedItems);
@@ -2204,6 +2378,7 @@ export default function RoomScene({ initialScene = null }) {
     );
   }, [
     lightingState,
+    markSceneMutation,
     placedItems,
     placedLights,
     rebuildResolvedWalls,
@@ -2389,13 +2564,14 @@ export default function RoomScene({ initialScene = null }) {
 
   const renderRoomQuickActions = useCallback((room, variant = 'panel') => {
     const compact = variant !== 'scene';
+    const isPanelVariant = variant === 'panel' || variant === 'mobile';
     const isPendingRoomForDirection = (direction) => (
       roomCreation.pendingRoomCreation?.sourceRoomId === room.id
       && roomCreation.pendingRoomCreation.direction === direction
     );
     return (
       <div style={{
-        display: 'flex',
+        display: isPanelVariant ? 'contents' : 'flex',
         alignItems: 'center',
         flexWrap: compact ? 'wrap' : 'nowrap',
         gap: compact ? 8 : 10,
@@ -2599,7 +2775,7 @@ export default function RoomScene({ initialScene = null }) {
                 }
                 cycleRoomWallPlacementSide();
               }}
-              variant={compact ? 'pill' : 'reveal'}
+              variant={isPanelVariant ? 'panel' : compact ? 'pill' : 'reveal'}
             />
           );
         })}
@@ -2692,18 +2868,7 @@ export default function RoomScene({ initialScene = null }) {
             Room Actions
           </div>
         </div>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'flex-start',
-          alignItems: 'center',
-          flexWrap: 'nowrap',
-          gap: 10,
-          overflowX: 'auto',
-          paddingLeft: 6,
-          paddingTop: 10,
-          paddingBottom: 4,
-          scrollbarWidth: 'none',
-        }}>
+        <div className="room-action-grid" style={{ paddingTop: 10 }}>
           {renderRoomQuickActions(selectedRoom, 'panel')}
         </div>
         <div data-room-creation-root="true">
@@ -2720,6 +2885,95 @@ export default function RoomScene({ initialScene = null }) {
       </div>
     );
   };
+
+  const renderViewPanel = useCallback((variant = 'desktop') => {
+    const isMobileVariant = variant === 'mobile';
+    const modeDescription = supportsFirstPersonWalk
+      ? (cameraMode === 'orbit'
+          ? 'Smooth camera orbit for framing and styling.'
+          : 'Step through the room at human eye level.')
+      : (currentViewPreset === 'top'
+          ? 'Plan view for layout checks and quick room edits.'
+          : 'Drag to look around and pinch to zoom.');
+
+    return (
+      <div className={isMobileVariant ? 'room-mobile-section room-view-card-shell' : 'room-view-card-shell'}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: isMobileVariant ? 0 : '14px 16px', background: isMobileVariant ? 'transparent' : cameraCardBg, borderRadius: isMobileVariant ? 0 : 22, border: isMobileVariant ? 'none' : `1px solid ${COLORS.secondary}50`, boxShadow: isMobileVariant ? 'none' : 'inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 24px rgba(0,0,0,0.18)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div className="room-view-title">View</div>
+              <div className="room-view-subtitle">{modeDescription}</div>
+            </div>
+          </div>
+          <div className="room-view-mode-grid">
+            {supportsFirstPersonWalk ? (
+              <>
+                <button
+                  type="button"
+                  className={cameraMode === 'orbit' ? 'room-view-mode is-active' : 'room-view-mode'}
+                  onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}
+                >
+                  <span className="room-view-mode-title">Orbit</span>
+                  <span className="room-view-mode-copy">Review the full space</span>
+                </button>
+                <button
+                  type="button"
+                  className={cameraMode === 'firstPerson' ? 'room-view-mode is-active' : 'room-view-mode'}
+                  onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}
+                >
+                  <span className="room-view-mode-title">Walk</span>
+                  <span className="room-view-mode-copy">Move through the room</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={cameraMode === 'orbit' && currentViewPreset !== 'top' ? 'room-view-mode is-active' : 'room-view-mode'}
+                  onClick={() => {
+                    setCameraMode('orbit');
+                    if (document.pointerLockElement) document.exitPointerLock();
+                    applyCameraPreset('perspective');
+                  }}
+                >
+                  <span className="room-view-mode-title">Explore</span>
+                  <span className="room-view-mode-copy">Drag and pinch around the room</span>
+                </button>
+                <button
+                  type="button"
+                  className={cameraMode === 'orbit' && currentViewPreset === 'top' ? 'room-view-mode is-active' : 'room-view-mode'}
+                  onClick={() => {
+                    setCameraMode('orbit');
+                    if (document.pointerLockElement) document.exitPointerLock();
+                    applyCameraPreset('top');
+                  }}
+                >
+                  <span className="room-view-mode-title">Plan</span>
+                  <span className="room-view-mode-copy">Jump to a clear top-down layout view</span>
+                </button>
+              </>
+            )}
+          </div>
+          <div className="room-view-strip">
+            {CAMERA_PRESET_OPTIONS.map(({ key, label, shortLabel, icon: Icon, iconStyle }) => (
+              <Tooltip key={key} title={label}>
+                <button
+                  type="button"
+                  className={currentViewPreset === key ? 'room-view-option is-active' : 'room-view-option'}
+                  onClick={() => applyCameraPreset(key)}
+                >
+                  <span className="room-view-option-icon">
+                    <Icon style={{ fontSize: 16, ...iconStyle }} />
+                  </span>
+                  <span className="room-view-option-label">{shortLabel}</span>
+                </button>
+              </Tooltip>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }, [COLORS.secondary, applyCameraPreset, cameraCardBg, cameraMode, currentViewPreset, supportsFirstPersonWalk]);
 
   const renderWindowBehaviorControls = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
@@ -2997,6 +3251,7 @@ export default function RoomScene({ initialScene = null }) {
   }, []);
 
   const deleteWall = (id) => {
+    markSceneMutation();
     setWalls((p) => p.filter((w) => w.id !== id));
     if (selectedWallId === id) setSelectedWallId(null);
     if (selectedOpening?.wallId === id) setSelectedOpening(null);
@@ -3005,6 +3260,7 @@ export default function RoomScene({ initialScene = null }) {
   };
 
   const addWall = () => {
+    markSceneMutation();
     const room = selectedRoom ?? rooms[0] ?? null;
     const w = createWallEntity({
       roomId: room?.id ?? null,
@@ -3018,6 +3274,7 @@ export default function RoomScene({ initialScene = null }) {
 
   const splitWall = () => {
     if (!selectedWall) return;
+    markSceneMutation();
     const { id, roomId, start, end, height, thickness, color, roughness, metalness, textureUrl } = selectedWall;
     const mid = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
     setWalls((p) => [
@@ -3104,6 +3361,7 @@ export default function RoomScene({ initialScene = null }) {
 
   // Furniture helpers
   const addItem = (modelMeta) => {
+    markSceneMutation();
     const item = {
       id:       uuidv4(),
       filename: modelMeta.filename,
@@ -3120,11 +3378,14 @@ export default function RoomScene({ initialScene = null }) {
     setActiveTab('furniture');
   };
 
-  const updateItem = (id, updates) =>
+  const updateItem = (id, updates) => {
+    markSceneMutation();
     setPlacedItems((p) => p.map((i) => i.id === id ? { ...i, ...updates } : i));
+  };
 
   const setSelectedFurnitureTint = useCallback((nextTint) => {
     if (!selectedFurnitureId) return;
+    markSceneMutation();
     setPlacedItems((prev) => {
       let changed = false;
       const nextItems = prev.map((item) => {
@@ -3140,15 +3401,17 @@ export default function RoomScene({ initialScene = null }) {
       });
       return changed ? nextItems : prev;
     });
-  }, [selectedFurnitureId]);
+  }, [markSceneMutation, selectedFurnitureId]);
 
   const deleteItem = (id) => {
+    markSceneMutation();
     setPlacedItems((p) => p.filter((i) => i.id !== id));
     if (selectedFurnitureId === id) setSelectedFurnitureId(null);
   };
 
   const duplicateItem = (item) => {
     if (!item) return;
+    markSceneMutation();
     const nextItem = {
       ...item,
       id: uuidv4(),
@@ -3168,6 +3431,7 @@ export default function RoomScene({ initialScene = null }) {
 
   const replaceItem = (newMeta) => {
     if (!selectedFurniture) return;
+    markSceneMutation();
     const newItem = {
       id: uuidv4(), filename: newMeta.filename, name: newMeta.name, url: newMeta.url,
       category: newMeta.category || null,
@@ -3182,6 +3446,7 @@ export default function RoomScene({ initialScene = null }) {
 
   const duplicateWall = (wall) => {
     if (!wall) return;
+    markSceneMutation();
     const nextWall = {
       ...wall,
       id: uuidv4(),
@@ -3202,6 +3467,7 @@ export default function RoomScene({ initialScene = null }) {
 
   const duplicateLight = (light) => {
     if (!light) return;
+    markSceneMutation();
     const nextLight = {
       ...light,
       id: uuidv4(),
@@ -3331,7 +3597,7 @@ export default function RoomScene({ initialScene = null }) {
   }, [deleteWall, duplicateItem, duplicateLight, duplicateWall, elementContextMenu, lightingState, setGizmoMode]);
 
   // Camera helpers 
-  const applyCameraPreset = (preset) => {
+  function applyCameraPreset(preset) {
     setCurrentViewPreset(preset);
     const { position, target } = getCameraPresetConfig(preset);
     if (cameraMode === 'orbit' && orbitControlsRef.current) {
@@ -3340,7 +3606,7 @@ export default function RoomScene({ initialScene = null }) {
     } else if (cameraMode === 'firstPerson') {
       setTeleportTarget([position[0], 1.28, position[2]]);
     }
-  };
+  }
 
   const handlePointerMissed = () => {
     setSelectedWallId(null);
@@ -3463,8 +3729,8 @@ export default function RoomScene({ initialScene = null }) {
           const next = typeof updater === 'function'
             ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
             : updater;
-          if (next.floor !== floorMaterial.color) updateSurface('floor', { color: next.floor });
-          if (next.ceiling !== ceilingMaterial.color) updateSurface('ceiling', { color: next.ceiling });
+          if (next.floor !== floorMaterial.color) trackedUpdateSurface('floor', { color: next.floor });
+          if (next.ceiling !== ceilingMaterial.color) trackedUpdateSurface('ceiling', { color: next.ceiling });
         }}
       />
     </>
@@ -3474,9 +3740,9 @@ export default function RoomScene({ initialScene = null }) {
       walls={walls}
       floorMaterial={floorMaterial}
       ceilingMaterial={ceilingMaterial}
-      applyTexture={applyTexture}
-      updateSurface={updateSurface}
-      applyTheme={applyTheme}
+      applyTexture={trackedApplyTexture}
+      updateSurface={trackedUpdateSurface}
+      applyTheme={trackedApplyTheme}
       activeTheme={activeTheme}
     />
   ) : activeTab === 'lighting' ? (
@@ -3504,32 +3770,7 @@ export default function RoomScene({ initialScene = null }) {
     />
   ) : (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: cameraCardBg, borderRadius: 22, border: `1px solid ${COLORS.secondary}50`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 24px rgba(0,0,0,0.18)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div className="room-view-title">View</div>
-          <div className="room-segmented room-segmented-compact">
-            <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
-              Orbit
-            </button>
-            <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}>
-              Walk
-            </button>
-          </div>
-        </div>
-        <div className="room-view-strip">
-          {Object.keys(CAMERA_PRESETS).map((k) => (
-            <Tooltip key={k} title={k[0].toUpperCase() + k.slice(1)}>
-              <button
-                type="button"
-                className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
-                onClick={() => applyCameraPreset(k)}
-              >
-                {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
-              </button>
-            </Tooltip>
-          ))}
-        </div>
-      </div>
+      {renderViewPanel('desktop')}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <div className="room-stat-chip">
           <span className="room-stat-dot" />
@@ -3567,9 +3808,9 @@ export default function RoomScene({ initialScene = null }) {
           walls={walls}
           floorMaterial={floorMaterial}
           ceilingMaterial={ceilingMaterial}
-          applyTexture={applyTexture}
-          updateSurface={updateSurface}
-          applyTheme={applyTheme}
+          applyTexture={trackedApplyTexture}
+          updateSurface={trackedUpdateSurface}
+          applyTheme={trackedApplyTheme}
           activeTheme={activeTheme}
         />
       ),
@@ -3913,6 +4154,7 @@ export default function RoomScene({ initialScene = null }) {
           {cameraMode === 'orbit' ? (
             <OrbitControls
               ref={orbitControlsRef}
+              makeDefault
               enableDamping dampingFactor={0.06}
               target={orbitCameraConfig.target}
               enablePan
@@ -3940,9 +4182,10 @@ export default function RoomScene({ initialScene = null }) {
                Placed at top-left so it doesn't conflict with the
                context toolbar (which floats near the selected object).
                On mobile the top-left is always clear of the bottom nav. */}
-          {anythingSelected && cameraMode === 'orbit' && (
-            <GizmoHelper alignment="top-right" margin={[60, 120]}>
+          {anythingSelected && cameraMode === 'orbit' && orbitControlsRef.current && (
+            <GizmoHelper alignment={gizmoHelperPlacement.alignment} margin={gizmoHelperPlacement.margin}>
               <GizmoViewport
+                scale={gizmoHelperPlacement.viewportScale}
                 axisColors={['#E05252', '#52C052', '#5252E0']}
                 labelColor="#E8E0D8"
                 hideNegativeAxes
@@ -4150,8 +4393,8 @@ export default function RoomScene({ initialScene = null }) {
                       id: opening.id,
                       type: opening.type,
                       wallId: wall.id,
-                      x: Math.min(Math.max(opening.clientX, 12), window.innerWidth - 180),
-                      y: Math.min(Math.max(opening.clientY, 12), window.innerHeight - 72),
+                      x: opening.clientX,
+                      y: opening.clientY,
                     });
                     setSelectedFurnitureId(null);
                     setSelectedLightId(null);
@@ -4479,12 +4722,25 @@ export default function RoomScene({ initialScene = null }) {
           <MobileTopBar
             projectName={projectSave.projectName}
             cameraMode={cameraMode}
+            cameraToggleLabel={supportsFirstPersonWalk
+              ? (cameraMode === 'firstPerson' ? 'Walk' : 'Orbit')
+              : (currentViewPreset === 'top' ? 'Plan' : 'Explore')}
+            cameraToggleActive={supportsFirstPersonWalk
+              ? cameraMode === 'firstPerson'
+              : currentViewPreset === 'top'}
             editorMode="3D"
             onSwitchEditor={() => { if (!isSaving) switchTo2D(); }}
             onCameraToggle={() => {
               if (isSaving) return;
-              if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }
-              else { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }
+              if (supportsFirstPersonWalk) {
+                if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }
+                else { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }
+                return;
+              }
+
+              setCameraMode('orbit');
+              if (document.pointerLockElement) document.exitPointerLock();
+              applyCameraPreset(currentViewPreset === 'top' ? 'perspective' : 'top');
             }}
           />
           <div style={{ position: 'fixed', inset: 0, paddingTop: 64, paddingBottom: 72 }}>
@@ -4571,8 +4827,8 @@ export default function RoomScene({ initialScene = null }) {
                     const next = typeof updater === 'function'
                       ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
                       : updater;
-                    if (next.floor   !== floorMaterial.color)   updateSurface('floor',   { color: next.floor });
-                    if (next.ceiling !== ceilingMaterial.color) updateSurface('ceiling', { color: next.ceiling });
+                    if (next.floor   !== floorMaterial.color)   trackedUpdateSurface('floor',   { color: next.floor });
+                    if (next.ceiling !== ceilingMaterial.color) trackedUpdateSurface('ceiling', { color: next.ceiling });
                   }}
                 />
               </div>
@@ -4581,8 +4837,8 @@ export default function RoomScene({ initialScene = null }) {
               <MaterialPanel
                 selectedWall={selectedWall} walls={walls}
                 floorMaterial={floorMaterial} ceilingMaterial={ceilingMaterial}
-                applyTexture={applyTexture} updateSurface={updateSurface}
-                applyTheme={applyTheme} activeTheme={activeTheme}
+                applyTexture={trackedApplyTexture} updateSurface={trackedUpdateSurface}
+                applyTheme={trackedApplyTheme} activeTheme={activeTheme}
               />
             )}
             {activeTab === 'lighting' && <LightingPanel {...lightingState} />}
@@ -4630,29 +4886,7 @@ export default function RoomScene({ initialScene = null }) {
 
                 {selectedRoom && renderRoomActionPanel('mobile')}
 
-                <div className="room-mobile-section">
-                  <div className="room-mobile-section-title">View</div>
-                  <div className="room-segmented room-segmented-compact">
-                    <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
-                      Orbit
-                    </button>
-                    <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}>
-                      Walk
-                    </button>
-                  </div>
-                  <div className="room-view-strip">
-                    {Object.keys(CAMERA_PRESETS).map((k) => (
-                      <button
-                        key={k}
-                        type="button"
-                        className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
-                        onClick={() => applyCameraPreset(k)}
-                      >
-                        {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {renderViewPanel('mobile')}
 
                 <div className="room-mobile-section">
                   <div className="room-mobile-section-title">Scene</div>
@@ -4670,11 +4904,7 @@ export default function RoomScene({ initialScene = null }) {
 
                 <div className="room-mobile-section">
                   <div className="room-mobile-section-title">Budget</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                    <button type="button" className={budgetEnabled ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={() => handleBudgetActivationChange(!budgetEnabled)}>
-                      <WalletOutlined />
-                      <span>{budgetEnabled ? 'Budget on' : 'Budget off'}</span>
-                    </button>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10 }}>
                     <button type="button" className="room-mobile-action-tile" disabled={!budgetEnabled} onClick={() => setBudgetSummaryOpen((open) => !open)}>
                       <WalletOutlined />
                       <span>{formatMoney(budgetGrandTotal, budgetSummary.currency)}</span>
@@ -5034,35 +5264,8 @@ export default function RoomScene({ initialScene = null }) {
                     </div>
                   </div>
                   <div style={{ marginBottom: 16, position: 'relative', zIndex: 1 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: cameraCardBg, borderRadius: 22, border: `1px solid ${COLORS.secondary}50`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 24px rgba(0,0,0,0.18)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                        <div className="room-view-title">
-                          View
-                        </div>
-                        <div className="room-segmented room-segmented-compact">
-                          <button type="button" className={cameraMode === 'orbit' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}>
-                            Orbit
-                          </button>
-                          <button type="button" className={cameraMode === 'firstPerson' ? 'room-segment is-active' : 'room-segment'} onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}>
-                            Walk
-                          </button>
-                        </div>
-                      </div>
-                      <div className="room-view-strip">
-                        {Object.keys(CAMERA_PRESETS).map((k) => (
-                          <Tooltip key={k} title={k[0].toUpperCase() + k.slice(1)}>
-                            <button
-                              type="button"
-                              className={currentViewPreset === k ? 'room-view-option is-active' : 'room-view-option'}
-                              onClick={() => applyCameraPreset(k)}
-                            >
-                              {k === 'top' ? <VerticalLeftOutlined style={{ transform: 'rotate(-90deg)' }} /> : k === 'front' ? <SpaceDashboardRoundedIcon style={{ fontSize: 16 }} /> : k === 'side' ? <VerticalRightOutlined /> : <EyeOutlined />}
-                            </button>
-                          </Tooltip>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                  {renderViewPanel('desktop')}
+                </div>
                   {selectedWall && (
                     <div style={{ marginBottom: 16, position: 'relative', zIndex: 1 }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px 16px', background: `${COLORS.background}D9`, borderRadius: 22, border: `1px solid ${COLORS.secondary}50` }}>
@@ -5195,6 +5398,7 @@ export default function RoomScene({ initialScene = null }) {
         <div
           role="menu"
           aria-label={`${elementContextMenu.label ?? elementContextMenu.kind} actions`}
+          data-element-context-menu-root="true"
           onPointerDown={(event) => event.stopPropagation()}
           style={{
             position: 'fixed',
@@ -5256,13 +5460,17 @@ export default function RoomScene({ initialScene = null }) {
         <div
           role="menu"
           aria-label={`${openingContextMenu.type} actions`}
+          data-opening-context-menu-root="true"
           onPointerDown={(event) => event.stopPropagation()}
           style={{
             position: 'fixed',
-            left: openingContextMenu.x,
-            top: openingContextMenu.y,
+            left: openingContextMenuPosition?.left ?? 12,
+            top: openingContextMenuPosition?.top ?? 12,
             zIndex: 1700,
             minWidth: 168,
+            width: 'min(244px, calc(100vw - 24px))',
+            maxHeight: 'calc(100vh - 24px)',
+            overflowY: 'auto',
             padding: 8,
             borderRadius: 12,
             background: `${COLORS.background}F7`,
@@ -5310,87 +5518,238 @@ export default function RoomScene({ initialScene = null }) {
               +
             </button>
           </div>
-          <button
-            type="button"
-            role="menuitem"
-            aria-haspopup="menu"
-            aria-expanded={Boolean(openingContextMenu.styleMenuOpen)}
-            onClick={() => {
-              setOpeningContextMenu((prev) => (
-                prev ? { ...prev, styleMenuOpen: !prev.styleMenuOpen } : prev
-              ));
-            }}
+          <div
+            role="group"
+            aria-label={`Choose ${openingContextMenu.type} style`}
             style={{
-              width: '100%',
-              minHeight: 38,
-              border: 0,
-              borderRadius: 8,
-              background: openingContextMenu.styleMenuOpen ? 'rgba(196,154,108,0.22)' : 'rgba(255,255,255,0.07)',
-              color: COLORS.text,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10,
-              padding: '0 12px',
-              fontSize: 13,
-              fontWeight: 800,
-              cursor: 'pointer',
+              display: 'grid',
+              gap: 6,
               marginBottom: 8,
             }}
           >
-            <span>Choose different style</span>
-            <RightOutlined style={{ fontSize: 11 }} />
-          </button>
-          {openingContextMenu.styleMenuOpen && (
+            <div style={{ padding: '2px 6px 4px', color: `${COLORS.text}A8`, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              Styles
+            </div>
+            {contextMenuStyleOptions.map((option) => {
+              const active = contextMenuActiveStyle === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    applyOpeningStyleFromContext(option.key);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (event.detail !== 0) applyOpeningStyleFromContext(option.key);
+                  }}
+                  style={{
+                    width: '100%',
+                    minHeight: 38,
+                    border: 0,
+                    borderRadius: 8,
+                    background: active ? 'rgba(196,154,108,0.2)' : 'rgba(255,255,255,0.07)',
+                    color: COLORS.text,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    padding: '0 12px',
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span>{option.label}</span>
+                  {active && <CheckOutlined style={{ color: COLORS.action, fontSize: 12 }} />}
+                </button>
+              );
+            })}
+          </div>
+          {openingContextMenu.type === 'door' && contextMenuOpeningEntity && (
             <div
-              role="menu"
-              aria-label={`Choose ${openingContextMenu.type} style`}
-              onPointerDown={(event) => event.stopPropagation()}
+              role="group"
+              aria-label="Choose door opening side"
               style={{
-                position: 'fixed',
-                left: Math.max(12, Math.min(openingContextMenu.x + 178, window.innerWidth - 236)),
-                top: Math.max(12, Math.min(openingContextMenu.y + 54, window.innerHeight - ((contextMenuStyleOptions.length * 42) + 28))),
-                zIndex: 1701,
-                minWidth: 220,
-                padding: 8,
-                borderRadius: 12,
-                background: `${COLORS.background}FA`,
-                border: `1px solid ${COLORS.secondary}66`,
-                boxShadow: '0 18px 44px rgba(0,0,0,0.36)',
-                backdropFilter: 'blur(16px)',
+                display: 'grid',
+                gap: 6,
+                marginBottom: 8,
               }}
             >
-              {contextMenuStyleOptions.map((option) => {
-                const active = contextMenuActiveStyle === option.key;
-                return (
+              <div style={{ padding: '2px 6px 4px', color: `${COLORS.text}A8`, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                Opening Side {contextMenuDoorOpenSideLabel ? `· ${contextMenuDoorOpenSideLabel}` : ''}
+              </div>
+              {(contextMenuActiveStyle === 'sliding') ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                   <button
-                    key={option.key}
                     type="button"
-                    role="menuitem"
-                    onClick={() => applyOpeningStyleFromContext(option.key)}
+                    role="menuitemradio"
+                    aria-checked={(contextMenuOpeningEntity.slideDirection ?? 'right') === 'left'}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      updateOpeningOpenSideFromContext({ slideDirection: 'left' });
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (event.detail !== 0) updateOpeningOpenSideFromContext({ slideDirection: 'left' });
+                    }}
                     style={{
-                      width: '100%',
                       minHeight: 38,
                       border: 0,
                       borderRadius: 8,
-                      background: active ? 'rgba(196,154,108,0.2)' : 'transparent',
+                      background: (contextMenuOpeningEntity.slideDirection ?? 'right') === 'left' ? 'rgba(196,154,108,0.2)' : 'rgba(255,255,255,0.07)',
                       color: COLORS.text,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 10,
-                      padding: '0 12px',
                       fontSize: 13,
                       fontWeight: 800,
                       cursor: 'pointer',
-                      textAlign: 'left',
                     }}
                   >
-                    <span>{option.label}</span>
-                    {active && <CheckOutlined style={{ color: COLORS.action, fontSize: 12 }} />}
+                    Left
                   </button>
-                );
-              })}
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={(contextMenuOpeningEntity.slideDirection ?? 'right') === 'right'}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      updateOpeningOpenSideFromContext({ slideDirection: 'right' });
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (event.detail !== 0) updateOpeningOpenSideFromContext({ slideDirection: 'right' });
+                    }}
+                    style={{
+                      minHeight: 38,
+                      border: 0,
+                      borderRadius: 8,
+                      background: (contextMenuOpeningEntity.slideDirection ?? 'right') === 'right' ? 'rgba(196,154,108,0.2)' : 'rgba(255,255,255,0.07)',
+                      color: COLORS.text,
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Right
+                  </button>
+                </div>
+              ) : (contextMenuActiveStyle === 'double') ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={(contextMenuOpeningEntity.opensInward ?? true) === true}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      updateOpeningOpenSideFromContext({ opensInward: true });
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (event.detail !== 0) updateOpeningOpenSideFromContext({ opensInward: true });
+                    }}
+                    style={{
+                      minHeight: 38,
+                      border: 0,
+                      borderRadius: 8,
+                      background: (contextMenuOpeningEntity.opensInward ?? true) === true ? 'rgba(196,154,108,0.2)' : 'rgba(255,255,255,0.07)',
+                      color: COLORS.text,
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Inward
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={(contextMenuOpeningEntity.opensInward ?? true) === false}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      updateOpeningOpenSideFromContext({ opensInward: false });
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (event.detail !== 0) updateOpeningOpenSideFromContext({ opensInward: false });
+                    }}
+                    style={{
+                      minHeight: 38,
+                      border: 0,
+                      borderRadius: 8,
+                      background: (contextMenuOpeningEntity.opensInward ?? true) === false ? 'rgba(196,154,108,0.2)' : 'rgba(255,255,255,0.07)',
+                      color: COLORS.text,
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Outward
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={(contextMenuOpeningEntity.hingeSide ?? 'left') === 'left'}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      updateOpeningOpenSideFromContext({ hingeSide: 'left' });
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (event.detail !== 0) updateOpeningOpenSideFromContext({ hingeSide: 'left' });
+                    }}
+                    style={{
+                      minHeight: 38,
+                      border: 0,
+                      borderRadius: 8,
+                      background: (contextMenuOpeningEntity.hingeSide ?? 'left') === 'left' ? 'rgba(196,154,108,0.2)' : 'rgba(255,255,255,0.07)',
+                      color: COLORS.text,
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Left
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={(contextMenuOpeningEntity.hingeSide ?? 'left') === 'right'}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      updateOpeningOpenSideFromContext({ hingeSide: 'right' });
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (event.detail !== 0) updateOpeningOpenSideFromContext({ hingeSide: 'right' });
+                    }}
+                    style={{
+                      minHeight: 38,
+                      border: 0,
+                      borderRadius: 8,
+                      background: (contextMenuOpeningEntity.hingeSide ?? 'left') === 'right' ? 'rgba(196,154,108,0.2)' : 'rgba(255,255,255,0.07)',
+                      color: COLORS.text,
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Right
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {budgetEnabled && (
@@ -6367,6 +6726,12 @@ export default function RoomScene({ initialScene = null }) {
           background: ${COLORS.accent};
           box-shadow: 0 0 0 4px rgba(139, 107, 77, 0.24);
         }
+        .room-action-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          width: 100%;
+        }
         .room-segmented {
           display: inline-flex;
           align-items: center;
@@ -6404,32 +6769,79 @@ export default function RoomScene({ initialScene = null }) {
           letter-spacing: 0.08em;
           text-transform: uppercase;
         }
+        .room-view-subtitle {
+          margin-top: 6px;
+          color: ${COLORS.text}8F;
+          font-size: 11px;
+          line-height: 1.45;
+          max-width: 220px;
+        }
+        .room-view-mode-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .room-view-mode {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          align-items: flex-start;
+          justify-content: center;
+          min-height: 64px;
+          padding: 14px 16px;
+          border-radius: 18px;
+          border: 1px solid ${COLORS.secondary}52;
+          background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
+          color: ${COLORS.text};
+          text-align: left;
+          cursor: pointer;
+          transition: transform 0.22s ease, border-color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease, color 0.22s ease;
+        }
+        .room-view-mode:hover {
+          transform: translateY(-1px);
+          border-color: ${COLORS.action}66;
+          box-shadow: 0 12px 24px rgba(0,0,0,0.14);
+        }
+        .room-view-mode.is-active {
+          background: linear-gradient(135deg, rgba(196,154,108,0.24) 0%, rgba(139,107,77,0.24) 100%);
+          border-color: ${COLORS.action}88;
+          box-shadow: 0 16px 28px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
+        }
+        .room-view-mode-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: inherit;
+        }
+        .room-view-mode-copy {
+          font-size: 10px;
+          color: ${COLORS.text}8A;
+          line-height: 1.35;
+        }
+        .room-view-mode.is-active .room-view-mode-copy {
+          color: ${COLORS.text}CC;
+        }
         .room-view-strip {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 10px;
-          padding: 8px;
-          background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
-          border: 1px solid ${COLORS.secondary}55;
-          border-radius: 999px;
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 24px rgba(0,0,0,0.16);
-          overflow: hidden;
+          padding: 2px 0 0;
         }
         .room-view-option {
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 0;
+          gap: 8px;
           width: 100%;
           min-width: 0;
-          height: 44px;
-          min-height: 44px;
-          border: 1px solid transparent;
-          background: rgba(255,255,255,0.02);
+          min-height: 72px;
+          padding: 12px 8px 10px;
+          border: 1px solid ${COLORS.secondary}42;
+          background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%);
           color: ${COLORS.text};
           font: inherit;
           cursor: pointer;
-          border-radius: 999px;
+          border-radius: 20px;
           box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
           transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
         }
@@ -6444,6 +6856,26 @@ export default function RoomScene({ initialScene = null }) {
           border-color: ${COLORS.action}88;
           color: ${COLORS.action};
           box-shadow: 0 10px 20px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255,255,255,0.08);
+        }
+        .room-view-option-icon {
+          width: 34px;
+          height: 34px;
+          border-radius: 12px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(255,255,255,0.06);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .room-view-option.is-active .room-view-option-icon {
+          background: rgba(31, 24, 20, 0.12);
+        }
+        .room-view-option-label {
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          line-height: 1;
         }
         .room-secondary-chip {
           min-height: 38px;
