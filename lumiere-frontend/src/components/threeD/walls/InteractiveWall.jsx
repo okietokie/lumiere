@@ -30,6 +30,8 @@ const InteractiveWall = React.forwardRef(({
   const openingCommittedOnPointerDown = useRef(false);
   const wallLongPressTimer = useRef(null);
   const openingTouchHoldRef = useRef(null);
+  const openingTouchTapRef = useRef(null);
+  const suppressOpeningToggleRef = useRef(null);
   const suppressWallClickRef = useRef(false);
   const suppressOpeningClickRef = useRef(null);
   const meshRef   = useRef();
@@ -421,6 +423,32 @@ const InteractiveWall = React.forwardRef(({
     const clientY = sourceEvent?.clientY ?? e.clientY ?? 0;
     const pointerId = sourceEvent?.pointerId ?? e.pointerId;
     const openingKey = `${openingType}:${opening.id}`;
+    const now = Date.now();
+    const lastTap = openingTouchTapRef.current;
+    const isRepeatTap = lastTap
+      && lastTap.key === openingKey
+      && (now - lastTap.time) <= 320
+      && Math.hypot(lastTap.x - clientX, lastTap.y - clientY) <= 26;
+
+    if (isRepeatTap) {
+      openingTouchTapRef.current = null;
+      suppressOpeningToggleRef.current = openingKey;
+      suppressOpeningClickRef.current = openingKey;
+      onOpeningMenu?.({
+        id: opening.id,
+        type: openingType,
+        clientX,
+        clientY,
+      });
+      return;
+    }
+
+    openingTouchTapRef.current = {
+      key: openingKey,
+      time: now,
+      x: clientX,
+      y: clientY,
+    };
 
     const onUp = () => clearOpeningTouchHold();
     const onCancel = () => clearOpeningTouchHold();
@@ -428,6 +456,7 @@ const InteractiveWall = React.forwardRef(({
       const dx = (moveEvent.clientX ?? clientX) - clientX;
       const dy = (moveEvent.clientY ?? clientY) - clientY;
       if (Math.hypot(dx, dy) < 10) return;
+      openingTouchTapRef.current = null;
       clearOpeningTouchHold();
       startOpeningDrag({
         stopPropagation: () => {},
@@ -437,18 +466,7 @@ const InteractiveWall = React.forwardRef(({
       }, openingType, opening, 'move');
     };
 
-    const timer = window.setTimeout(() => {
-      clearOpeningTouchHold();
-      suppressOpeningClickRef.current = openingKey;
-      onOpeningMenu?.({
-        id: opening.id,
-        type: openingType,
-        clientX,
-        clientY,
-      });
-    }, 520);
-
-    openingTouchHoldRef.current = { timer, onMove, onUp, onCancel };
+    openingTouchHoldRef.current = { timer: null, onMove, onUp, onCancel };
     window.addEventListener('pointermove', onMove, { passive: true });
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
@@ -591,6 +609,11 @@ const InteractiveWall = React.forwardRef(({
             doorColor={preview ? tint : '#d8c2a8'}
             handleColor={preview ? '#2d2d2d' : '#1f1f1f'}
             onDoorPointerDown={preview ? undefined : (e) => beginOpeningTouchGesture(e, openingType, opening)}
+            shouldSuppressToggle={() => {
+              if (suppressOpeningToggleRef.current !== `${openingType}:${opening.id}`) return false;
+              suppressOpeningToggleRef.current = null;
+              return true;
+            }}
             onClick={(e) => {
               if (preview) return;
               e.stopPropagation();
@@ -692,6 +715,11 @@ const InteractiveWall = React.forwardRef(({
           glassColor={preview ? tint : '#9cc7da'}
           windowStyle={opening.windowStyle ?? 'sliding'}
           onWindowPointerDown={preview ? undefined : (e) => beginOpeningTouchGesture(e, openingType, opening)}
+          shouldSuppressToggle={() => {
+            if (suppressOpeningToggleRef.current !== `${openingType}:${opening.id}`) return false;
+            suppressOpeningToggleRef.current = null;
+            return true;
+          }}
           onClick={(e) => {
             if (preview) return;
             e.stopPropagation();

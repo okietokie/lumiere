@@ -270,6 +270,8 @@ const FurnitureInner = forwardRef(({
   const [hovered, setHovered] = useState(false);
   const outerRef              = useRef();
   const innerRef              = useRef();
+  const lastTouchTapRef       = useRef(null);
+  const suppressClickRef      = useRef(false);
 
   const { clonedScene, normScale, centroid, normalizedSize } = useMemo(() => {
     const clone = SkeletonUtils.clone(scene);
@@ -332,6 +334,16 @@ const FurnitureInner = forwardRef(({
   }, [item.id, item.tint]);
 
   const rawScale = Array.isArray(item.scale) ? item.scale : [1, 1, 1];
+  const openContextMenu = (e) => {
+    e.stopPropagation();
+    const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+    sourceEvent?.preventDefault?.();
+    onContextMenu?.({
+      item,
+      clientX: sourceEvent?.clientX ?? e.clientX ?? 0,
+      clientY: sourceEvent?.clientY ?? e.clientY ?? 0,
+    });
+  };
 
   return (
     <group
@@ -339,17 +351,38 @@ const FurnitureInner = forwardRef(({
       position={item.position}
       rotation={item.rotation}
       scale={rawScale}
-      onClick={(e)       => { e.stopPropagation(); onSelect(); }}
-      onContextMenu={(e) => {
-        e.stopPropagation();
+      onPointerDown={(e) => {
         const sourceEvent = e.nativeEvent ?? e.sourceEvent;
-        sourceEvent?.preventDefault?.();
-        onContextMenu?.({
-          item,
-          clientX: sourceEvent?.clientX ?? 0,
-          clientY: sourceEvent?.clientY ?? 0,
-        });
+        const pointerType = sourceEvent?.pointerType ?? e.pointerType;
+        if (pointerType === 'mouse') return;
+
+        const clientX = sourceEvent?.clientX ?? e.clientX ?? 0;
+        const clientY = sourceEvent?.clientY ?? e.clientY ?? 0;
+        const now = Date.now();
+        const lastTap = lastTouchTapRef.current;
+        const isDoubleTap = lastTap
+          && (now - lastTap.time) <= 320
+          && Math.hypot(lastTap.x - clientX, lastTap.y - clientY) <= 26;
+
+        if (!isDoubleTap) {
+          lastTouchTapRef.current = { time: now, x: clientX, y: clientY };
+          return;
+        }
+
+        lastTouchTapRef.current = null;
+        suppressClickRef.current = true;
+        openContextMenu(e);
       }}
+      onClick={(e)       => {
+        e.stopPropagation();
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          return;
+        }
+        onSelect();
+      }}
+      onDoubleClick={openContextMenu}
+      onContextMenu={openContextMenu}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'pointer'; }}
       onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto';    }}
     >

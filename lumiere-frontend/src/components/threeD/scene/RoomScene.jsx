@@ -27,6 +27,7 @@ import {
   CheckOutlined,
   CloseOutlined,
   LoadingOutlined,
+  PoweroffOutlined,
   WalletOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
@@ -4541,53 +4542,6 @@ export default function RoomScene({ initialScene = null }) {
             activeTab={activeTab}
             onTabChange={(tab) => { if (!isSaving) openMobilePanel(tab); }}
           />
-          {selectedOpeningEntity && (
-            <div
-              style={{
-                position: 'fixed',
-                left: 16,
-                right: 16,
-                bottom: 92,
-                zIndex: 1000,
-                padding: '12px',
-                borderRadius: 8,
-                maxWidth: 420,
-                maxHeight: 'min(42vh, calc(100dvh - 180px))',
-                margin: '0 auto',
-                ...openingPanelTone,
-                backdropFilter: 'blur(14px)',
-                overflowY: 'auto',
-                WebkitOverflowScrolling: 'touch',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div>
-                  <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4 }}>Door Studio</div>
-                  <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, textTransform: 'capitalize' }}>{selectedOpening?.type} edit</div>
-                  <div style={{ color: `${COLORS.text}92`, fontSize: 11 }}>Drag in scene to move. Fine-tune here with exact values.</div>
-                </div>
-                {renderOpeningModeButton(
-                  'Remove this opening',
-                  <DeleteOutlined />,
-                  false,
-                  () => removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id),
-                  true
-                )}
-              </div>
-              {selectedOpening?.type === 'door' ? (
-                renderMobileDoorEditor()
-              ) : (
-                <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {renderOpeningDimensionInputs()}
-                  {renderWindowTypeControls()}
-                  {renderWindowBehaviorControls()}
-                </div>
-              )}
-            </div>
-          )}
           <SlidePanel
             open={mobilePanelOpen}
             onClose={() => setMobilePanelOpen(false)}
@@ -4695,8 +4649,22 @@ export default function RoomScene({ initialScene = null }) {
 
                 <div className="room-mobile-section">
                   <div className="room-mobile-section-title">Budget</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10 }}>
-                    <button type="button" className="room-mobile-action-tile" disabled={!budgetEnabled} onClick={() => setBudgetSummaryOpen((open) => !open)}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                    <button
+                      type="button"
+                      className={budgetEnabled ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
+                      disabled={isSaving}
+                      onClick={() => handleBudgetActivationChange(!budgetEnabled)}
+                    >
+                      <PoweroffOutlined />
+                      <span>{budgetEnabled ? 'Budget active' : 'Activate budget'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={budgetEnabled && budgetSummaryOpen ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
+                      disabled={!budgetEnabled}
+                      onClick={() => setBudgetSummaryOpen((open) => !open)}
+                    >
                       <WalletOutlined />
                       <span>{formatMoney(budgetGrandTotal, budgetSummary.currency)}</span>
                     </button>

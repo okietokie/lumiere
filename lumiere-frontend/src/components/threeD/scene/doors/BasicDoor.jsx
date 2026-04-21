@@ -31,6 +31,7 @@ const BasicDoor = forwardRef(function BasicDoor(
     doorColor = '#d8c2a8',
     handleColor = '#1f1f1f',
     onDoorPointerDown = null,
+    shouldSuppressToggle = null,
     userData = undefined,
     ...groupProps
   },
@@ -72,19 +73,31 @@ const BasicDoor = forwardRef(function BasicDoor(
   };
   const toggleSingleDoor = useCallback((e) => {
     if (!isSingleHinged) return;
+    if (shouldSuppressToggle?.()) {
+      e.stopPropagation();
+      return;
+    }
     e.stopPropagation();
     setSingleDoorTargetOpenAmount((prev) => (prev >= 0.5 ? 0 : 1));
-  }, [isSingleHinged]);
+  }, [isSingleHinged, shouldSuppressToggle]);
   const toggleSlidingDoor = useCallback((e) => {
     if (!isSliding) return;
+    if (shouldSuppressToggle?.()) {
+      e.stopPropagation();
+      return;
+    }
     e.stopPropagation();
     setSlidingTargetOpenAmount((prev) => (prev >= 0.5 ? 0 : 1));
-  }, [isSliding]);
+  }, [isSliding, shouldSuppressToggle]);
   const toggleDoubleDoor = useCallback((e) => {
     if (!isDouble) return;
+    if (shouldSuppressToggle?.()) {
+      e.stopPropagation();
+      return;
+    }
     e.stopPropagation();
     setDoubleDoorTargetOpenAmount((prev) => (prev >= 0.5 ? 0 : 1));
-  }, [isDouble]);
+  }, [isDouble, shouldSuppressToggle]);
 
   useEffect(() => {
     if (!isSingleHinged) return;

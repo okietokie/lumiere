@@ -17,6 +17,7 @@ export default function BasicWindow({
   hingeSide = 'left',
   opensInward = true,
   onWindowPointerDown,
+  shouldSuppressToggle,
   onClick,
 }) {
   const isSliding = windowStyle === 'sliding';
@@ -73,6 +74,10 @@ export default function BasicWindow({
   const handleWindowClick = useCallback((e) => {
     e.stopPropagation();
 
+    if (shouldSuppressToggle?.()) {
+      return;
+    }
+
     if (isSlidingFamily) {
       setIsOpen((prev) => !prev);
     } else if (isCasement) {
@@ -89,7 +94,7 @@ export default function BasicWindow({
     }
 
     onClick?.(e);
-  }, [isCasement, isSlidingFamily, onClick]);
+  }, [isCasement, isSlidingFamily, onClick, shouldSuppressToggle]);
 
   useFrame(() => {
     if (isSlidingFamily) {
