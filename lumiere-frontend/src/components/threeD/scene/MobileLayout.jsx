@@ -160,7 +160,7 @@ export function BottomNav({ activeTab, onTabChange }) {
   ];
 
   return (
-    <div style={{
+    <div data-tour="scene-navbar" style={{
       position:       'fixed',
       bottom:         0,
       left:           0,
@@ -187,6 +187,7 @@ export function BottomNav({ activeTab, onTabChange }) {
           <button
             key={tab.key}
             onClick={() => onTabChange(tab.key)}
+            data-tour={tab.key === "furniture" ? "scene-nav-furniture-mobile" : undefined}
             style={{
               display:        'flex',
               flexDirection:  'column',

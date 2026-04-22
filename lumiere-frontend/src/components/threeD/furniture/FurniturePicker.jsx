@@ -152,7 +152,7 @@ function ThumbnailPreview({ url, filename, alt, onFallback }) {
   );
 }
 
-function ModelCard({ model, onPlace }) {
+function ModelCard({ model, onPlace, dataTour }) {
   const [hovered,  setHovered]  = useState(false);
   const [visible,  setVisible]  = useState(false);   // IntersectionObserver
   const [useCanvasPreview, setUseCanvasPreview] = useState(false);
@@ -190,6 +190,7 @@ function ModelCard({ model, onPlace }) {
     <button
       ref={cardRef}
       onClick={onPlace}
+      data-tour={dataTour}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       title={`Place ${model.name}`}
@@ -467,6 +468,7 @@ export default function FurniturePicker({
                 key={model.id || model.filename}
                 model={model}
                 onPlace={() => addItem(model)}
+                dataTour={visibleModels[0] === model ? "scene-furniture-card" : undefined}
               />
             ))}
           </div>

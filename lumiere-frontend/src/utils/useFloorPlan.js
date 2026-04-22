@@ -185,6 +185,13 @@ export function hitTestWall(wall, cx, cy, pad = 10) {
   return along;
 }
 
+function clampOpeningTForWall(wall, openingWidth, t) {
+  const length = wall?.length ?? 0;
+  if (length <= 0) return 0.5;
+  const half = (openingWidth / 2) / length;
+  return Math.max(half, Math.min(1 - half, t));
+}
+
 /** Point-in-polygon test (ray casting) */
 export function pointInPolygon(px, py, pts) {
   let inside = false;
@@ -422,8 +429,7 @@ export function useFloorPlan(initialState = null) {
             openings: wall.openings.map(opening => {
               if (opening.id !== openingId) return opening;
               const nextWidth = updates.width ?? opening.width;
-              const half = (nextWidth / 2) / wall.length;
-              const nextT = Math.max(half, Math.min(1 - half, updates.t ?? opening.t));
+              const nextT = clampOpeningTForWall(wall, nextWidth, updates.t ?? opening.t);
               return { ...opening, ...updates, width: nextWidth, t: nextT };
             }),
           };
@@ -431,6 +437,31 @@ export function useFloorPlan(initialState = null) {
       };
     }));
   }, [pushHistory]);
+
+  const moveOpening = useCallback((roomId, wallId, openingId, rawX, rawY) => {
+    setRooms(prev => prev.map(room => {
+      if (room.id !== roomId) return room;
+      return {
+        ...room,
+        walls: room.walls.map(wall => {
+          if (wall.id !== wallId || wall.length <= 0) return wall;
+          return {
+            ...wall,
+            openings: wall.openings.map(opening => {
+              if (opening.id !== openingId) return opening;
+              const dx = wall.end.x - wall.start.x;
+              const dy = wall.end.y - wall.start.y;
+              const px = rawX - wall.start.x;
+              const py = rawY - wall.start.y;
+              const along = (px * dx + py * dy) / (wall.length * wall.length);
+              const t = clampOpeningTForWall(wall, opening.width, along);
+              return { ...opening, t };
+            }),
+          };
+        }),
+      };
+    }));
+  }, []);
 
   // ── drag corner ───────────────────────────────────────────────────────────
   const dragCorner = useCallback((roomId, ptIdx, rawX, rawY) => {
@@ -618,7 +649,7 @@ export function useFloorPlan(initialState = null) {
     selectedWall,   setSelectedWall,
     selectedOpening, setSelectedOpening,
     hoveredWall,    setHoveredWall,
-    handleWallClick, deleteOpening, updateOpening,
+    handleWallClick, deleteOpening, updateOpening, moveOpening,
     wallThickness, applyGlobalThickness,
     doorWidth, setDoorWidth, windowWidth, setWindowWidth,
     setRooms,

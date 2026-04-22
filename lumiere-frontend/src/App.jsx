@@ -28,6 +28,7 @@ import {
 import { ToastProvider } from "./ui/ToastNotification";
 import useModelPrefetch from "./hooks/useModelPrefetch";
 import { fetchModelManifest } from "./hooks/useModelPrefetch";
+import { OnboardingTourProvider } from "./components/onboarding/OnboardingTourProvider.jsx";
 
 function RequireAuth({ children }) {
   return getAccessToken() ? children : <Navigate to="/login" replace />;
@@ -384,7 +385,9 @@ function App() {
       <AntApp>
         <ToastProvider>
           <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <RouteShell />
+            <OnboardingTourProvider>
+              <RouteShell />
+            </OnboardingTourProvider>
           </BrowserRouter>
         </ToastProvider>
       </AntApp>

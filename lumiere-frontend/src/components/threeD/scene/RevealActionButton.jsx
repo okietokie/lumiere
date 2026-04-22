@@ -7,6 +7,9 @@ export default function RevealActionButton({
   active = false,
   onClick,
   variant = "reveal",
+  dataTour,
+  endAdornment = null,
+  expandedWidthOverride = null,
 }) {
   const revealCollapsedSize = 44;
   const revealExpandedWidth = 124;
@@ -33,6 +36,7 @@ export default function RevealActionButton({
   const isPill = variant === "pill";
   const isPanel = variant === "panel";
   const isSidebar = variant === "sidebar";
+  const expandedWidth = expandedWidthOverride ?? revealExpandedWidth;
   const expanded = isPill ? true : revealed;
   const showIcon = !isPill && !!Icon;
   const baseBackground = active ? COLORS.accent : "#1f1814";
@@ -47,6 +51,7 @@ export default function RevealActionButton({
       <button
         type="button"
         aria-label={label}
+        data-tour={dataTour}
         onMouseEnter={() => setRevealed(true)}
         onMouseLeave={() => setRevealed(false)}
         onFocus={() => setRevealed(true)}
@@ -123,6 +128,7 @@ export default function RevealActionButton({
       <button
         type="button"
         aria-label={label}
+        data-tour={dataTour}
         onClick={onClick}
         style={{
           position: "relative",
@@ -183,6 +189,7 @@ export default function RevealActionButton({
     <button
       type="button"
       aria-label={label}
+      data-tour={dataTour}
       onMouseEnter={() => setRevealed(true)}
       onMouseLeave={() => setRevealed(false)}
       onFocus={() => setRevealed(true)}
@@ -194,11 +201,11 @@ export default function RevealActionButton({
       style={{
         position: "relative",
         overflow: "hidden",
-        width: isPill ? "auto" : (expanded ? revealExpandedWidth : revealCollapsedSize),
-        minWidth: isPill ? 120 : (expanded ? revealExpandedWidth : revealCollapsedSize),
+        width: isPill ? "auto" : (expanded ? expandedWidth : revealCollapsedSize),
+        minWidth: isPill ? 120 : (expanded ? expandedWidth : revealCollapsedSize),
         height: isPill ? 50 : revealHeight,
         minHeight: isPill ? 50 : revealHeight,
-        padding: isPill ? "0 20px" : 0,
+        padding: isPill ? "0 20px" : (expanded && endAdornment ? "0 38px 0 0" : 0),
         borderRadius: isPill ? 50 : (expanded ? revealHeight : "50%"),
         border: isPill ? `1px solid ${borderColor}` : "none",
         backgroundColor: expanded ? hoverBackground : baseBackground,
@@ -254,6 +261,22 @@ export default function RevealActionButton({
       >
         {label}
       </span>
+      {expanded && endAdornment && (
+        <span
+          style={{
+            position: "absolute",
+            right: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2,
+          }}
+        >
+          {endAdornment}
+        </span>
+      )}
     </button>
   );
 }

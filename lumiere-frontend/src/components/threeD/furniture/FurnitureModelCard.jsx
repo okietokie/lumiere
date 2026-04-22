@@ -174,7 +174,7 @@ function isTouchPreferred() {
   return window.matchMedia('(hover: none), (pointer: coarse)').matches;
 }
 
-export default function FurnitureModelCard({ model, onPlace }) {
+export default function FurnitureModelCard({ model, onPlace, dataTour }) {
   const [hovered, setHovered] = useState(false);
   const [visible, setVisible] = useState(false);
   const [useCanvasPreview, setUseCanvasPreview] = useState(false);
@@ -261,6 +261,7 @@ export default function FurnitureModelCard({ model, onPlace }) {
     <button
       ref={cardRef}
       onClick={handleClick}
+      data-tour={dataTour}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);

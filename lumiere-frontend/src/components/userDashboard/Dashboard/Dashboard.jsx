@@ -49,6 +49,8 @@ import { COLORS } from "../../../utils/colors";
 import lmIcon from "../../../assets/lm no-bg.png";
 import CreateProjectModal from "../modals/CreateProjectModal";
 import ConfirmDeleteModal from "../modals/ConfirmDeleteModal";
+import OnboardingJoyride from "../../onboarding/OnboardingJoyride.jsx";
+import { useOnboardingTour } from "../../onboarding/OnboardingTourProvider.jsx";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
@@ -59,6 +61,7 @@ const navItems = [
   { id: "assets", label: "Assets", icon: Boxes },
   { id: "budget", label: "Budget", icon: Wallet },
   { id: "renders", label: "Renders", icon: ImageIcon },
+  { id: "tutorials", label: "Tutorials", icon: Wand2 },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -598,6 +601,7 @@ const Sidebar = ({ activeTab, setActiveTab, onCreateNew }) => (
     <button
       type="button"
       onClick={onCreateNew}
+      data-tour="dashboard-new-project"
       className="mt-3 flex h-14 items-center justify-center rounded-3xl bg-[var(--dash-action)] text-[#120f0d] shadow-[0_12px_28px_rgba(169,120,78,0.24)] transition hover:brightness-110"
       title="New Project"
     >
@@ -654,6 +658,7 @@ const Topbar = ({
         <div className="ml-auto flex items-center gap-2">
           <PrimaryButton
             onClick={onCreateNew}
+            data-tour="dashboard-new-project"
             className="hidden sm:inline-flex"
           >
             <Plus size={16} strokeWidth={2.4} />
@@ -2034,6 +2039,7 @@ const AntMobileBottomNav = ({ activeTab, setActiveTab, onCreateNew }) => (
 
 const Dashboard = ({ user, onLogout }) => {
   const navigate = useNavigate();
+  const onboardingTour = useOnboardingTour();
   const {
     projects,
     lastProject,
@@ -2068,9 +2074,30 @@ const Dashboard = ({ user, onLogout }) => {
 
   const totalBudget = budgetItems.reduce((sum, item) => sum + item.amount, 0);
 
+  useEffect(() => {
+    if (loading || projects.length > 0 || onboardingTour.isActive) return;
+    if (onboardingTour.state.completed || onboardingTour.state.dismissed) return;
+    onboardingTour.start();
+    onboardingTour.setStep("create-room");
+    navigate("/user/room-2d?tour=first-project");
+    return undefined;
+  }, [
+    loading,
+    navigate,
+    onboardingTour,
+    projects.length,
+  ]);
+
   const openProject = (project) => {
     const projectId = getProjectId(project);
     if (projectId) navigate(`/user/room?projectId=${projectId}`);
+  };
+
+  const openCreateModal = () => {
+    setCreateOpen(true);
+    if (onboardingTour.isActive && onboardingTour.state.step === "new-project") {
+      onboardingTour.setStep("project-details");
+    }
   };
 
   const renameProjectFromCard = async (project) => {
@@ -2081,7 +2108,7 @@ const Dashboard = ({ user, onLogout }) => {
   };
 
   const runQuickAction = (id) => {
-    if (id === "new-project") setCreateOpen(true);
+    if (id === "new-project") openCreateModal();
     if (id === "create-room") navigate("/user/room");
     if (id === "import-design") navigate("/user/room-2d");
     if (id === "ai-generate") navigate("/user/room");
@@ -2093,6 +2120,58 @@ const Dashboard = ({ user, onLogout }) => {
     onDelete: setDeleteTarget,
     onRename: renameProjectFromCard,
   };
+
+  const handleTourCreateOpen = () => openCreateModal();
+
+  const handleCreateProject = async (payload) => {
+    const createdProject = await createProject(payload);
+    const projectId = getProjectId(createdProject);
+
+    if (onboardingTour.isActive && onboardingTour.state.step === "project-details" && projectId) {
+      onboardingTour.markProjectCreated(projectId);
+      navigate(`/user/room-2d?projectId=${projectId}`);
+    }
+
+    return createdProject;
+  };
+
+  const startFirstProjectTutorial = () => {
+    setCreateOpen(false);
+    onboardingTour.reset();
+    onboardingTour.start();
+    onboardingTour.setStep("create-room");
+    navigate("/user/room-2d?tour=first-project");
+  };
+
+  const dashboardTourStep =
+    onboardingTour.isActive && (onboardingTour.state.step === "welcome" || onboardingTour.state.step === "new-project" || onboardingTour.state.step === "project-details")
+      ? onboardingTour.state.step === "welcome"
+        ? {
+            target: "body",
+            placement: "center",
+            disableBeacon: true,
+            title: "Welcome to Lumiere",
+            content:
+              "We’ll guide your first setup from the dashboard into the editor, then help you place your first piece of furniture.",
+          }
+        : onboardingTour.state.step === "new-project"
+          ? {
+              target: '[data-tour="dashboard-new-project"]',
+              placement: "bottom",
+              disableBeacon: true,
+              title: "Create your first project",
+              content:
+                "Start by opening the project creator. We’ll use this project as the base for your first room.",
+            }
+          : {
+              target: '[data-tour="project-name-input"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Name your project",
+              content:
+                "Give the project a clear name, then click Create Project. As soon as it’s saved, we’ll bring you into the room editor.",
+            }
+      : null;
 
   const overviewContent = (
     <div className="space-y-8">
@@ -2588,6 +2667,79 @@ const Dashboard = ({ user, onLogout }) => {
         )}
       </Space>
     ),
+    tutorials: (
+      <Space direction="vertical" size={32} style={{ width: "100%" }}>
+        <AntSectionHeading
+          eyebrow="Tutorials"
+          title="Guided Experiences"
+          copy="Replay hands-on walkthroughs anytime. These are available even if you already have projects."
+        />
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={14} xl={10}>
+            <Card
+              className="lm-hover-card"
+              style={{
+                ...antdStyles.panel,
+                overflow: "hidden",
+                background:
+                  "radial-gradient(circle at top right, rgba(196,154,108,0.22), transparent 32%), linear-gradient(135deg, rgba(36,28,24,0.98), rgba(20,16,14,0.98))",
+              }}
+              styles={{ body: { ...antdStyles.panelBody, padding: 28 } }}
+            >
+              <Space direction="vertical" size={18} style={{ width: "100%" }}>
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 18,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "rgba(196,154,108,0.14)",
+                    border: "1px solid rgba(196,154,108,0.18)",
+                  }}
+                >
+                  <Wand2 size={24} color={palette.accent} />
+                </div>
+                <div>
+                  <Title level={3} style={{ margin: 0, color: palette.text }}>
+                    First Project Onboarding
+                  </Title>
+                  <Paragraph style={{ margin: "10px 0 0", color: "rgba(234,216,195,0.68)" }}>
+                    Walk through the full beginner flow: welcome, create a project,
+                    sketch your first room, switch to 3D, and add furniture.
+                  </Paragraph>
+                </div>
+                <Space size={12} wrap>
+                  <Button
+                    type="primary"
+                    onClick={startFirstProjectTutorial}
+                    style={{
+                      ...primaryButtonStyle,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Wand2 size={16} />
+                    Start tutorial
+                  </Button>
+                  <Button
+                    onClick={() => setActiveTab("overview")}
+                    style={{
+                      ...quietButtonStyle,
+                      border: 0,
+                    }}
+                  >
+                    Back to dashboard
+                  </Button>
+                </Space>
+              </Space>
+            </Card>
+          </Col>
+        </Row>
+      </Space>
+    ),
     settings: (
       <Space direction="vertical" size={32} style={{ width: "100%" }}>
         <AntSectionHeading
@@ -2622,12 +2774,19 @@ const Dashboard = ({ user, onLogout }) => {
 
   return (
     <Layout style={antdStyles.root}>
+      <OnboardingJoyride
+        step={dashboardTourStep}
+        onSkip={onboardingTour.dismiss}
+        primaryLabel="Open creator"
+        onPrimaryAction={handleTourCreateOpen}
+        showPrimary={onboardingTour.state.step !== "project-details"}
+      />
       <style>{animatedButtonCss}</style>
 
       <AntSidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onCreateNew={() => setCreateOpen(true)}
+        onCreateNew={openCreateModal}
         collapsed={isMobile}
       />
 
@@ -2644,7 +2803,7 @@ const Dashboard = ({ user, onLogout }) => {
           onLogout={onLogout}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          onCreateNew={() => setCreateOpen(true)}
+          onCreateNew={openCreateModal}
           onSearch={searchProjects}
           compact={isMobile}
         />
@@ -2687,7 +2846,7 @@ const Dashboard = ({ user, onLogout }) => {
       <CreateProjectModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreate={createProject}
+        onCreate={handleCreateProject}
       />
 
       <ConfirmDeleteModal

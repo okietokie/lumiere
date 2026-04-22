@@ -29,6 +29,7 @@ import {
   LoadingOutlined,
   PoweroffOutlined,
   WalletOutlined,
+  QuestionCircleOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
@@ -119,6 +120,8 @@ import {
   saveLive3DSceneSnapshot,
 } from "../../../utils/editorSceneBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import OnboardingJoyride from "../../onboarding/OnboardingJoyride.jsx";
+import { useOnboardingTour } from "../../onboarding/OnboardingTourProvider.jsx";
 
 
 const CAMERA_PRESETS = {
@@ -131,6 +134,7 @@ const CAMERA_PRESETS = {
 const OPENING_STEP = 0.05;
 const WALL_EDGE_CONNECT_MIN_LENGTH = 0.25;
 const WALL_EDGE_CONNECT_EPSILON = 0.0001;
+const WALL_EDGE_TOUCH_CONFIRM_MS = 420;
 const DOOR_STYLE_OPTIONS = [
   { key: 'hinged', label: 'Single Hinged Door' },
   { key: 'sliding', label: 'Single Sliding Door' },
@@ -527,6 +531,7 @@ function SnapshotBridge({ snapshotApiRef }) {
 
 export default function RoomScene({ initialScene = null }) {
   const navigate = useNavigate();
+  const onboardingTour = useOnboardingTour();
   const [searchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
   const shouldPreferLiveSnapshot = searchParams.get("live") === "1";
@@ -628,6 +633,8 @@ export default function RoomScene({ initialScene = null }) {
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
   const [furnitureToolbarPos, setFurnitureToolbarPos] = useState(null);
   const [lightToolbarPos,     setLightToolbarPos]     = useState(null);
+  const [manualSceneGuideActive, setManualSceneGuideActive] = useState(false);
+  const [manualSceneGuideStep, setManualSceneGuideStep] = useState(null);
 
   const orbitControlsRef = useRef(null);
   const sceneRef         = useRef(null);
@@ -640,6 +647,7 @@ export default function RoomScene({ initialScene = null }) {
   const desktopFloatingRef = useRef(null);
   const sceneHistoryPastRef = useRef([]);
   const sceneHistoryFutureRef = useRef([]);
+  const wallEdgeTouchConfirmRef = useRef(null);
   const [, setSceneHistoryVersion] = useState(0);
 
   const screens = Grid.useBreakpoint();
@@ -673,6 +681,9 @@ export default function RoomScene({ initialScene = null }) {
     if (!target) return false;
     const tagName = target.tagName?.toLowerCase();
     return tagName === 'input' || tagName === 'textarea' || target.isContentEditable;
+  }, []);
+  const clearWallEdgeTouchConfirm = useCallback(() => {
+    wallEdgeTouchConfirmRef.current = null;
   }, []);
   useEffect(() => {
     const coarseQuery = window.matchMedia?.('(pointer: coarse)');
@@ -999,11 +1010,12 @@ export default function RoomScene({ initialScene = null }) {
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
     setWallEdgeLinkStart(null);
+    clearWallEdgeTouchConfirm();
     setActiveTool('select');
     setActiveTab('walls');
     setMobilePanelOpen(false);
     setSaveModalOpen(true);
-  }, [projectSave, setSelectedLightId]);
+  }, [clearWallEdgeTouchConfirm, projectSave, setSelectedLightId]);
   const toggleWallsHidden = useCallback(() => {
     setWallsHidden((prev) => !prev);
     setSelectedWallId(null);
@@ -1011,11 +1023,12 @@ export default function RoomScene({ initialScene = null }) {
     setWallToolbarPinned(false);
     setWallToolbarPos(null);
     setWallEdgeLinkStart(null);
+    clearWallEdgeTouchConfirm();
     if (activeTab === 'walls') setActiveTab('furniture');
     if (activeTool === 'door' || activeTool === 'window' || activeTool === 'build') {
       setActiveTool('select');
     }
-  }, [activeTab, activeTool]);
+  }, [activeTab, activeTool, clearWallEdgeTouchConfirm]);
   const toggleCeilingHidden = useCallback(() => {
     setCeilingHidden((prev) => !prev);
   }, []);
@@ -2476,7 +2489,10 @@ export default function RoomScene({ initialScene = null }) {
       return;
     }
 
-    const shouldCompleteLink = Boolean(
+    const sourceEvent = event?.nativeEvent ?? event?.sourceEvent ?? event;
+    const pointerType = sourceEvent?.pointerType ?? event?.pointerType;
+    const isTouchInteraction = isTouchDevice || (pointerType ? pointerType !== 'mouse' : false);
+    const shouldCompleteWithModifier = Boolean(
       event?.ctrlKey
       || event?.metaKey
       || event?.nativeEvent?.ctrlKey
@@ -2488,7 +2504,54 @@ export default function RoomScene({ initialScene = null }) {
       point,
     };
 
-    if (!wallEdgeLinkStart || !shouldCompleteLink) {
+    const touchConfirmState = wallEdgeTouchConfirmRef.current;
+    const touchConfirmStillValid = Boolean(
+      touchConfirmState
+      && (Date.now() - touchConfirmState.at) <= WALL_EDGE_TOUCH_CONFIRM_MS
+    );
+    const shouldCompleteWithTouchDoubleTap = Boolean(
+      isTouchInteraction
+      && wallEdgeLinkStart
+      && !(wallEdgeLinkStart.wallId === wall.id && wallEdgeLinkStart.edge === edge)
+      && touchConfirmStillValid
+      && touchConfirmState.wallId === wall.id
+      && touchConfirmState.edge === edge
+    );
+    const shouldCompleteLink = shouldCompleteWithModifier || shouldCompleteWithTouchDoubleTap;
+
+    if (!wallEdgeLinkStart) {
+      clearWallEdgeTouchConfirm();
+      setWallEdgeLinkStart(nextEdge);
+      setSelectedWallId(wall.id);
+      setSelectedOpening(null);
+      setSelectedFurnitureId(null);
+      setSelectedLightId(null);
+      setActiveTab('walls');
+      toast.info(
+        isTouchInteraction
+          ? 'Wall edge selected. Double-tap another wall edge to connect it.'
+          : 'Wall edge selected. Ctrl/Cmd-click another wall edge to connect it.'
+      );
+      return;
+    }
+
+    if (!shouldCompleteLink) {
+      if (isTouchInteraction) {
+        wallEdgeTouchConfirmRef.current = {
+          wallId: wall.id,
+          edge,
+          at: Date.now(),
+        };
+        setSelectedWallId(wall.id);
+        setSelectedOpening(null);
+        setSelectedFurnitureId(null);
+        setSelectedLightId(null);
+        setActiveTab('walls');
+        toast.info('Double-tap this wall edge to create the connector wall.');
+        return;
+      }
+
+      clearWallEdgeTouchConfirm();
       setWallEdgeLinkStart(nextEdge);
       setSelectedWallId(wall.id);
       setSelectedOpening(null);
@@ -2500,6 +2563,7 @@ export default function RoomScene({ initialScene = null }) {
     }
 
     if (wallEdgeLinkStart.wallId === wall.id && wallEdgeLinkStart.edge === edge) {
+      clearWallEdgeTouchConfirm();
       toast.info('Choose a different wall edge to create a connector wall.');
       return;
     }
@@ -2509,6 +2573,7 @@ export default function RoomScene({ initialScene = null }) {
     const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
 
     if (length < WALL_EDGE_CONNECT_MIN_LENGTH) {
+      clearWallEdgeTouchConfirm();
       toast.info('Choose two wall edges with some space between them.');
       return;
     }
@@ -2517,6 +2582,7 @@ export default function RoomScene({ initialScene = null }) {
     if (existingWall) {
       setSelectedWallId(existingWall.id);
       setWallEdgeLinkStart(null);
+      clearWallEdgeTouchConfirm();
       setActiveTab('walls');
       toast.info('A wall already connects those two edges.');
       return;
@@ -2544,9 +2610,12 @@ export default function RoomScene({ initialScene = null }) {
     setSelectedFurnitureId(null);
     setSelectedLightId(null);
     setWallEdgeLinkStart(null);
+    clearWallEdgeTouchConfirm();
     setActiveTab('walls');
     toast.success('Connector wall created between the selected edges.');
   }, [
+    clearWallEdgeTouchConfirm,
+    isTouchDevice,
     markSceneMutation,
     selectedRoom,
     setSelectedLightId,
@@ -2746,7 +2815,11 @@ export default function RoomScene({ initialScene = null }) {
           return (
             <RevealActionButton
               key={`${room.id}-${key}`}
-              label={key === 'direction' ? roomWallPlacementSide[0].toUpperCase() + roomWallPlacementSide.slice(1) : label}
+              label={key === 'direction'
+                ? roomWallPlacementSide[0].toUpperCase() + roomWallPlacementSide.slice(1)
+                : key === 'room'
+                  ? room.name
+                  : label}
               icon={key === 'direction'
                 ? (roomWallPlacementSide === 'left'
                   ? KeyboardDoubleArrowLeftRoundedIcon
@@ -2776,6 +2849,45 @@ export default function RoomScene({ initialScene = null }) {
                 }
                 cycleRoomWallPlacementSide();
               }}
+              expandedWidthOverride={key === 'room' && !compact ? 156 : null}
+              endAdornment={key === 'room' && !compact ? (
+                <Tooltip
+                  trigger="click"
+                  placement={isMobile ? 'bottom' : 'top'}
+                  title="Click this room chip to start adding a connected room. Then choose the side, name it, set dimensions, and try the flow live as you build."
+                >
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label="How to add a room"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }
+                    }}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      border: `1px solid ${COLORS.secondary}66`,
+                      background: 'rgba(255,255,255,0.08)',
+                      color: activeTab === 'room' ? COLORS.background : COLORS.text,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+                    }}
+                  >
+                    <QuestionCircleOutlined style={{ fontSize: 14 }} />
+                  </span>
+                </Tooltip>
+              ) : null}
               variant={isPanelVariant ? 'panel' : compact ? 'pill' : 'reveal'}
             />
           );
@@ -3257,7 +3369,10 @@ export default function RoomScene({ initialScene = null }) {
     if (selectedWallId === id) setSelectedWallId(null);
     if (selectedOpening?.wallId === id) setSelectedOpening(null);
     if (openingPreview?.wallId === id) setOpeningPreview(null);
-    if (wallEdgeLinkStart?.wallId === id) setWallEdgeLinkStart(null);
+    if (wallEdgeLinkStart?.wallId === id) {
+      setWallEdgeLinkStart(null);
+      clearWallEdgeTouchConfirm();
+    }
   };
 
   const addWall = () => {
@@ -3377,6 +3492,9 @@ export default function RoomScene({ initialScene = null }) {
     setPlacedItems((p) => [...p, item]);
     setSelectedFurnitureId(item.id);
     setActiveTab('furniture');
+    if (onboardingTour.isActive && onboardingTour.state.step === "add-furniture") {
+      onboardingTour.complete();
+    }
   };
 
   const updateItem = (id, updates) => {
@@ -3617,6 +3735,7 @@ export default function RoomScene({ initialScene = null }) {
     setSelectedOpening(null);
     setOpeningPreview(null);
     setWallEdgeLinkStart(null);
+    clearWallEdgeTouchConfirm();
     setActiveTool('select');
     setFurnitureToolbarPos(null);
     setLightToolbarPos(null);
@@ -3631,6 +3750,124 @@ export default function RoomScene({ initialScene = null }) {
     setActiveTab(tabKey);
     setDesktopPanelOpen(true);
   }, [activeTab]);
+
+  const prepareMobileGuidePanel = useCallback(() => {
+    if (!isMobile) return;
+    setActiveTab('more');
+    setMobilePanelOpen(true);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!onboardingTour.isActive) return;
+    if (onboardingTour.state.step === "hide-walls" && wallsHidden) {
+      onboardingTour.setStep("hide-ceiling");
+    }
+  }, [onboardingTour, wallsHidden]);
+
+  useEffect(() => {
+    if (!onboardingTour.isActive) return;
+    if (onboardingTour.state.step === "hide-ceiling" && ceilingHidden) {
+      onboardingTour.setStep("save-sync");
+    }
+  }, [ceilingHidden, onboardingTour]);
+
+  const getSceneGuideStepConfig = useCallback((stepKey) => {
+    switch (stepKey) {
+      case "scene-guide-launch":
+        return {
+          target: '[data-tour="scene-guide-launch"]',
+          placement: isMobile ? "bottom" : "right",
+          disableBeacon: true,
+          title: "Scene guide",
+          content:
+            "Use this guide button any time you want a quick refresher on the main 3D editor controls.",
+        };
+      case "hide-walls":
+        return {
+          target: '[data-tour="scene-hide-walls"]',
+          placement: isMobile ? "top" : "left",
+          disableBeacon: true,
+          title: "See your 2D work in 3D",
+          content:
+            "Everything you created in 2D is already here in 3D, including the room shell, door, window, and furniture. Hide the walls to peek inside more easily.",
+        };
+      case "hide-ceiling":
+        return {
+          target: '[data-tour="scene-hide-ceiling"]',
+          placement: isMobile ? "top" : "left",
+          disableBeacon: true,
+          title: "Open the room further",
+          content:
+            "Hide the ceiling too. These visibility controls make it easier to inspect layouts while keeping the same project in sync across both editors.",
+        };
+      case "save-sync":
+        return {
+          target: '[data-tour="scene-save"]',
+          placement: isMobile ? "top" : "left",
+          disableBeacon: true,
+          title: "Save before switching editors",
+          content:
+            "Changes made in 2D appear here, and changes you make in 3D can flow back to 2D too. Save before switching editors so both views stay properly synced.",
+        };
+      case "switch-2d-sync":
+        return {
+          target: '[data-tour="scene-switch-2d"]',
+          placement: isMobile ? "top" : "left",
+          disableBeacon: true,
+          title: "Move between 2D and 3D",
+          content:
+            "After saving, you can switch between editors anytime. Use 2D for structure, 3D for spatial feel, and keep building in the same project.",
+        };
+      case "scene-navbar":
+        return {
+          target: '[data-tour="scene-navbar"]',
+          placement: isMobile ? "top" : "right",
+          disableBeacon: true,
+          title: "Main navigation",
+          content:
+            "This is your main 3D editor navigation. Use it to jump between build, materials, furniture, lighting, projects, and view controls without leaving the scene.",
+        };
+      case "scene-budget":
+        return {
+          target: '[data-tour="scene-budget-activate"]',
+          placement: isMobile ? "top" : "right",
+          disableBeacon: true,
+          title: "Budget activation",
+          content:
+            "Turn Budget on here when you want live cost tracking. Once active, Lumiere can estimate totals and let you assign pricing rules to walls, furniture, and other scene elements.",
+        };
+      case "scene-dashboard":
+        return {
+          target: '[data-tour="scene-dashboard"]',
+          placement: isMobile ? "top" : "left",
+          disableBeacon: true,
+          title: "Back to dashboard",
+          content:
+            "Use Dashboard to leave the editor and return to your project overview. The editor will guide you through saving first so you do not lose progress.",
+        };
+      case "scene-logout":
+        return {
+          target: '[data-tour="scene-logout"]',
+          placement: isMobile ? "top" : "left",
+          disableBeacon: true,
+          title: "Logout",
+          content:
+            "Logout ends the current session when you are finished working. It is a quick way to leave the editor safely from either desktop or mobile.",
+        };
+      default:
+        return null;
+    }
+  }, [isMobile]);
+
+  const sceneTourStep =
+    onboardingTour.isActive
+      ? getSceneGuideStepConfig(onboardingTour.state.step)
+      : null;
+
+  const manualSceneGuideTourStep =
+    manualSceneGuideActive
+      ? getSceneGuideStepConfig(manualSceneGuideStep)
+      : null;
 
   const desktopNavItems = useMemo(() => {
     const items = [
@@ -4501,6 +4738,120 @@ export default function RoomScene({ initialScene = null }) {
         left: 0,
       }}
     >
+      <OnboardingJoyride
+        step={manualSceneGuideTourStep}
+        onSkip={() => {
+          setManualSceneGuideActive(false);
+          setManualSceneGuideStep(null);
+          if (isMobile) setMobilePanelOpen(false);
+        }}
+        primaryLabel={
+          manualSceneGuideStep === "scene-guide-launch"
+            ? "Start"
+            : manualSceneGuideStep === "scene-navbar"
+              ? "Next"
+              : manualSceneGuideStep === "scene-budget"
+                ? "Next"
+                : manualSceneGuideStep === "scene-dashboard"
+                  ? "Next"
+                  : "Finish"
+        }
+        onPrimaryAction={() => {
+          if (manualSceneGuideStep === "scene-guide-launch") {
+            setManualSceneGuideStep("scene-navbar");
+            return;
+          }
+          if (manualSceneGuideStep === "scene-navbar") {
+            prepareMobileGuidePanel();
+            setManualSceneGuideStep("scene-budget");
+            return;
+          }
+          if (manualSceneGuideStep === "scene-budget") {
+            prepareMobileGuidePanel();
+            setManualSceneGuideStep("scene-dashboard");
+            return;
+          }
+          if (manualSceneGuideStep === "scene-dashboard") {
+            prepareMobileGuidePanel();
+            setManualSceneGuideStep("scene-logout");
+            return;
+          }
+          setManualSceneGuideActive(false);
+          setManualSceneGuideStep(null);
+          if (isMobile) setMobilePanelOpen(false);
+        }}
+        showPrimary
+        useModalOverlay={false}
+        exitOnEsc
+        keyboardNavigation
+        showCancelIcon
+      />
+
+      <OnboardingJoyride
+        step={sceneTourStep}
+        onSkip={onboardingTour.dismiss}
+        primaryLabel={
+          onboardingTour.state.step === "hide-walls"
+            ? (wallsHidden ? "Continue" : "Hide walls")
+            : onboardingTour.state.step === "hide-ceiling"
+              ? (ceilingHidden ? "Continue" : "Hide ceiling")
+              : onboardingTour.state.step === "save-sync"
+                ? "Continue"
+                : onboardingTour.state.step === "switch-2d-sync"
+                  ? "Continue"
+                  : onboardingTour.state.step === "scene-navbar"
+                    ? "Next"
+                    : onboardingTour.state.step === "scene-budget"
+                      ? "Next"
+                      : onboardingTour.state.step === "scene-dashboard"
+                        ? "Next"
+                        : "Finish tour"
+        }
+        onPrimaryAction={() => {
+          if (onboardingTour.state.step === "hide-walls") {
+            if (!wallsHidden) toggleWallsHidden();
+            else onboardingTour.setStep("hide-ceiling");
+            return;
+          }
+
+          if (onboardingTour.state.step === "hide-ceiling") {
+            if (!ceilingHidden) toggleCeilingHidden();
+            else onboardingTour.setStep("save-sync");
+            return;
+          }
+
+          if (onboardingTour.state.step === "save-sync") {
+            onboardingTour.setStep("switch-2d-sync");
+            return;
+          }
+
+          if (onboardingTour.state.step === "switch-2d-sync") {
+            onboardingTour.setStep("scene-navbar");
+            return;
+          }
+
+          if (onboardingTour.state.step === "scene-navbar") {
+            prepareMobileGuidePanel();
+            onboardingTour.setStep("scene-budget");
+            return;
+          }
+
+          if (onboardingTour.state.step === "scene-budget") {
+            prepareMobileGuidePanel();
+            onboardingTour.setStep("scene-dashboard");
+            return;
+          }
+
+          if (onboardingTour.state.step === "scene-dashboard") {
+            prepareMobileGuidePanel();
+            onboardingTour.setStep("scene-logout");
+            return;
+          }
+
+          onboardingTour.complete();
+        }}
+        showPrimary
+      />
 
       {!isMobile && (
         <>
@@ -4535,6 +4886,35 @@ export default function RoomScene({ initialScene = null }) {
               applyCameraPreset(currentViewPreset === 'top' ? 'perspective' : 'top');
             }}
           />
+          <button
+            type="button"
+            data-tour="scene-guide-launch"
+            onClick={() => {
+              setManualSceneGuideActive(true);
+              setManualSceneGuideStep("scene-guide-launch");
+            }}
+            style={{
+              position: 'fixed',
+              top: 'calc(64px + env(safe-area-inset-top, 0px))',
+              left: 12,
+              zIndex: 1100,
+              width: 42,
+              height: 42,
+              borderRadius: 999,
+              border: `1px solid ${COLORS.secondary}55`,
+              background: `${COLORS.background}E8`,
+              color: COLORS.text,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 12px 28px rgba(0,0,0,0.26)',
+              backdropFilter: 'blur(16px)',
+              cursor: 'pointer',
+            }}
+            aria-label="Open scene guide"
+          >
+            <QuestionCircleOutlined style={{ fontSize: 18 }} />
+          </button>
           <div style={{ position: 'fixed', inset: 0, paddingTop: 64, paddingBottom: 72 }}>
             {canvasBlock}
           </div>
@@ -4611,11 +4991,11 @@ export default function RoomScene({ initialScene = null }) {
             {activeTab === 'more' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                  <button type="button" className="room-mobile-action-tile" onClick={() => setSaveModalOpen(true)}>
+                  <button type="button" className="room-mobile-action-tile" onClick={() => setSaveModalOpen(true)} data-tour="scene-save">
                     <SaveOutlined />
                     <span>Save</span>
                   </button>
-                  <button type="button" className="room-mobile-action-tile" onClick={switchTo2D}>
+                  <button type="button" className="room-mobile-action-tile" onClick={switchTo2D} data-tour="scene-switch-2d">
                     <SpaceDashboardRoundedIcon style={{ fontSize: 18 }} />
                     <span>2D Plan</span>
                   </button>
@@ -4636,11 +5016,11 @@ export default function RoomScene({ initialScene = null }) {
                 <div className="room-mobile-section">
                   <div className="room-mobile-section-title">Scene</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                    <button type="button" className={wallsHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleWallsHidden}>
+                    <button type="button" className={wallsHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleWallsHidden} data-tour="scene-hide-walls">
                       <ColumnWidthOutlined />
                       <span>{wallsHidden ? 'Show walls' : 'Hide walls'}</span>
                     </button>
-                    <button type="button" className={ceilingHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleCeilingHidden}>
+                    <button type="button" className={ceilingHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleCeilingHidden} data-tour="scene-hide-ceiling">
                       <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
                       <span>{ceilingHidden ? 'Show ceiling' : 'Hide ceiling'}</span>
                     </button>
@@ -4655,6 +5035,7 @@ export default function RoomScene({ initialScene = null }) {
                       className={budgetEnabled ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
                       disabled={isSaving}
                       onClick={() => handleBudgetActivationChange(!budgetEnabled)}
+                      data-tour="scene-budget-activate"
                     >
                       <PoweroffOutlined />
                       <span>{budgetEnabled ? 'Budget active' : 'Activate budget'}</span>
@@ -4695,11 +5076,11 @@ export default function RoomScene({ initialScene = null }) {
                       <FolderOpenOutlined />
                       <span>Projects</span>
                     </button>
-                    <button type="button" className="room-mobile-action-tile" onClick={handleDashboard}>
+                    <button type="button" className="room-mobile-action-tile" onClick={handleDashboard} data-tour="scene-dashboard">
                       <AppstoreOutlined />
                       <span>Dashboard</span>
                     </button>
-                    <button type="button" className="room-mobile-action-tile is-danger" onClick={handleLogout}>
+                    <button type="button" className="room-mobile-action-tile is-danger" onClick={handleLogout} data-tour="scene-logout">
                       <LogoutOutlined />
                       <span>Logout</span>
                     </button>
@@ -4728,6 +5109,7 @@ export default function RoomScene({ initialScene = null }) {
                     disabled={isSaving}
                     icon={isSaving ? <LoadingOutlined spin /> : projectSave.saveStatus === 'saved' ? <CheckOutlined /> : <SaveOutlined />}
                     onClick={() => setSaveModalOpen(true)}
+                    data-tour="scene-save"
                     className="room-action-button room-action-button-accent"
                     style={{ minWidth: 128, justifyContent: 'center' }}
                   >
@@ -4735,10 +5117,10 @@ export default function RoomScene({ initialScene = null }) {
                   </Button>
                 </Tooltip>
                 <Tooltip title="Back to Dashboard">
-                  <Button type="text" disabled={isSaving} icon={<AppstoreOutlined />} onClick={handleDashboard} className="room-action-button" />
+                  <Button type="text" disabled={isSaving} icon={<AppstoreOutlined />} onClick={handleDashboard} className="room-action-button" data-tour="scene-dashboard" />
                 </Tooltip>
                 <Tooltip title="Logout">
-                  <Button type="text" disabled={isSaving} icon={<LogoutOutlined />} onClick={handleLogout} className="room-action-button" />
+                  <Button type="text" disabled={isSaving} icon={<LogoutOutlined />} onClick={handleLogout} className="room-action-button" data-tour="scene-logout" />
                 </Tooltip>
                 {projectSave.saveStatus === 'saved' && !isSaving && (
                   <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 600, marginLeft: 2, letterSpacing: '0.04em' }}>Saved</span>
@@ -4750,6 +5132,7 @@ export default function RoomScene({ initialScene = null }) {
               disabled={isSaving}
               icon={<SpaceDashboardRoundedIcon style={{ fontSize: 16 }} />}
               onClick={switchTo2D}
+              data-tour="scene-switch-2d"
               className="room-standalone-action-button"
             >
               Switch to 2D View
@@ -4759,6 +5142,7 @@ export default function RoomScene({ initialScene = null }) {
               disabled={isSaving}
               icon={wallsHidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
               onClick={toggleWallsHidden}
+              data-tour="scene-hide-walls"
               className="room-standalone-action-button"
             >
               {wallsHidden ? 'Show Walls' : 'Hide Walls'}
@@ -4768,6 +5152,7 @@ export default function RoomScene({ initialScene = null }) {
               disabled={isSaving}
               icon={ceilingHidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
               onClick={toggleCeilingHidden}
+              data-tour="scene-hide-ceiling"
               className="room-standalone-action-button"
             >
               {ceilingHidden ? 'Show Ceiling' : 'Hide Ceiling'}
@@ -4784,7 +5169,7 @@ export default function RoomScene({ initialScene = null }) {
                   <div className="room-floating-brand">
                     <span className="room-floating-brand-dot" />
                   </div>
-                  <div className="room-floating-rail-items">
+                  <div className="room-floating-rail-items" data-tour="scene-navbar">
                     {desktopNavItems.map(({ key, label, icon: Icon }) => {
                       const isActive = desktopPanelOpen && activeTab === key;
                       return (
@@ -4795,11 +5180,40 @@ export default function RoomScene({ initialScene = null }) {
                           active={isActive}
                           onClick={() => { if (!isSaving) toggleDesktopPanel(key); }}
                           variant="sidebar"
+                          dataTour={key === "furniture" ? "scene-nav-furniture" : undefined}
                         />
                       );
                     })}
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  data-tour="scene-guide-launch"
+                  onClick={() => {
+                    setManualSceneGuideActive(true);
+                    setManualSceneGuideStep("scene-guide-launch");
+                  }}
+                  style={{
+                    pointerEvents: 'auto',
+                    width: 42,
+                    height: 42,
+                    borderRadius: 999,
+                    border: `1px solid ${COLORS.secondary}55`,
+                    background: `${COLORS.background}D9`,
+                    color: COLORS.text,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: glassShadow,
+                    backdropFilter: 'blur(20px)',
+                    cursor: 'pointer',
+                    marginTop: 2,
+                  }}
+                  aria-label="Open scene guide"
+                >
+                  <QuestionCircleOutlined style={{ fontSize: 18 }} />
+                </button>
 
                 <div
                   className="room-desktop-budget-controls"
@@ -4812,6 +5226,7 @@ export default function RoomScene({ initialScene = null }) {
                       aria-label="Activate Budget Estimation"
                       aria-pressed={budgetEnabled}
                       onClick={() => handleBudgetActivationChange(!budgetEnabled)}
+                      data-tour="scene-budget-activate"
                       style={{
                         position: 'relative',
                         minHeight: 42,

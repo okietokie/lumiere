@@ -21,6 +21,8 @@ import axiosClient from "../../api/axiosClient";
 import { clearAuthSession } from "../../utils/authStorage";
 import { normalizeShareUrl } from "../../utils/shareUrl";
 import "./RoomCanvas.css";
+import OnboardingJoyride from "../onboarding/OnboardingJoyride.jsx";
+import { useOnboardingTour } from "../onboarding/OnboardingTourProvider.jsx";
 
 const MIN_STAGE_SCALE = 0.25;
 const MAX_STAGE_SCALE = 4;
@@ -41,6 +43,32 @@ function getTouchCenter(touches, rect) {
     x: ((a.clientX + b.clientX) / 2) - rect.left,
     y: ((a.clientY + b.clientY) / 2) - rect.top,
   };
+}
+
+function getEventScreenPoint(event, fallbackPoint = { x: 0, y: 0 }) {
+  const stage = event?.target?.getStage?.();
+  const stagePoint = stage?.getPointerPosition?.();
+  if (stagePoint) return stagePoint;
+
+  const evt = event?.evt;
+  if (evt && stage?.container) {
+    const rect = stage.container().getBoundingClientRect();
+    const touch = evt.changedTouches?.[0] ?? evt.touches?.[0];
+    if (touch) {
+      return {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top,
+      };
+    }
+    if (Number.isFinite(evt.clientX) && Number.isFinite(evt.clientY)) {
+      return {
+        x: evt.clientX - rect.left,
+        y: evt.clientY - rect.top,
+      };
+    }
+  }
+
+  return fallbackPoint;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -518,6 +546,7 @@ function WallRect({ wall, isSelected, isHovered, onClick, onMenu, visibleRanges 
           stroke={col} strokeWidth={isSelected||isHovered ? 1.5 : 1}
           shadowColor="rgba(0,0,0,0.3)" shadowBlur={isSelected ? 8 : 3}
           onClick={onClick}
+          onTap={onClick}
           onDblClick={e => { e.cancelBubble = true; onMenu?.(e); }}
           onContextMenu={e => { e.evt.preventDefault(); e.cancelBubble = true; onMenu?.(e); }}
           onMouseEnter={e => { if(onClick) e.target.getStage().container().style.cursor="pointer"; }}
@@ -541,33 +570,86 @@ function WallLabel({ wall }) {
     align="center" offsetX={18} offsetY={4} listening={false}/>;
 }
 
+function getOpeningGeometry(wall, opening) {
+  const cx = wall.start.x + (wall.end.x - wall.start.x) * opening.t;
+  const cy = wall.start.y + (wall.end.y - wall.start.y) * opening.t;
+  const hw = opening.width / 2;
+  const rad = Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const ax = -cos * hw;
+  const ay = -sin * hw;
+  const bx = cos * hw;
+  const by = sin * hw;
+  return { cx, cy, ax, ay, bx, by, thickness: wall.thickness };
+}
+
+function clampOpeningPositionToWall(wall, opening, position) {
+  const length = wall?.length ?? 0;
+  if (length <= 0) return position;
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const px = position.x - wall.start.x;
+  const py = position.y - wall.start.y;
+  const along = (px * dx + py * dy) / (length * length);
+  const half = (opening.width / 2) / length;
+  const t = Math.max(half, Math.min(1 - half, along));
+  return {
+    x: wall.start.x + dx * t,
+    y: wall.start.y + dy * t,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Door & Window
 // ─────────────────────────────────────────────────────────────────────────────
-function DoorOpening({ wall, opening, isSelected, onSelect, onMenu }) {
-  const cx = wall.start.x + (wall.end.x-wall.start.x)*opening.t;
-  const cy = wall.start.y + (wall.end.y-wall.start.y)*opening.t;
-  const hw = opening.width/2, rad = Math.atan2(wall.end.y-wall.start.y, wall.end.x-wall.start.x);
-  const ax = cx - Math.cos(rad)*hw, ay = cy - Math.sin(rad)*hw;
-  const bx = cx + Math.cos(rad)*hw, by = cy + Math.sin(rad)*hw;
-  const t = wall.thickness;
-  const gp = [ax+wall.nx*t,ay+wall.ny*t, ax-wall.nx*t,ay-wall.ny*t,
-               bx-wall.nx*t,by-wall.ny*t, bx+wall.nx*t,by+wall.ny*t];
+function DoorOpening({ wall, opening, isSelected, onSelect, onMenu, draggable = false, onDragStart, onDragMove, onDragEnd }) {
+  const groupRef = useRef(null);
+  const longPressRef = useRef(null);
+  const { cx, cy, ax, ay, bx, by, thickness } = getOpeningGeometry(wall, opening);
+  const gp = [ax+wall.nx*thickness,ay+wall.ny*thickness, ax-wall.nx*thickness,ay-wall.ny*thickness,
+               bx-wall.nx*thickness,by-wall.ny*thickness, bx+wall.nx*thickness,by+wall.ny*thickness];
+  const clearLongPress = useCallback(() => {
+    if (longPressRef.current) {
+      window.clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearLongPress, [clearLongPress]);
   return (
     <Group
+      ref={groupRef}
+      x={cx}
+      y={cy}
       listening
+      draggable={draggable}
+      dragBoundFunc={(position) => clampOpeningPositionToWall(wall, opening, position)}
       onClick={(e) => { e.cancelBubble = true; onSelect?.(); }}
       onTap={(e) => { e.cancelBubble = true; onSelect?.(); }}
       onDblClick={(e) => { e.cancelBubble = true; onMenu?.(e); }}
       onDblTap={(e) => { e.cancelBubble = true; onMenu?.(e); }}
       onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; onMenu?.(e); }}
+      onTouchStart={(e) => {
+        e.cancelBubble = true;
+        onSelect?.();
+        clearLongPress();
+        if (!draggable) return;
+        longPressRef.current = window.setTimeout(() => {
+          groupRef.current?.startDrag();
+        }, 260);
+      }}
+      onTouchEnd={clearLongPress}
+      onTouchMove={clearLongPress}
+      onDragStart={(e) => { e.cancelBubble = true; clearLongPress(); onDragStart?.(e); }}
+      onDragMove={onDragMove}
+      onDragEnd={(e) => { clearLongPress(); onDragEnd?.(e); }}
       onMouseEnter={e => { e.target.getStage().container().style.cursor = "pointer"; }}
       onMouseLeave={e => { e.target.getStage().container().style.cursor = "crosshair"; }}
     >
       <Line points={gp} closed fill="#1a1714" stroke="#1a1714" strokeWidth={1}/>
       {isSelected && <Line points={gp} closed fill="transparent" stroke="#ffd86c" strokeWidth={2.5} dash={[4, 3]}/>}
-      <Line points={[ax,ay,ax-wall.nx*t,ay-wall.ny*t]} stroke="#e8c98a" strokeWidth={1.5}/>
-      <Line points={[bx,by,bx-wall.nx*t,by-wall.ny*t]} stroke="#e8c98a" strokeWidth={1.5}/>
+      <Line points={[ax,ay,ax-wall.nx*thickness,ay-wall.ny*thickness]} stroke="#e8c98a" strokeWidth={1.5}/>
+      <Line points={[bx,by,bx-wall.nx*thickness,by-wall.ny*thickness]} stroke="#e8c98a" strokeWidth={1.5}/>
       <Arc x={ax} y={ay} innerRadius={0} outerRadius={opening.width} angle={90}
         rotation={wall.angleDeg+(opening.swingDir==="left"?0:-90)}
         fill="rgba(232,201,138,0.08)" stroke="#e8c98a" strokeWidth={0.8} dash={[3,3]}/>
@@ -575,33 +657,56 @@ function DoorOpening({ wall, opening, isSelected, onSelect, onMenu }) {
     </Group>
   );
 }
-function WindowOpening({ wall, opening, isSelected, onSelect, onMenu }) {
-  const cx = wall.start.x + (wall.end.x-wall.start.x)*opening.t;
-  const cy = wall.start.y + (wall.end.y-wall.start.y)*opening.t;
-  const hw = opening.width/2, rad = Math.atan2(wall.end.y-wall.start.y, wall.end.x-wall.start.x);
-  const ax = cx-Math.cos(rad)*hw, ay = cy-Math.sin(rad)*hw;
-  const bx = cx+Math.cos(rad)*hw, by = cy+Math.sin(rad)*hw;
-  const t = wall.thickness;
-  const gp = [ax+wall.nx*t,ay+wall.ny*t,ax-wall.nx*t,ay-wall.ny*t,bx-wall.nx*t,by-wall.ny*t,bx+wall.nx*t,by+wall.ny*t];
+function WindowOpening({ wall, opening, isSelected, onSelect, onMenu, draggable = false, onDragStart, onDragMove, onDragEnd }) {
+  const groupRef = useRef(null);
+  const longPressRef = useRef(null);
+  const { cx, cy, ax, ay, bx, by, thickness } = getOpeningGeometry(wall, opening);
+  const gp = [ax+wall.nx*thickness,ay+wall.ny*thickness,ax-wall.nx*thickness,ay-wall.ny*thickness,bx-wall.nx*thickness,by-wall.ny*thickness,bx+wall.nx*thickness,by+wall.ny*thickness];
+  const clearLongPress = useCallback(() => {
+    if (longPressRef.current) {
+      window.clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearLongPress, [clearLongPress]);
   return (
     <Group
+      ref={groupRef}
+      x={cx}
+      y={cy}
       listening
+      draggable={draggable}
+      dragBoundFunc={(position) => clampOpeningPositionToWall(wall, opening, position)}
       onClick={(e) => { e.cancelBubble = true; onSelect?.(); }}
       onTap={(e) => { e.cancelBubble = true; onSelect?.(); }}
       onDblClick={(e) => { e.cancelBubble = true; onMenu?.(e); }}
       onDblTap={(e) => { e.cancelBubble = true; onMenu?.(e); }}
       onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; onMenu?.(e); }}
+      onTouchStart={(e) => {
+        e.cancelBubble = true;
+        onSelect?.();
+        clearLongPress();
+        if (!draggable) return;
+        longPressRef.current = window.setTimeout(() => {
+          groupRef.current?.startDrag();
+        }, 260);
+      }}
+      onTouchEnd={clearLongPress}
+      onTouchMove={clearLongPress}
+      onDragStart={(e) => { e.cancelBubble = true; clearLongPress(); onDragStart?.(e); }}
+      onDragMove={onDragMove}
+      onDragEnd={(e) => { clearLongPress(); onDragEnd?.(e); }}
       onMouseEnter={e => { e.target.getStage().container().style.cursor = "pointer"; }}
       onMouseLeave={e => { e.target.getStage().container().style.cursor = "crosshair"; }}
     >
       <Line points={gp} closed fill="#1a1714" stroke="#1a1714" strokeWidth={1}/>
       {isSelected && <Line points={gp} closed fill="transparent" stroke="#ffd86c" strokeWidth={2.5} dash={[4, 3]}/>}
       {[-0.3,0,0.3].map((off,i) => (
-        <Line key={i} points={[ax+wall.nx*t*off,ay+wall.ny*t*off,bx+wall.nx*t*off,by+wall.ny*t*off]}
+        <Line key={i} points={[ax+wall.nx*thickness*off,ay+wall.ny*thickness*off,bx+wall.nx*thickness*off,by+wall.ny*thickness*off]}
           stroke="rgba(140,210,220,0.7)" strokeWidth={i===1?1.5:0.8}/>
       ))}
-      <Line points={[ax+wall.nx*t*0.6,ay+wall.ny*t*0.6,ax-wall.nx*t*0.6,ay-wall.ny*t*0.6]} stroke="#e8c98a" strokeWidth={1.5}/>
-      <Line points={[bx+wall.nx*t*0.6,by+wall.ny*t*0.6,bx-wall.nx*t*0.6,by-wall.ny*t*0.6]} stroke="#e8c98a" strokeWidth={1.5}/>
+      <Line points={[ax+wall.nx*thickness*0.6,ay+wall.ny*thickness*0.6,ax-wall.nx*thickness*0.6,ay-wall.ny*thickness*0.6]} stroke="#e8c98a" strokeWidth={1.5}/>
+      <Line points={[bx+wall.nx*thickness*0.6,by+wall.ny*thickness*0.6,bx-wall.nx*thickness*0.6,by-wall.ny*thickness*0.6]} stroke="#e8c98a" strokeWidth={1.5}/>
     </Group>
   );
 }
@@ -653,6 +758,7 @@ function RoomShape({
   onRoomClick, onWallClick, onWallHover, onWallHoverOut,
   selectedOpening, onOpeningClick, onOpeningMenu,
   onGeometryMenu,
+  onOpeningDragStart, onOpeningDragMove, onOpeningDragEnd,
   onCornerMouseDown, onCornerDragStart, onCornerDragMove, onCornerDragEnd,
 }) {
   const flat = room.points.flatMap(p=>[p.x,p.y]);
@@ -685,9 +791,7 @@ function RoomShape({
           isHovered={hoveredWall?.wallId===wall.id && inOpening}
           visibleRanges={visibleWallRanges?.get(wall.id)}
           onMenu={inSelect ? e=>onGeometryMenu({ type: "edge", roomId: room.id, wallId: wall.id, event: e }) : null}
-          onClick={inOpening ? e=>onWallClick(room.id,wall.id,
-            e.target.getStage().getPointerPosition().x,
-            e.target.getStage().getPointerPosition().y) : null}
+          onClick={inOpening ? (e) => onWallClick(room.id, wall.id, e) : null}
         />
       ))}
 
@@ -704,16 +808,24 @@ function RoomShape({
               wall={wall}
               opening={op}
               isSelected={selectedOpening?.openingId === op.id}
+              draggable={inSelect}
               onSelect={() => onOpeningClick(room.id, wall.id, op.id)}
               onMenu={(e) => onOpeningMenu(room.id, wall.id, op, e)}
+              onDragStart={() => onOpeningDragStart(room.id, wall.id, op.id)}
+              onDragMove={(e) => onOpeningDragMove(room.id, wall.id, op.id, e.target.x(), e.target.y())}
+              onDragEnd={(e) => onOpeningDragEnd(room.id, wall.id, op.id, e.target.x(), e.target.y())}
             />
           : <WindowOpening
               key={op.id}
               wall={wall}
               opening={op}
               isSelected={selectedOpening?.openingId === op.id}
+              draggable={inSelect}
               onSelect={() => onOpeningClick(room.id, wall.id, op.id)}
               onMenu={(e) => onOpeningMenu(room.id, wall.id, op, e)}
+              onDragStart={() => onOpeningDragStart(room.id, wall.id, op.id)}
+              onDragMove={(e) => onOpeningDragMove(room.id, wall.id, op.id, e.target.x(), e.target.y())}
+              onDragEnd={(e) => onOpeningDragEnd(room.id, wall.id, op.id, e.target.x(), e.target.y())}
             />
       ))}
 
@@ -750,9 +862,8 @@ function RoomShape({
           fill="transparent"
           onMouseEnter={()=>onWallHover(room.id,wall.id)}
           onMouseLeave={()=>onWallHoverOut()}
-          onClick={e=>onWallClick(room.id,wall.id,
-            e.target.getStage().getPointerPosition().x,
-            e.target.getStage().getPointerPosition().y)}
+          onClick={(e) => onWallClick(room.id, wall.id, e)}
+          onTap={(e) => onWallClick(room.id, wall.id, e)}
         />
       ))}
     </Group>
@@ -993,11 +1104,12 @@ function FurnitureCatalogue({ onSelect, pending }) {
         <div key={cat}>
           <div className="catalogue-cat-label">{cat}</div>
           <div className="catalogue-grid">
-            {catalogueItems.filter(f=>f.category===cat).map(f=>(
+            {catalogueItems.filter(f=>f.category===cat).map((f, index)=>(
               <button key={f.key}
                 className={`catalogue-item${pendingKey===f.key?" active":""}`}
                 onClick={()=>onSelect(f)}
                 title={f.label}
+                data-tour={index === 0 ? "planner-furniture-catalogue-item" : undefined}
               >
                 {f.previewUrl ? (
                   <img className="catalogue-thumb" src={f.previewUrl} alt="" loading="lazy" decoding="async"/>
@@ -1034,9 +1146,14 @@ function ThicknessSlider({ value, onChange }) {
   );
 }
 
-function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick }) {
+function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick, ...props }) {
   return (
-    <button className={`tool-btn${active?" active":""}${danger?" danger":""}`} onClick={onClick} disabled={disabled}>
+    <button
+      className={`tool-btn${active?" active":""}${danger?" danger":""}`}
+      onClick={onClick}
+      disabled={disabled}
+      {...props}
+    >
       <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d={icon}/>
       </svg>
@@ -1051,9 +1168,11 @@ function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function RoomCanvas({ initialPlan = null }) {
   const navigate = useNavigate();
+  const onboardingTour = useOnboardingTour();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
   const shouldPreferLiveSnapshot = searchParams.get("live") === "1";
+  const tutorialMode = searchParams.get("tour");
   const containerRef = useRef(null);
   const stageRef     = useRef(null);
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
@@ -1111,7 +1230,7 @@ export default function RoomCanvas({ initialPlan = null }) {
     selectedWall,   setSelectedWall,
     selectedOpening, setSelectedOpening,
     hoveredWall,    setHoveredWall,
-    handleWallClick, deleteOpening, updateOpening,
+    handleWallClick, deleteOpening, updateOpening, moveOpening,
     wallThickness, applyGlobalThickness,
     doorWidth, setDoorWidth, windowWidth, setWindowWidth,
     replacePlan,
@@ -1232,6 +1351,23 @@ export default function RoomCanvas({ initialPlan = null }) {
     const point = stageRef.current?.getPointerPosition() ?? { x: 0, y: 0 };
     return screenToPlanPoint(point);
   }, [screenToPlanPoint]);
+  const handleOpeningPlacement = useCallback((roomId, wallId, event) => {
+    const point = getEventScreenPoint(event, stageRef.current?.getPointerPosition?.() ?? { x: 0, y: 0 });
+    const planPoint = screenToPlanPoint(point);
+    handleWallClick(roomId, wallId, planPoint.x, planPoint.y);
+  }, [handleWallClick, screenToPlanPoint]);
+  const handleOpeningDragStart = useCallback((roomId, wallId, openingId) => {
+    beginHistoryAction();
+    setSelectedRoom({ roomId });
+    setSelectedWall({ roomId, wallId });
+    setSelectedOpening({ roomId, wallId, openingId });
+  }, [beginHistoryAction, setSelectedOpening, setSelectedRoom, setSelectedWall]);
+  const handleOpeningDragMove = useCallback((roomId, wallId, openingId, x, y) => {
+    moveOpening(roomId, wallId, openingId, x, y);
+  }, [moveOpening]);
+  const handleOpeningDragEnd = useCallback((roomId, wallId, openingId, x, y) => {
+    moveOpening(roomId, wallId, openingId, x, y);
+  }, [moveOpening]);
   const onPointerMove = useCallback(() => { const {x,y}=getPos(); handleMouseMove(x,y); }, [getPos, handleMouseMove]);
   const onStageClick = useCallback(e => {
     if (stageGestureRef.current.didMove) {
@@ -1357,8 +1493,11 @@ export default function RoomCanvas({ initialPlan = null }) {
   const switchTo3D = useCallback(() => {
     const scene = convert2DPlanTo3DScene(buildPlanSnapshot(), { manifest: modelAssets?.manifest ?? [] });
     if (scene) saveLive3DSceneSnapshot(scene);
+    if (onboardingTour.isActive && onboardingTour.state.step === "switch-3d") {
+      onboardingTour.markSwitchedTo3D();
+    }
     navigate(switchTo3DUrl);
-  }, [buildPlanSnapshot, modelAssets?.manifest, navigate, switchTo3DUrl]);
+  }, [buildPlanSnapshot, modelAssets?.manifest, navigate, onboardingTour, switchTo3DUrl]);
 
   const captureSnapshot = useCallback(() => {
     if (!stageRef.current) return null;
@@ -1597,6 +1736,169 @@ export default function RoomCanvas({ initialPlan = null }) {
   }, [initialPlan, loadProject, selectedProjectId, shouldPreferLiveSnapshot]);
 
   useEffect(() => {
+    if (tutorialMode !== "first-project") return;
+    if (onboardingTour.isActive) return;
+    if (onboardingTour.state.completed || onboardingTour.state.dismissed) return;
+    onboardingTour.start();
+    onboardingTour.setStep("create-room");
+  }, [onboardingTour, tutorialMode]);
+
+  useEffect(() => {
+    if (!onboardingTour.isActive || !rooms.length) return;
+    if (onboardingTour.state.step === "create-room" || onboardingTour.state.step === "draw-room") {
+      onboardingTour.markRoomCreated();
+    }
+  }, [onboardingTour, rooms.length]);
+
+  const doorCount = rooms.reduce(
+    (sum, room) => sum + room.walls.reduce(
+      (wallSum, wall) => wallSum + wall.openings.filter((opening) => opening.type === "door").length,
+      0
+    ),
+    0
+  );
+  const windowCount = rooms.reduce(
+    (sum, room) => sum + room.walls.reduce(
+      (wallSum, wall) => wallSum + wall.openings.filter((opening) => opening.type === "window").length,
+      0
+    ),
+    0
+  );
+  const doorWallIds = new Set(
+    rooms.flatMap((room) =>
+      room.walls
+        .filter((wall) => wall.openings.some((opening) => opening.type === "door"))
+        .map((wall) => wall.id)
+    )
+  );
+  const windowWallIds = new Set(
+    rooms.flatMap((room) =>
+      room.walls
+        .filter((wall) => wall.openings.some((opening) => opening.type === "window"))
+        .map((wall) => wall.id)
+    )
+  );
+  const hasWindowOnDifferentWallFromDoor = [...windowWallIds].some((wallId) => !doorWallIds.has(wallId));
+
+  const plannerTourStep =
+    onboardingTour.isActive && (
+      onboardingTour.state.step === "create-room"
+      || onboardingTour.state.step === "draw-room"
+      || onboardingTour.state.step === "edit-room"
+      || onboardingTour.state.step === "door-tool"
+      || onboardingTour.state.step === "place-door"
+      || onboardingTour.state.step === "window-tool"
+      || onboardingTour.state.step === "place-window"
+      || onboardingTour.state.step === "furniture-tool"
+      || onboardingTour.state.step === "select-furniture"
+      || onboardingTour.state.step === "place-furniture"
+      || onboardingTour.state.step === "switch-3d"
+    )
+      ? onboardingTour.state.step === "create-room"
+        ? {
+            target: '[data-tour="planner-draw-room"]',
+            placement: "right",
+            disableBeacon: true,
+            title: "Let’s create your first room",
+            content:
+              "Use the draw tool to sketch the room outline. Once the room closes, the tour will continue automatically.",
+          }
+        : onboardingTour.state.step === "draw-room"
+          ? {
+              target: '[data-tour="planner-canvas"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Sketch the room shell",
+              content:
+                "Click to place wall corners, then click back on the first point to complete the room.",
+            }
+        : onboardingTour.state.step === "edit-room"
+          ? {
+              target: '[data-tour="planner-select-edit"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Refine in 2D",
+              content:
+                "Use Select & Edit to reshape walls, tweak corners, and fine-tune the room before adding details.",
+            }
+        : onboardingTour.state.step === "door-tool"
+          ? {
+              target: '[data-tour="planner-place-door"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Add doors",
+              content:
+                "The door tool lets you place openings directly on a wall once your room is selected.",
+            }
+        : onboardingTour.state.step === "place-door"
+          ? {
+              target: '[data-tour="planner-canvas"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Place a real door",
+              content:
+                "Try it now: click on any wall in the room to place your first door. The tutorial will continue once it appears.",
+            }
+        : onboardingTour.state.step === "window-tool"
+          ? {
+              target: '[data-tour="planner-place-window"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Add windows",
+              content:
+                "Use the window tool to place natural light openings in the same 2D workflow.",
+            }
+        : onboardingTour.state.step === "place-window"
+          ? {
+              target: '[data-tour="planner-canvas"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Place a real window",
+              content:
+                hasWindowOnDifferentWallFromDoor
+                  ? "Nice. Your window is on a different wall from the door, so the 3D preview will read more clearly."
+                  : windowCount > 0
+                    ? "Place the window on a different wall from your door so each opening is easier to understand in 3D."
+                    : "Click on a different wall from your door to add a window. Once you place it, we'll move to furniture.",
+            }
+        : onboardingTour.state.step === "furniture-tool"
+          ? {
+              target: '[data-tour="planner-furniture-tool"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Preview furniture in plan view",
+              content:
+                "You can place and arrange furniture in 2D too, then continue in 3D for a fuller spatial preview.",
+            }
+        : onboardingTour.state.step === "select-furniture"
+          ? {
+              target: '[data-tour="planner-furniture-catalogue-item"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Choose furniture",
+              content:
+                "Pick any furniture item from the catalogue. Then we'll place it inside the room.",
+            }
+        : onboardingTour.state.step === "place-furniture"
+          ? {
+              target: '[data-tour="planner-canvas"]',
+              placement: "right",
+              disableBeacon: true,
+              title: "Place furniture in the room",
+              content:
+                "Click inside the room to place the selected item. The tutorial will continue once it appears.",
+            }
+          : {
+              target: '[data-tour="planner-switch-3d"]',
+              placement: "left",
+              disableBeacon: true,
+              title: "Switch to 3D view",
+              content:
+                "Your room shell is ready. Save before switching between 2D and 3D so progress stays synced across both editors.",
+            }
+      : null;
+
+  useEffect(() => {
     if (!autosaveEnabled || !currentProjectId) return undefined;
     autosaveRef.current = window.setInterval(() => {
       saveProject(projectName, true).catch(() => {});
@@ -1647,6 +1949,34 @@ export default function RoomCanvas({ initialPlan = null }) {
     : null;
   const displayPos = snapEnabled ? snappedPos : mousePos;
   const visibleWallRanges = useMemo(() => getWallVisibleRanges(rooms), [rooms]);
+
+  useEffect(() => {
+    if (!onboardingTour.isActive) return;
+    if (onboardingTour.state.step === "place-door" && doorCount > 0) {
+      onboardingTour.setStep("window-tool");
+    }
+  }, [doorCount, onboardingTour]);
+
+  useEffect(() => {
+    if (!onboardingTour.isActive) return;
+    if (onboardingTour.state.step === "place-window" && hasWindowOnDifferentWallFromDoor) {
+      onboardingTour.setStep("furniture-tool");
+    }
+  }, [hasWindowOnDifferentWallFromDoor, onboardingTour]);
+
+  useEffect(() => {
+    if (!onboardingTour.isActive) return;
+    if (onboardingTour.state.step === "select-furniture" && pendingFurniture) {
+      onboardingTour.setStep("place-furniture");
+    }
+  }, [onboardingTour, pendingFurniture]);
+
+  useEffect(() => {
+    if (!onboardingTour.isActive) return;
+    if (onboardingTour.state.step === "place-furniture" && furniture.length > 0) {
+      onboardingTour.setStep("switch-3d");
+    }
+  }, [furniture.length, onboardingTour]);
 
   const openOpeningContextMenu = useCallback((roomId, wallId, opening, event) => {
     const sourceEvent = event?.evt;
@@ -1703,6 +2033,74 @@ export default function RoomCanvas({ initialPlan = null }) {
 
   return (
     <div className="lumiere-wrapper">
+      <OnboardingJoyride
+        step={plannerTourStep}
+        onSkip={onboardingTour.dismiss}
+        primaryLabel={
+          onboardingTour.state.step === "create-room"
+            ? "Start drawing"
+            : onboardingTour.state.step === "edit-room"
+              ? "Open edit mode"
+              : onboardingTour.state.step === "door-tool"
+                ? "Show door tool"
+                : onboardingTour.state.step === "window-tool"
+                  ? "Show window tool"
+                  : onboardingTour.state.step === "furniture-tool"
+                    ? "Show furniture tool"
+                    : onboardingTour.state.step === "switch-3d"
+                      ? "Open 3D editor"
+                      : "Continue"
+        }
+        onPrimaryAction={() => {
+          if (onboardingTour.state.step === "create-room") {
+            setMode("draw");
+            cancelDraft();
+            onboardingTour.setStep("draw-room");
+            return;
+          }
+
+          if (onboardingTour.state.step === "edit-room") {
+            setMode("select");
+            cancelDraft();
+            onboardingTour.setStep("door-tool");
+            return;
+          }
+
+          if (onboardingTour.state.step === "door-tool") {
+            setMode("door");
+            cancelDraft();
+            onboardingTour.setStep("place-door");
+            return;
+          }
+
+          if (onboardingTour.state.step === "window-tool") {
+            setMode("window");
+            cancelDraft();
+            onboardingTour.setStep("place-window");
+            return;
+          }
+
+          if (onboardingTour.state.step === "furniture-tool") {
+            setMode("furniture");
+            cancelDraft();
+            onboardingTour.setStep("select-furniture");
+            return;
+          }
+
+          if (onboardingTour.state.step === "switch-3d") {
+            switchTo3D();
+          }
+        }}
+        showPrimary={
+          ![
+            "draw-room",
+            "place-door",
+            "place-window",
+            "select-furniture",
+            "place-furniture",
+          ].includes(onboardingTour.state.step)
+        }
+      />
       <button
         type="button"
         className={`mobile-editor-menu-button${mobileControlsOpen ? " is-open" : ""}`}
@@ -1738,6 +2136,7 @@ export default function RoomCanvas({ initialPlan = null }) {
             type="button"
             onClick={switchTo3D}
             disabled={isSaving}
+            data-tour="planner-switch-3d"
             className="canvas-action-btn canvas-action-btn-view"
           >
             Switch to 3D
@@ -1767,21 +2166,45 @@ export default function RoomCanvas({ initialPlan = null }) {
         {/* Tools */}
         <div className="sidebar-section">
           <div className="sidebar-section-title">Tools</div>
-          <ToolBtn label="Draw Room"     shortcut="D" active={mode==="draw"}
+          <ToolBtn label="Draw Room"     shortcut="D" active={mode==="draw"} data-tour="planner-draw-room"
             icon="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-            onClick={()=>{setMode("draw");cancelDraft();}}/>
-          <ToolBtn label="Select & Edit" shortcut="S" active={mode==="select"}
+            onClick={()=>{
+              setMode("draw");
+              cancelDraft();
+              if (onboardingTour.isActive && onboardingTour.state.step === "create-room") {
+                onboardingTour.setStep("draw-room");
+              }
+            }}/>
+          <ToolBtn label="Select & Edit" shortcut="S" active={mode==="select"} data-tour="planner-select-edit"
             icon="M5 3l14 9-7 1-3 7z"
             onClick={()=>{setMode("select");cancelDraft();}}/>
-          <ToolBtn label="Place Door"    shortcut="O" active={mode==="door"} disabled={!hasRooms}
+          <ToolBtn label="Place Door"    shortcut="O" active={mode==="door"} disabled={!hasRooms} data-tour="planner-place-door"
             icon="M3 21V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v16M9 21V10h6v11"
-            onClick={()=>{setMode("door");cancelDraft();}}/>
-          <ToolBtn label="Place Window"  shortcut="W" active={mode==="window"} disabled={!hasRooms}
+            onClick={()=>{
+              setMode("door");
+              cancelDraft();
+              if (onboardingTour.isActive && onboardingTour.state.step === "door-tool") {
+                onboardingTour.setStep("place-door");
+              }
+            }}/>
+          <ToolBtn label="Place Window"  shortcut="W" active={mode==="window"} disabled={!hasRooms} data-tour="planner-place-window"
             icon="M3 9h18M3 15h18M9 3v18M15 3v18"
-            onClick={()=>{setMode("window");cancelDraft();}}/>
-          <ToolBtn label="Furniture"     shortcut="F" active={mode==="furniture"} disabled={!hasRooms}
+            onClick={()=>{
+              setMode("window");
+              cancelDraft();
+              if (onboardingTour.isActive && onboardingTour.state.step === "window-tool") {
+                onboardingTour.setStep("place-window");
+              }
+            }}/>
+          <ToolBtn label="Furniture"     shortcut="F" active={mode==="furniture"} disabled={!hasRooms} data-tour="planner-furniture-tool"
             icon="M3 9h18v12H3zM9 9V5a3 3 0 0 1 6 0v4"
-            onClick={()=>{setMode("furniture");cancelDraft();}}/>
+            onClick={()=>{
+              setMode("furniture");
+              cancelDraft();
+              if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
+                onboardingTour.setStep("select-furniture");
+              }
+            }}/>
           <div style={{height:4}}/>
           <ToolBtn label="Save Project" icon="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zM7 3v5h8V3M8 17h8"
             onClick={()=>setSaveModalOpen(true)}/>
@@ -1839,6 +2262,9 @@ export default function RoomCanvas({ initialPlan = null }) {
                   const currentKey = getPendingKey(pendingFurniture);
                   const nextKey = getModelKey(item.model ?? item);
                   setPendingFurniture(currentKey === nextKey ? null : item);
+                  if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
+                    onboardingTour.setStep("select-furniture");
+                  }
                 }}
                 pending={pendingFurniture}
               />
@@ -2037,6 +2463,7 @@ export default function RoomCanvas({ initialPlan = null }) {
               type="button"
               onClick={switchTo3D}
               disabled={isSaving}
+              data-tour="planner-switch-3d"
               className="canvas-action-btn canvas-action-btn-view"
             >
               Switch to 3D View
@@ -2044,7 +2471,11 @@ export default function RoomCanvas({ initialPlan = null }) {
           </div>
         </div>
 
-        <div ref={containerRef} className={`canvas-stage-wrap${mode==="select"?" select-mode":""}`}>
+        <div
+          ref={containerRef}
+          className={`canvas-stage-wrap${mode==="select"?" select-mode":""}`}
+          data-tour="planner-canvas"
+        >
           {!hasDraft&&!hasRooms&&(
             <div className="canvas-empty">
               <svg className="canvas-empty-icon" viewBox="0 0 60 60" fill="none">
@@ -2085,10 +2516,13 @@ export default function RoomCanvas({ initialPlan = null }) {
                   selectedWall={selectedWall} selectedOpening={selectedOpening} hoveredWall={hoveredWall}
                   visibleWallRanges={visibleWallRanges}
                   onRoomClick={id=>setSelectedRoom({roomId:id})}
-                  onWallClick={(rId,wId,x,y)=>handleWallClick(rId,wId,x,y)}
+                  onWallClick={handleOpeningPlacement}
                   onOpeningClick={(rId,wId,oId)=>{setSelectedRoom({roomId:rId});setSelectedWall({roomId:rId,wallId:wId});setSelectedOpening({roomId:rId,wallId:wId,openingId:oId});}}
                   onOpeningMenu={openOpeningContextMenu}
                   onGeometryMenu={openGeometryContextMenu}
+                  onOpeningDragStart={handleOpeningDragStart}
+                  onOpeningDragMove={handleOpeningDragMove}
+                  onOpeningDragEnd={handleOpeningDragEnd}
                   onWallHover={(rId,wId)=>setHoveredWall({roomId:rId,wallId:wId})}
                   onWallHoverOut={()=>setHoveredWall(null)}
                   onCornerMouseDown={(rId,ptIdx)=>setSelectedCorner({roomId:rId,ptIdx})}

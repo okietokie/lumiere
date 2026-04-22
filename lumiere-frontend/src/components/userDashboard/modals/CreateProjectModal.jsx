@@ -49,7 +49,13 @@ const CreateProjectModal = ({ open, onClose, onCreate }) => {
 
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--create-project" role="dialog" aria-modal="true" aria-labelledby="create-project-title">
+      <div
+        className="modal modal--create-project"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-project-title"
+        data-tour="create-project-modal"
+      >
         <div className="modal__header">
           <div className="modal__header-copy">
             <span className="modal__eyebrow">Overview</span>
@@ -88,6 +94,7 @@ const CreateProjectModal = ({ open, onClose, onCreate }) => {
                 id="proj-name"
                 ref={inputRef}
                 type="text"
+                data-tour="project-name-input"
                 placeholder="e.g. Modern Living Room"
                 value={name}
                 onChange={(e) => {
@@ -121,7 +128,12 @@ const CreateProjectModal = ({ open, onClose, onCreate }) => {
 
         <div className="modal__footer">
           <button className="btn-ghost" onClick={onClose} disabled={loading}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={loading || !name.trim()}>
+          <button
+            className="btn-primary"
+            onClick={handleSubmit}
+            disabled={loading || !name.trim()}
+            data-tour="project-submit"
+          >
             {loading ? (
               <span className="spinner" />
             ) : (
