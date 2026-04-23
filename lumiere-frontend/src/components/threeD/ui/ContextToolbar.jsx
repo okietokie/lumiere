@@ -4,6 +4,10 @@ import { useThree, useFrame } from '@react-three/fiber';
 import { gsap } from 'gsap';
 import * as THREE from 'three';
 import { COLORS } from '../../../utils/colors';
+import furnitureMoveVideo from '../../../assets/tutorials/furniture/furniture_move.mp4';
+import furnitureRotateVideo from '../../../assets/tutorials/furniture/furniture_rotate.mp4';
+import furnitureScaleVideo from '../../../assets/tutorials/furniture/furniture_scale.mp4';
+import furnitureTintVideo from '../../../assets/tutorials/furniture/furniture_tint.mp4';
 import {
   captureOriginals as storeCaptureOriginals,
   applyTint        as storeApplyTint,
@@ -12,7 +16,7 @@ import {
   resetTint        as storeResetTint,
 } from '../../../utils/tintStore';
 
-const TOOLBAR_W = { wall: 420, furniture: 260, light: 160 };
+const TOOLBAR_W = { wall: 420, furniture: 360, light: 160 };
 const TOOLBAR_H = 64;
 const MARGIN    = 10;
 const WALL_BUTTONS = [
@@ -32,6 +36,39 @@ const FURNITURE_BUTTONS = [
   { iconName: 'expand',  label: 'Scale',    action: 'gizmo:scale',     tab: 'furniture', section: 'furniture-gizmo', precision: true  },
   { iconName: 'tint',    label: 'Tint',     action: 'tint',            tab: null,        section: null,              precision: false },
   { iconName: 'delete',  label: 'Delete',   action: 'delete',          tab: null,        section: null,              danger: true     },
+  { iconName: 'help',    label: 'Help',     action: 'tutorial',        tab: null,        section: null,              tutorial: true   },
+];
+const FURNITURE_TUTORIAL_STEPS = [
+  {
+    action: 'gizmo:translate',
+    title: 'Move furniture',
+    body: 'Use Move to reposition the selected furniture. Drag the gizmo arrows in the scene, or double-tap Move to enter exact X, Y, and Z values.',
+    video: furnitureMoveVideo,
+  },
+  {
+    action: 'gizmo:rotate',
+    title: 'Rotate furniture',
+    body: 'Use Rotate to turn the selected furniture into the right orientation. Drag the rotation rings, or double-tap Rotate for precise angle controls.',
+    video: furnitureRotateVideo,
+  },
+  {
+    action: 'gizmo:scale',
+    title: 'Scale furniture',
+    body: 'Use Scale to resize the selected piece. Drag the scale handles in the scene, or double-tap Scale to type exact scale values.',
+    video: furnitureScaleVideo,
+  },
+  {
+    action: 'tint',
+    title: 'Tint furniture',
+    body: 'Use Tint to adjust the color mood of the selected object. The panel lets you tune hue, saturation, and brightness without changing the original model.',
+    video: furnitureTintVideo,
+  },
+  {
+    action: 'delete',
+    title: 'Delete furniture',
+    body: 'Use Delete when the selected furniture should be removed from the scene. It only removes the selected item, leaving the rest of the room untouched.',
+    video: null,
+  },
 ];
 const LIGHT_BUTTONS = [
   { iconName: 'drag',    label: 'Move',     action: 'tab',             tab: 'lighting',  section: 'light-selected',  precision: false },
@@ -78,6 +115,8 @@ export default function ContextToolbar({
   const [bubble,   setBubble]   = useState(null);
   const bubbleTimer             = useRef(null);
   const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 560);
+  const [tutorialStep, setTutorialStep] = useState(null);
+  const [tutorialRect, setTutorialRect] = useState(null);
 
   const [precisionMode, setPrecisionMode] = useState(null);
   const lastTapMs                         = useRef({});
@@ -98,11 +137,67 @@ export default function ContextToolbar({
 
   useEffect(() => {
     if (!screenPos) {
-      setTintOpen(false); setPrecisionMode(null);
+      setTintOpen(false); setPrecisionMode(null); setTutorialStep(null);
     }
   }, [screenPos]);
 
   useEffect(() => { setPrecisionMode(null); }, [selectedItem?.id]);
+  useEffect(() => { setTutorialStep(null); }, [selectedItem?.id, type]);
+
+  const toolbarWidth = isNarrow
+    ? Math.min(window.innerWidth - 20, buttonsMaxWidth(type, true))
+    : buttonsMaxWidth(type, false);
+  const computedPos = isPinned
+    ? {
+        x: Math.max(10, Math.round((window.innerWidth - toolbarWidth) / 2)),
+        y: isNarrow ? 78 : 16,
+      }
+    : screenPos;
+
+  const measureTutorialTarget = useCallback(() => {
+    if (tutorialStep == null || type !== 'furniture') {
+      setTutorialRect(null);
+      return;
+    }
+    const step = FURNITURE_TUTORIAL_STEPS[tutorialStep];
+    const target = Array.from(toolbarRef.current?.querySelectorAll('[data-tutorial-action]') ?? [])
+      .find((node) => node.dataset.tutorialAction === step?.action);
+    if (!target) {
+      setTutorialRect(null);
+      return;
+    }
+    const r = target.getBoundingClientRect();
+    setTutorialRect({
+      left: r.left,
+      top: r.top,
+      width: r.width,
+      height: r.height,
+      right: r.right,
+      bottom: r.bottom,
+    });
+  }, [tutorialStep, type]);
+
+  useEffect(() => {
+    measureTutorialTarget();
+  }, [computedPos?.x, computedPos?.y, isNarrow, measureTutorialTarget, tintOpen]);
+
+  useEffect(() => {
+    if (tutorialStep == null) return undefined;
+    const onKey = (event) => {
+      if (event.key === 'Escape') setTutorialStep(null);
+      if (event.key === 'ArrowRight') setTutorialStep((step) => Math.min(FURNITURE_TUTORIAL_STEPS.length - 1, step + 1));
+      if (event.key === 'ArrowLeft') setTutorialStep((step) => Math.max(0, step - 1));
+    };
+    const onResize = () => measureTutorialTarget();
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onResize, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onResize, true);
+    };
+  }, [measureTutorialTarget, tutorialStep]);
 
   useEffect(() => {
     if (tintOpen && selectedFurnitureMesh) {
@@ -125,15 +220,6 @@ export default function ContextToolbar({
   if (!selectedItem || (!screenPos && !isPinned)) return null;
 
   const currentTint = normalizeTint(selectedItem?.tint);
-  const toolbarWidth = isNarrow
-    ? Math.min(window.innerWidth - 20, buttonsMaxWidth(type, true))
-    : buttonsMaxWidth(type, false);
-  const computedPos = isPinned
-    ? {
-        x: Math.max(10, Math.round((window.innerWidth - toolbarWidth) / 2)),
-        y: isNarrow ? 78 : 16,
-      }
-    : screenPos;
 
   const buttons = type === 'wall' ? WALL_BUTTONS
     : type === 'furniture' ? FURNITURE_BUTTONS
@@ -181,6 +267,13 @@ export default function ContextToolbar({
         if (precisionMode && precisionMode !== mode) setPrecisionMode(null);
         showBubble(BUBBLE_MSGS[btn.action], btnEl);
       }
+      return;
+    }
+
+    if (btn.action === 'tutorial') {
+      setTutorialStep(0);
+      setBubble(null);
+      setPrecisionMode(null);
       return;
     }
 
@@ -345,9 +438,202 @@ export default function ContextToolbar({
 
       {/*  Speech bubble */}
       {bubble && <SpeechBubble text={bubble.text} x={bubble.x} y={bubble.y} placeBelow={bubble.placeBelow} />}
+      {tutorialStep != null && type === 'furniture' && (
+        <FurnitureTutorialOverlay
+          stepIndex={tutorialStep}
+          targetRect={tutorialRect}
+          compact={isNarrow}
+          onClose={() => setTutorialStep(null)}
+          onPrev={() => setTutorialStep((step) => Math.max(0, step - 1))}
+          onNext={() => setTutorialStep((step) => {
+            const next = step + 1;
+            if (next >= FURNITURE_TUTORIAL_STEPS.length) return null;
+            return next;
+          })}
+        />
+      )}
     </>
   );
 }
+
+function FurnitureTutorialOverlay({ stepIndex, targetRect, compact, onClose, onPrev, onNext }) {
+  const cardRef = useRef(null);
+  const step = FURNITURE_TUTORIAL_STEPS[stepIndex];
+  const total = FURNITURE_TUTORIAL_STEPS.length;
+  const cardWidth = Math.min(compact ? window.innerWidth - 24 : 330, window.innerWidth - 24);
+  const cardLeft = targetRect
+    ? Math.max(12, Math.min(window.innerWidth - cardWidth - 12, targetRect.left + targetRect.width / 2 - cardWidth / 2))
+    : Math.max(12, Math.round((window.innerWidth - cardWidth) / 2));
+  const spaceBelow = targetRect ? window.innerHeight - targetRect.bottom : 0;
+  const cardTop = targetRect
+    ? (spaceBelow > 260
+        ? Math.min(window.innerHeight - 260, targetRect.bottom + 18)
+        : Math.max(12, targetRect.top - (step?.video ? 360 : 230)))
+    : 96;
+  const isLast = stepIndex === total - 1;
+
+  useEffect(() => {
+    if (cardRef.current) {
+      gsap.fromTo(cardRef.current,
+        { opacity: 0, y: 8, scale: 0.97 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.18, ease: 'power2.out' },
+      );
+    }
+  }, [stepIndex]);
+
+  if (!step) return null;
+
+  return (
+    <>
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 99980,
+          background: 'rgba(0,0,0,0.42)',
+          pointerEvents: 'auto',
+        }}
+        onClick={onClose}
+      />
+      {targetRect && (
+        <div
+          style={{
+            position: 'fixed',
+            left: targetRect.left - 7,
+            top: targetRect.top - 7,
+            width: targetRect.width + 14,
+            height: targetRect.height + 14,
+            zIndex: 99990,
+            borderRadius: 12,
+            border: '2px solid #F2D49B',
+            boxShadow: '0 0 0 9999px rgba(0,0,0,0.18), 0 0 28px rgba(242,212,155,0.78)',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+      <div
+        ref={cardRef}
+        role="dialog"
+        aria-label={`${step.title} tutorial`}
+        style={{
+          position: 'fixed',
+          left: cardLeft,
+          top: cardTop,
+          width: cardWidth,
+          zIndex: 100000,
+          background: 'rgba(18, 12, 10, 0.98)',
+          border: '1px solid rgba(242,212,155,0.42)',
+          borderRadius: 12,
+          boxShadow: '0 18px 60px rgba(0,0,0,0.75)',
+          color: '#F2E5D5',
+          fontFamily: 'Inter, sans-serif',
+          overflow: 'hidden',
+          pointerEvents: 'auto',
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {step.video && (
+          <video
+            key={step.video}
+            src={step.video}
+            autoPlay
+            muted
+            loop
+            playsInline
+            style={{
+              display: 'block',
+              width: '100%',
+              aspectRatio: '16 / 9',
+              objectFit: 'cover',
+              background: '#050403',
+              borderBottom: '1px solid rgba(242,212,155,0.16)',
+            }}
+          />
+        )}
+        <div style={{ padding: '14px 15px 13px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 8,
+          }}>
+            <div>
+              <div style={{ color: '#C49A6C', fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                Furniture guide {stepIndex + 1} of {total}
+              </div>
+              <div style={{ marginTop: 3, color: '#fff8ef', fontSize: 16, fontWeight: 700 }}>
+                {step.title}
+              </div>
+            </div>
+            <button
+              type="button"
+              title="Close tutorial"
+              onClick={onClose}
+              style={{
+                width: 32,
+                minWidth: 32,
+                height: 32,
+                borderRadius: '50%',
+                border: '1px solid rgba(255,255,255,0.12)',
+                background: 'rgba(255,255,255,0.04)',
+                color: '#F2E5D5',
+                cursor: 'pointer',
+                fontSize: 18,
+                lineHeight: '28px',
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <p style={{ margin: '0 0 13px', color: 'rgba(242,229,213,0.78)', fontSize: 12, lineHeight: 1.55 }}>
+            {step.body}
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <button
+              type="button"
+              onClick={onPrev}
+              disabled={stepIndex === 0}
+              style={tutorialNavButtonStyle(stepIndex === 0)}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={onNext}
+              style={{
+                ...tutorialNavButtonStyle(false),
+                background: '#C49A6C',
+                borderColor: '#C49A6C',
+                color: '#1b100c',
+                fontWeight: 800,
+              }}
+            >
+              {isLast ? 'Done' : 'Next'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function tutorialNavButtonStyle(disabled) {
+  return {
+    height: 34,
+    minWidth: 78,
+    borderRadius: 8,
+    border: '1px solid rgba(242,212,155,0.28)',
+    background: disabled ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
+    color: disabled ? 'rgba(242,229,213,0.34)' : '#F2E5D5',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 12,
+    fontWeight: 700,
+    fontFamily: 'Inter, sans-serif',
+  };
+}
+
 const AXIS_COLORS = {
   X: '#FF4D4D',   // red
   Y: '#4DDD6E',   // green
@@ -839,6 +1125,7 @@ function Icon({ name, size = 15 }) {
     door:    'M6 2h9a2 2 0 0 1 2 2v18H6V2zm2 2v16h7V4H8zm5 8.5a1 1 0 1 0 .001 2.001A1 1 0 0 0 13 12.5z',
     window:  'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5zm2 0v6h5V4H6v1zm7-1v7h5V5h-5zm-7 9v6h5v-6H6zm7 0v6h5v-6h-5z',
     tint:    'M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z',
+    help:    'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 17a1.15 1.15 0 1 1 0-2.3 1.15 1.15 0 0 1 0 2.3zm1.2-5.35v.55h-2.1v-.72c0-1.21.58-1.83 1.47-2.42.74-.49 1.22-.86 1.22-1.61 0-.85-.63-1.32-1.57-1.32-.99 0-1.75.48-2.35 1.23L8.5 8.98C9.34 7.86 10.58 7.2 12.34 7.2c2.1 0 3.62 1.02 3.62 2.95 0 1.52-.88 2.23-1.85 2.85-.61.39-.91.64-.91 1.65z',
   };
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor">
@@ -951,6 +1238,8 @@ function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
   return (
     <button
       ref={btnRef}
+      type="button"
+      data-tutorial-action={btn.action}
       onClick={(event) => {
         if (compact && !revealed) {
           event.preventDefault();
@@ -1100,9 +1389,9 @@ function SpeechBubble({ text, x, y, placeBelow = false }) {
 }
 
 function buttonsMaxWidth(type, compact) {
-  if (compact) return type === 'wall' ? 420 : type === 'furniture' ? 280 : 200;
+  if (compact) return type === 'wall' ? 420 : type === 'furniture' ? 360 : 200;
   if (type === 'wall') return 470;
-  if (type === 'furniture') return 310;
+  if (type === 'furniture') return 360;
   return TOOLBAR_W[type] ?? 300;
 }
 

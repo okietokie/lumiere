@@ -194,6 +194,13 @@ export const AuthExperience = ({ initialMode = "login" }) => {
                     aria-hidden={!isSignup}
                     inert={!isSignup ? "" : undefined}
                   >
+                    <div className="lm-auth-inline-switch">
+                      <span>Already have access?</span>
+                      <button type="button" onClick={() => flipTo("login")}>
+                        Log in
+                      </button>
+                    </div>
+
                     <div className="lm-auth-intro">
                       <span className="lm-auth-intro-accent" />
                       <p className="lm-auth-eyebrow">Create Your Account</p>
@@ -281,12 +288,6 @@ export const AuthExperience = ({ initialMode = "login" }) => {
                       </button>
                     </Form>
 
-                    <div className="lm-auth-switch">
-                      <span>Already have access?</span>
-                      <button type="button" onClick={() => flipTo("login")}>
-                        Login here
-                      </button>
-                    </div>
                   </div>
                 </div>
               </div>

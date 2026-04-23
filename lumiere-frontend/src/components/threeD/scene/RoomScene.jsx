@@ -56,6 +56,7 @@ import useLighting, { LIGHT_BUDGET_CATEGORIES, LIGHT_TYPES } from "../../../hook
 import FirstPersonControls from "../camera/FirstPersonControls";
 import WalkHUD             from "../camera/WalkHUD";
 import InteractiveWall from "../walls/InteractiveWall";
+import WallGizmo from "../walls/WallGizmo";
 import WallEditorPanel from "../walls/WallEditor";
 import FurnitureItem   from "../furniture/FurnitureItem";
 import FurnitureGizmo  from "../furniture/FurnitureGizmo";
@@ -4597,6 +4598,14 @@ export default function RoomScene({ initialScene = null }) {
             itemRef={{ current: furnitureRefs.current[selectedFurnitureId] }}
             gizmoMode={gizmoMode}
             updateItem={updateItem}
+            setOrbitEnabled={setOrbitEnabled}
+          />
+
+          <WallGizmo
+            selectedWall={wallsHidden ? null : selectedWall}
+            wallRefs={wallRefs}
+            gizmoMode={gizmoMode}
+            updateWall={updateWall}
             setOrbitEnabled={setOrbitEnabled}
           />
 

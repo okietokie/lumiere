@@ -197,8 +197,8 @@
 }
 
 .lm-auth-card-shell.is-signup {
-  height: min(42rem, calc(100dvh - 7rem));
-  min-height: min(39.5rem, calc(100dvh - 7rem));
+  height: min(45rem, calc(100dvh - 3.25rem));
+  min-height: min(40rem, calc(100dvh - 3.25rem));
 }
 
 .lm-auth-glow-card {
@@ -263,10 +263,48 @@
 
 .lm-auth-card-shell.is-signup .lm-auth-face-back {
   justify-content: flex-start;
+  padding: clamp(1rem, 2.7vw, 1.55rem);
+}
+
+.lm-auth-inline-switch {
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-bottom: clamp(0.45rem, 1.2vh, 0.7rem);
+  color: var(--lm-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.lm-auth-card-shell.is-signup .lm-auth-inline-switch {
+  display: flex;
+}
+
+.lm-auth-inline-switch button {
+  border: 1px solid color-mix(in srgb, var(--lm-action) 34%, transparent);
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  background: color-mix(in srgb, var(--lm-bg) 28%, transparent);
+  color: var(--lm-text);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.lm-auth-inline-switch button:hover {
+  border-color: var(--lm-action);
+  background: color-mix(in srgb, var(--lm-action) 16%, transparent);
+  transform: translateY(-1px);
 }
 
 .lm-auth-intro {
   margin-bottom: clamp(1rem, 2.8vh, 1.45rem);
+}
+
+.lm-auth-card-shell.is-signup .lm-auth-intro {
+  margin-bottom: clamp(0.65rem, 1.5vh, 0.9rem);
 }
 
 .lm-auth-intro-accent {
@@ -275,6 +313,10 @@
   height: 0.18rem;
   margin-bottom: 0.9rem;
   background: linear-gradient(90deg, var(--lm-action), var(--lm-grid));
+}
+
+.lm-auth-card-shell.is-signup .lm-auth-intro-accent {
+  margin-bottom: 0.55rem;
 }
 
 .lm-auth-eyebrow {
@@ -303,9 +345,19 @@
   line-height: 1.5;
 }
 
+.lm-auth-card-shell.is-signup .lm-auth-subcopy {
+  margin-top: 0.45rem;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
 .lm-auth-form .ant-form-item,
 .lm-auth-modal-form .ant-form-item {
   margin-bottom: clamp(0.72rem, 1.8vh, 1.05rem);
+}
+
+.lm-auth-card-shell.is-signup .lm-auth-form .ant-form-item {
+  margin-bottom: clamp(0.52rem, 1.2vh, 0.72rem);
 }
 
 .lm-auth-form .ant-form-item-label,
@@ -337,6 +389,12 @@
     1px 1px 8px color-mix(in srgb, var(--lm-text) 9%, transparent) !important;
   font-size: 0.94rem;
   transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.lm-auth-card-shell.is-signup .lm-auth-form .ant-input,
+.lm-auth-card-shell.is-signup .lm-auth-form .ant-input-affix-wrapper {
+  min-height: 2.42rem;
+  padding: 0.58rem 0.76rem !important;
 }
 
 .lm-auth-form .ant-input-affix-wrapper .ant-input,
@@ -437,6 +495,10 @@
   text-decoration: underline;
 }
 
+.lm-auth-card-shell.is-signup .lm-auth-terms-wrap {
+  margin-bottom: 0.62rem !important;
+}
+
 .lm-auth-text-button {
   border: none;
   background: transparent;
@@ -483,6 +545,11 @@
 .lm-auth-submit:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.lm-auth-card-shell.is-signup .lm-auth-submit {
+  min-height: 2.65rem;
+  padding: 0.68rem 0.9rem;
 }
 
 .lm-auth-switch {
@@ -692,9 +759,15 @@
 
   .lm-auth-intro,
   .lm-auth-form,
+  .lm-auth-inline-switch,
   .lm-auth-switch {
     width: 100%;
     max-width: 21.75rem;
+  }
+
+  .lm-auth-inline-switch {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .lm-auth-subcopy {
