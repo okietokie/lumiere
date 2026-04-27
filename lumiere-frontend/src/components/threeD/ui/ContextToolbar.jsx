@@ -313,6 +313,26 @@ export default function ContextToolbar({
 
   return (
     <>
+      <style>{`
+        @keyframes lumiereGuideBeacon {
+          0%, 100% {
+            transform: scale(1);
+            box-shadow:
+              inset 0 0 0 1px rgba(255, 241, 221, 0.14),
+              0 0 0 1px rgba(214, 171, 120, 0.42),
+              0 0 18px rgba(214, 171, 120, 0.34),
+              0 0 34px rgba(255, 225, 183, 0.18);
+          }
+          50% {
+            transform: scale(1.07);
+            box-shadow:
+              inset 0 0 0 1px rgba(255, 241, 221, 0.2),
+              0 0 0 2px rgba(224, 186, 137, 0.58),
+              0 0 24px rgba(224, 186, 137, 0.5),
+              0 0 42px rgba(255, 231, 195, 0.26);
+          }
+        }
+      `}</style>
       {/*  Main toolbar pill */}
       <div
         ref={toolbarRef}
@@ -1134,13 +1154,15 @@ function Icon({ name, size = 15 }) {
   );
 }
 
-function mobileLinkButtonStyle({ expanded, active = false, danger = false }) {
+function mobileLinkButtonStyle({ expanded, active = false, danger = false, tutorial = false }) {
   const bg = danger
     ? 'rgba(116, 27, 22, 0.96)'
-    : active
+    : tutorial
+      ? 'rgba(68, 50, 40, 0.98)'
+      : active
       ? '#d7b38a'
       : '#f6f1ea';
-  const fg = danger ? '#fff1ef' : active ? '#251913' : '#231814';
+  const fg = danger ? '#fff1ef' : tutorial ? '#ffe7c8' : active ? '#251913' : '#231814';
   return {
     display: 'inline-flex',
     justifyContent: 'center',
@@ -1159,15 +1181,18 @@ function mobileLinkButtonStyle({ expanded, active = false, danger = false }) {
     background: bg,
     border: 'none',
     flexShrink: 0,
-    boxShadow: active
+    boxShadow: tutorial
+      ? 'inset 0 0 0 1px rgba(255,241,221,0.14), 0 0 0 1px rgba(214,171,120,0.42), 0 0 18px rgba(214,171,120,0.34), 0 0 34px rgba(255,225,183,0.18)'
+      : active
       ? '0 8px 18px rgba(196,154,108,0.28)'
       : '0 6px 16px rgba(0,0,0,0.14)',
     cursor: 'pointer',
     padding: 0,
+    animation: tutorial ? 'lumiereGuideBeacon 2.4s ease-in-out infinite' : 'none',
   };
 }
 
-function mobileLinkOverlayStyle({ expanded, active = false, danger = false }) {
+function mobileLinkOverlayStyle({ expanded, active = false, danger = false, tutorial = false }) {
   return {
     position: 'absolute',
     zIndex: -1,
@@ -1183,6 +1208,8 @@ function mobileLinkOverlayStyle({ expanded, active = false, danger = false }) {
     transformOrigin: 'center right',
     backgroundColor: danger
       ? 'rgba(154, 55, 47, 0.92)'
+      : tutorial
+        ? 'rgba(255,255,255,0.1)'
       : active
         ? 'rgba(255,255,255,0.22)'
         : '#ece3d7',
@@ -1263,6 +1290,7 @@ function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
         expanded,
         active: active || precisionActive,
         danger: btn.danger,
+        tutorial: btn.tutorial,
       }) : {
         display: 'flex',
         flexDirection: 'column',
@@ -1273,14 +1301,17 @@ function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
         borderRadius: 8,
         border: active || precisionActive
           ? `1px solid rgba(196,154,108,${precisionActive ? '0.75' : '0.5'})`
+          : btn.tutorial
+            ? '1px solid rgba(224, 186, 137, 0.55)'
           : '1px solid transparent',
         background: (
           btn.danger ? 'rgba(220,53,69,0.15)'
+            : btn.tutorial ? 'radial-gradient(circle at 50% 42%, rgba(138,104,76,0.98) 0%, rgba(93,68,52,0.98) 52%, rgba(54,39,31,1) 100%)'
             : precisionActive ? 'rgba(196,154,108,0.26)'
             : active ? 'rgba(196,154,108,0.18)'
             : 'transparent'
         ),
-        color: btn.danger ? '#ff6b6b' : (active || precisionActive) ? '#C49A6C' : '#E8E0D8',
+        color: btn.danger ? '#ff6b6b' : btn.tutorial ? '#ffe7c8' : (active || precisionActive) ? '#C49A6C' : '#E8E0D8',
         cursor: 'pointer',
         transition: 'background 0.12s',
         width: 'auto',
@@ -1290,8 +1321,11 @@ function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
         position: 'relative',
         flex: '0 0 auto',
         overflow: 'hidden',
-        boxShadow: 'none',
+        boxShadow: btn.tutorial
+          ? 'inset 0 0 0 1px rgba(255,241,221,0.14), 0 0 0 1px rgba(214,171,120,0.42), 0 0 18px rgba(214,171,120,0.34), 0 0 34px rgba(255,225,183,0.18)'
+          : 'none',
         whiteSpace: 'nowrap',
+        animation: btn.tutorial ? 'lumiereGuideBeacon 2.4s ease-in-out infinite' : 'none',
       }}
       onMouseOver={(e) => {
         if (!compact && !btn.danger && !active) e.currentTarget.style.background = 'rgba(196,154,108,0.13)';
@@ -1323,6 +1357,7 @@ function ToolbarBtn({ btn, active, precisionActive, compact, onClick }) {
             expanded,
             active: active || precisionActive,
             danger: btn.danger,
+            tutorial: btn.tutorial,
           })} />
           <span style={mobileLinkTitleStyle(expanded)}>{btn.label}</span>
         </>

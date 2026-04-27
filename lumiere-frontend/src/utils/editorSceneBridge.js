@@ -111,6 +111,10 @@ function getPlanBounds(planRooms = []) {
   };
 }
 
+function isClosedPlanRoom(room) {
+  return room?.kind !== "wall" && Array.isArray(room?.points) && room.points.length >= 3;
+}
+
 function projectPointOnSegment(point, start, end) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -614,12 +618,15 @@ function normalizePolygonOrientation(pointsMeters) {
 export function convert2DPlanTo3DScene(plan, options = {}) {
   if (!plan?.rooms?.length) return null;
   const manifest = Array.isArray(options?.manifest) ? options.manifest : [];
+  const closedRooms = plan.rooms.filter(isClosedPlanRoom);
+  const hasWalls = plan.rooms.some((room) => Array.isArray(room?.walls) && room.walls.length > 0);
+  if (!closedRooms.length && !hasWalls) return null;
 
   const bounds = getPlanBounds(plan.rooms);
   const shiftX = -((bounds.minX + bounds.maxX) / 2);
   const shiftY = -((bounds.minY + bounds.maxY) / 2);
 
-  const rooms = plan.rooms.map((room, roomIndex) => {
+  const rooms = closedRooms.map((room, roomIndex) => {
     const pointsMeters = normalizePolygonOrientation(
       (room?.points ?? []).map((point) => [toMeters(point.x + shiftX), toMeters(point.y + shiftY)])
     );
@@ -644,12 +651,16 @@ export function convert2DPlanTo3DScene(plan, options = {}) {
       isCustomShape: true,
     };
   });
+  const room3DById = new Map(rooms.map((room) => [room.id, room]));
 
   const walls = [];
   const wallMap = new Map();
 
   plan.rooms.forEach((room, roomIndex) => {
-    const room3D = rooms[roomIndex];
+    const room3D = room3DById.get(room.id) ?? {
+      id: room.id ?? `wall_host_${roomIndex + 1}`,
+      height: DEFAULT_ROOM_HEIGHT_M,
+    };
     (room?.walls ?? []).forEach((wall) => {
       const start = [
         toMeters((wall?.start?.x ?? 0) + shiftX),
@@ -744,7 +755,7 @@ export function convert2DPlanTo3DScene(plan, options = {}) {
     .filter(Boolean);
 
   const floorMaterial = {
-    color: plan.rooms[0]?.floor?.color ?? "#C8A060",
+    color: closedRooms[0]?.floor?.color ?? plan.rooms[0]?.floor?.color ?? "#C8A060",
     roughness: 0.6,
     metalness: 0,
     textureId: "wood_light",

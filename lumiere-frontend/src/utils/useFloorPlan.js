@@ -151,10 +151,13 @@ export function calcArea(pts) {
   return Math.abs(a / 2);
 }
 
-export function buildWalls(points, roomId, existingWalls = []) {
+export function buildWalls(points, roomId, existingWalls = [], { closed = true } = {}) {
   const n = points.length;
-  return points.map((a, i) => {
-    const b   = points[(i + 1) % n];
+  if (n < 2) return [];
+  const segmentCount = closed ? n : n - 1;
+  return Array.from({ length: segmentCount }, (_, i) => {
+    const a   = points[i];
+    const b   = points[closed ? (i + 1) % n : i + 1];
     const dx  = b.x - a.x, dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
     const prev = existingWalls[i];
@@ -171,6 +174,18 @@ export function buildWalls(points, roomId, existingWalls = []) {
       openings:  prev?.openings ?? [],
     };
   });
+}
+
+function rebuildPlanEntity(entity, points) {
+  const kind = entity?.kind === "wall" ? "wall" : "room";
+  const walls = buildWalls(points, entity?.id, entity?.walls, { closed: kind !== "wall" });
+  return {
+    ...entity,
+    kind,
+    points,
+    walls,
+    area: kind === "wall" ? 0 : calcArea(points),
+  };
 }
 
 export function hitTestWall(wall, cx, cy, pad = 10) {
@@ -315,6 +330,29 @@ export function useFloorPlan(initialState = null) {
     setSelectedRoom({ roomId: newRoom.id }); setSelectedCorner(null);
   }, [wallThickness, rooms.length, pushHistory]);
 
+  const finalizeWall = useCallback((pts) => {
+    if (pts.length < 2) return;
+    pushHistory();
+    const id = `wall_shape_${Date.now()}`;
+    const walls = buildWalls(pts, id, [], { closed: false }).map((wall) => ({
+      ...wall,
+      thickness: wallThickness,
+    }));
+    const newWallShape = {
+      id,
+      kind: "wall",
+      name: `Wall ${rooms.filter((room) => room?.kind === "wall").length + 1}`,
+      points: pts,
+      walls,
+      area: 0,
+      floor: { ...DEFAULT_ROOM_FLOOR },
+    };
+    setRooms((prev) => [...prev, newWallShape]);
+    setDraftPts([]); draftRef.current = [];
+    setClosingSnap(false); setMousePos(null); setSnappedPos(null);
+    setSelectedRoom({ roomId: newWallShape.id }); setSelectedCorner(null);
+  }, [pushHistory, rooms, wallThickness]);
+
   // ── mouse move ────────────────────────────────────────────────────────────
   const handleMouseMove = useCallback((rawX, rawY) => {
     setMousePos({ x: rawX, y: rawY });
@@ -376,8 +414,21 @@ export function useFloorPlan(initialState = null) {
   }, [mode, snap, isNearFirst, closeRoom, pendingFurniture, rooms, pushHistory]);
 
   const handleDoubleClick = useCallback(() => {
-    if (mode === "draw") closeRoom(draftRef.current);
-  }, [mode, closeRoom]);
+    if (mode !== "draw") return;
+    const current = draftRef.current;
+    if (current.length >= 3 && current.length > 0) {
+      const last = current[current.length - 1];
+      if (isNearFirst(last.x, last.y, current)) {
+        closeRoom(current);
+        return;
+      }
+    }
+    if (current.length >= 3) {
+      finalizeWall(current);
+      return;
+    }
+    if (current.length >= 2) finalizeWall(current);
+  }, [mode, closeRoom, finalizeWall, isNearFirst]);
 
   // ── wall click ────────────────────────────────────────────────────────────
   const handleWallClick = useCallback((roomId, wallId, cx, cy) => {
@@ -468,9 +519,8 @@ export function useFloorPlan(initialState = null) {
     const { x, y } = snap(rawX, rawY);
     setRooms(prev => prev.map(room => {
       if (room.id !== roomId) return room;
-      const pts   = room.points.map((p, i) => i === ptIdx ? { x, y } : p);
-      const walls = buildWalls(pts, room.id, room.walls);
-      return { ...room, points: pts, walls, area: calcArea(pts) };
+      const pts = room.points.map((p, i) => i === ptIdx ? { x, y } : p);
+      return rebuildPlanEntity(room, pts);
     }));
     return { x, y };
   }, [snap]);
@@ -481,15 +531,13 @@ export function useFloorPlan(initialState = null) {
 
   const deleteCorner = useCallback((roomId, ptIdx) => {
     pushHistory();
-    setRooms(prev => prev.map(room => {
-      if (room.id !== roomId || room.points.length <= 3) return room;
+    setRooms(prev => prev.flatMap((room) => {
+      if (room.id !== roomId) return [room];
+      const minPoints = room.kind === "wall" ? 2 : 3;
+      if (room.points.length <= minPoints) return [room];
       const pts = room.points.filter((_, index) => index !== ptIdx);
-      return {
-        ...room,
-        points: pts,
-        walls: buildWalls(pts, room.id),
-        area: calcArea(pts),
-      };
+      if (pts.length < minPoints) return [];
+      return [rebuildPlanEntity(room, pts)];
     }));
     setSelectedCorner(null);
     setSelectedWall(null);
@@ -498,18 +546,16 @@ export function useFloorPlan(initialState = null) {
 
   const deleteWallEdge = useCallback((roomId, wallId) => {
     pushHistory();
-    setRooms(prev => prev.map(room => {
-      if (room.id !== roomId || room.points.length <= 3) return room;
+    setRooms(prev => prev.flatMap(room => {
+      if (room.id !== roomId) return [room];
+      const minPoints = room.kind === "wall" ? 2 : 3;
+      if (room.points.length <= minPoints) return [room];
       const wallIndex = room.walls.findIndex(wall => wall.id === wallId);
-      if (wallIndex < 0) return room;
+      if (wallIndex < 0) return [room];
       const removePointIndex = (wallIndex + 1) % room.points.length;
       const pts = room.points.filter((_, index) => index !== removePointIndex);
-      return {
-        ...room,
-        points: pts,
-        walls: buildWalls(pts, room.id),
-        area: calcArea(pts),
-      };
+      if (pts.length < minPoints) return [];
+      return [rebuildPlanEntity(room, pts)];
     }));
     setSelectedCorner(null);
     setSelectedWall(null);

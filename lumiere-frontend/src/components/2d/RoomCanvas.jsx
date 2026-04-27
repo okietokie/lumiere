@@ -761,6 +761,7 @@ function RoomShape({
   onOpeningDragStart, onOpeningDragMove, onOpeningDragEnd,
   onCornerMouseDown, onCornerDragStart, onCornerDragMove, onCornerDragEnd,
 }) {
+  const isWallShape = room.kind === "wall";
   const flat = room.points.flatMap(p=>[p.x,p.y]);
   const cx   = room.points.reduce((s,p)=>s+p.x,0)/room.points.length;
   const cy   = room.points.reduce((s,p)=>s+p.y,0)/room.points.length;
@@ -774,14 +775,14 @@ function RoomShape({
   return (
     <Group>
       {/* ① Textured floor fill */}
-      <FloorFill room={room} isSelected={isRSel}/>
+      {!isWallShape && <FloorFill room={room} isSelected={isRSel}/>}
 
       {/* ② Clickable floor overlay (transparent, catches clicks) */}
-      <Line points={flat} closed fill="transparent" stroke="transparent"
-        onClick={()=>onRoomClick(room.id)}/>
+      {!isWallShape && <Line points={flat} closed fill="transparent" stroke="transparent"
+        onClick={()=>onRoomClick(room.id)}/>}
 
       {/* ③ Selection dashed border */}
-      {isRSel && <Line points={flat} closed fill="transparent"
+      {!isWallShape && isRSel && <Line points={flat} closed fill="transparent"
         stroke={floor.color} strokeWidth={1.2} opacity={0.5} dash={[6,4]} listening={false}/>}
 
       {/* ④ Walls */}
@@ -1923,7 +1924,7 @@ export default function RoomCanvas({ initialPlan = null }) {
         if (e.key==="s"||e.key==="S") setMode("select");
         if (e.key==="o"||e.key==="O") setMode("door");
         if (e.key==="w"||e.key==="W") setMode("window");
-        if (e.key==="f"||e.key==="F") setMode("furniture");
+        if ((e.key==="f"||e.key==="F") && rooms.some((room) => room.kind !== "wall")) setMode("furniture");
         if (e.key==="g"||e.key==="G") setSnapEnabled(v=>!v);
         if ((e.key==="Delete"||e.key==="Backspace") && selectedFurnitureId) deleteFurniture(selectedFurnitureId);
         if ((e.key==="r"||e.key==="R") && selectedFurnitureId) rotateFurniture(selectedFurnitureId);
@@ -1931,9 +1932,12 @@ export default function RoomCanvas({ initialPlan = null }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, cancelDraft, setMode, setSnapEnabled, selectedFurnitureId, deleteFurniture, rotateFurniture, setSelectedCorner, setSelectedWall, setSelectedOpening, setSelectedFurnitureId, setPendingFurniture, currentProjectId, projectName, saveProject, isTypingTarget]);
+  }, [undo, redo, cancelDraft, setMode, setSnapEnabled, selectedFurnitureId, deleteFurniture, rotateFurniture, setSelectedCorner, setSelectedWall, setSelectedOpening, setSelectedFurnitureId, setPendingFurniture, currentProjectId, projectName, saveProject, isTypingTarget, rooms]);
 
+  const enclosedRooms = rooms.filter((room) => room.kind !== "wall");
+  const wallShapes = rooms.filter((room) => room.kind === "wall");
   const hasRooms = rooms.length > 0;
+  const hasEnclosedRooms = enclosedRooms.length > 0;
   const hasDraft = draftPts.length > 0;
   const selRoom  = selectedRoom ? rooms.find(r=>r.id===selectedRoom.roomId) : null;
   const selFurn  = selectedFurnitureId ? furniture.find(f=>f.id===selectedFurnitureId) : null;
@@ -2030,6 +2034,17 @@ export default function RoomCanvas({ initialPlan = null }) {
     window:    "Click any wall to place a window",
     furniture: pendingFurniture ? "Click on canvas to place furniture" : "Choose an item from the catalogue below",
   };
+  const activeModeHint = mode === "draw"
+    ? (closingSnap
+      ? "Tap the first point to close into a room, or double-tap to finish as a wall"
+      : hasDraft
+        ? `${draftPts.length} pts - double-tap to finish, or return to the first point for a room`
+        : "Tap to place the first point")
+    : mode === "select"
+      ? "Drag handles to reshape rooms and walls"
+      : mode === "furniture"
+        ? (pendingFurniture ? "Click inside a room to place furniture" : "Choose an item from the catalogue below")
+        : modeHint[mode];
 
   return (
     <div className="lumiere-wrapper">
@@ -2196,7 +2211,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                 onboardingTour.setStep("place-window");
               }
             }}/>
-          <ToolBtn label="Furniture"     shortcut="F" active={mode==="furniture"} disabled={!hasRooms} data-tour="planner-furniture-tool"
+          <ToolBtn label="Furniture"     shortcut="F" active={mode==="furniture"} disabled={!hasEnclosedRooms} data-tour="planner-furniture-tool"
             icon="M3 9h18v12H3zM9 9V5a3 3 0 0 1 6 0v4"
             onClick={()=>{
               setMode("furniture");
@@ -2390,7 +2405,7 @@ export default function RoomCanvas({ initialPlan = null }) {
 
         {/* Room list */}
         <div className="room-list">
-          {hasRooms && <div className="room-list-title">Rooms ({rooms.length})</div>}
+          {hasRooms && <div className="room-list-title">Plan Elements ({rooms.length})</div>}
           {rooms.map(room=>{
             const aM2  = (room.area/(PX_PER_M*PX_PER_M)).toFixed(1);
             const furn = furniture.filter(f=>f.roomId===room.id).length;
@@ -2412,7 +2427,7 @@ export default function RoomCanvas({ initialPlan = null }) {
               </div>
             );
           })}
-          {!hasRooms&&!hasDraft&&<div style={{padding:"8px",fontSize:"11px",color:"rgba(122,112,104,0.5)",textAlign:"center"}}>No rooms yet</div>}
+          {!hasRooms&&!hasDraft&&<div style={{padding:"8px",fontSize:"11px",color:"rgba(122,112,104,0.5)",textAlign:"center"}}>No rooms or walls yet</div>}
         </div>
       </aside>
 
@@ -2429,7 +2444,7 @@ export default function RoomCanvas({ initialPlan = null }) {
             </span>
           </div>
           <div className="canvas-topbar-actions">
-            <div className="topbar-hint">{modeHint[mode]}</div>
+            <div className="topbar-hint">{activeModeHint}</div>
             <button
               type="button"
               onClick={() => setSaveModalOpen(true)}
@@ -2483,7 +2498,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                 <circle cx="30" cy="30" r="4" fill="#c9a96e" opacity="0.4"/>
               </svg>
               <div className="canvas-empty-title">Begin Your Design</div>
-              <div className="canvas-empty-sub">Select Draw and click to place the first wall corner</div>
+              <div className="canvas-empty-sub">Select Draw, tap points to sketch, then double-tap to finish a wall or close back to the first point for a room</div>
             </div>
           )}
 

@@ -1135,6 +1135,19 @@ export default function RoomScene({ initialScene = null }) {
       return { room, walls: scopedWalls };
     });
   }, [rooms, walls]);
+  const orphanWalls = useMemo(() => {
+    const assignedWallIds = new Set(roomWalls.flatMap(({ walls: scopedWalls }) => scopedWalls.map((wall) => wall.id)));
+    return walls.filter((wall) => {
+      const hasValidPoints = Array.isArray(wall?.start)
+        && Array.isArray(wall?.end)
+        && Number.isFinite(wall.start[0])
+        && Number.isFinite(wall.start[1])
+        && Number.isFinite(wall.end[0])
+        && Number.isFinite(wall.end[1]);
+      if (!hasValidPoints) return false;
+      return !assignedWallIds.has(wall.id);
+    });
+  }, [roomWalls, walls]);
   const roomSurfaceBounds = useMemo(() => {
     return roomWalls.map(({ room, walls: scopedWalls }) => {
       const roomLeft = room.x - room.width / 2;
@@ -4458,6 +4471,76 @@ export default function RoomScene({ initialScene = null }) {
               );
             })()
           )})}
+          {!wallsHidden && orphanWalls.map((wall) => (
+            <InteractiveWall
+              key={wall.id}
+              ref={(r) => {
+                if (r) wallRefs.current[wall.id] = r;
+                else delete wallRefs.current[wall.id];
+              }}
+              wall={wall}
+              isSelected={wall.id === selectedWallId}
+              selectedOpening={selectedOpening?.wallId === wall.id ? selectedOpening : null}
+              openingPreview={openingPreview?.wallId === wall.id ? openingPreview : null}
+              activeOpeningTool={activeTool === 'door' || activeTool === 'window' ? activeTool : null}
+              onSelect={() => {
+                setSelectedRoomId(wall.roomId ?? null);
+                setSelectedWallId(wall.id);
+                setSelectedFurnitureId(null);
+                setSelectedLightId(null);
+                setActiveTab('walls');
+                if (activeTool === 'build') setActiveTool('select');
+              }}
+              onOpeningPreviewMove={(type, point) => updateOpeningPreview(wall, type, point)}
+              onOpeningCommit={(point) => commitOpeningPreview(wall, point)}
+              onOpeningSelect={(opening) => {
+                setSelectedRoomId(wall.roomId ?? null);
+                setSelectedWallId(wall.id);
+                setSelectedOpening({ ...opening, wallId: wall.id });
+                setOpeningContextMenu(null);
+                setSelectedFurnitureId(null);
+                setSelectedLightId(null);
+                setActiveTab('walls');
+              }}
+              onOpeningMenu={(opening) => {
+                setSelectedRoomId(wall.roomId ?? null);
+                setSelectedWallId(wall.id);
+                setSelectedOpening({ id: opening.id, type: opening.type, wallId: wall.id });
+                setOpeningContextMenu({
+                  id: opening.id,
+                  type: opening.type,
+                  wallId: wall.id,
+                  x: opening.clientX,
+                  y: opening.clientY,
+                });
+                setSelectedFurnitureId(null);
+                setSelectedLightId(null);
+                setActiveTab('walls');
+              }}
+              onContextMenu={({ wall: contextWall, clientX, clientY }) => {
+                setSelectedRoomId(contextWall.roomId ?? null);
+                setSelectedWallId(contextWall.id);
+                setSelectedFurnitureId(null);
+                setSelectedLightId(null);
+                openElementContextMenu({
+                  kind: 'wall',
+                  targetType: 'wall',
+                  targetId: contextWall.id,
+                  roomId: contextWall.roomId ?? null,
+                  label: 'Wall',
+                  entity: contextWall,
+                  clientX,
+                  clientY,
+                });
+              }}
+              updateOpening={(type, openingId, updates) => updateWallOpening(wall.id, type, openingId, updates)}
+              updateWall={updateWall}
+              edgeLinkStart={wallEdgeLinkStart}
+              onEdgeLinkPoint={handleWallEdgeLinkPoint}
+              setOrbitEnabled={setOrbitEnabled}
+              cameraMode={cameraMode}
+            />
+          ))}
 
           {pendingScenePreviewRoom && (
             <group>
@@ -4871,6 +4954,28 @@ export default function RoomScene({ initialScene = null }) {
 
       {isMobile ? (
         <>
+          <style>{`
+            @keyframes lumiereSceneGuidePulse {
+              0%, 100% {
+                transform: scale(1);
+                box-shadow:
+                  inset 0 0 0 1px rgba(255, 241, 221, 0.14),
+                  0 0 0 1px rgba(214, 171, 120, 0.42),
+                  0 12px 28px rgba(0,0,0,0.26),
+                  0 0 18px rgba(214, 171, 120, 0.34),
+                  0 0 34px rgba(255, 225, 183, 0.18);
+              }
+              50% {
+                transform: scale(1.07);
+                box-shadow:
+                  inset 0 0 0 1px rgba(255, 241, 221, 0.2),
+                  0 0 0 2px rgba(224, 186, 137, 0.58),
+                  0 16px 32px rgba(0,0,0,0.24),
+                  0 0 24px rgba(224, 186, 137, 0.5),
+                  0 0 42px rgba(255, 231, 195, 0.26);
+              }
+            }
+          `}</style>
           <MobileTopBar
             projectName={projectSave.projectName}
             cameraMode={cameraMode}
@@ -4910,15 +5015,16 @@ export default function RoomScene({ initialScene = null }) {
               width: 42,
               height: 42,
               borderRadius: 999,
-              border: `1px solid ${COLORS.secondary}55`,
-              background: `${COLORS.background}E8`,
-              color: COLORS.text,
+              border: '1px solid rgba(224,186,137,0.55)',
+              background: 'radial-gradient(circle at 50% 42%, rgba(138,104,76,0.98) 0%, rgba(93,68,52,0.98) 52%, rgba(54,39,31,1) 100%)',
+              color: '#ffe7c8',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 12px 28px rgba(0,0,0,0.26)',
+              boxShadow: 'inset 0 0 0 1px rgba(255,241,221,0.14), 0 12px 28px rgba(0,0,0,0.26), 0 0 18px rgba(214,171,120,0.34), 0 0 34px rgba(255,225,183,0.18)',
               backdropFilter: 'blur(16px)',
               cursor: 'pointer',
+              animation: 'lumiereSceneGuidePulse 2.4s ease-in-out infinite',
             }}
             aria-label="Open scene guide"
           >
@@ -5208,16 +5314,17 @@ export default function RoomScene({ initialScene = null }) {
                     width: 42,
                     height: 42,
                     borderRadius: 999,
-                    border: `1px solid ${COLORS.secondary}55`,
-                    background: `${COLORS.background}D9`,
-                    color: COLORS.text,
+                    border: '1px solid rgba(224,186,137,0.55)',
+                    background: 'radial-gradient(circle at 50% 42%, rgba(138,104,76,0.98) 0%, rgba(93,68,52,0.98) 52%, rgba(54,39,31,1) 100%)',
+                    color: '#ffe7c8',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: glassShadow,
+                    boxShadow: 'inset 0 0 0 1px rgba(255,241,221,0.14), 0 12px 28px rgba(0,0,0,0.26), 0 0 18px rgba(214,171,120,0.34), 0 0 34px rgba(255,225,183,0.18)',
                     backdropFilter: 'blur(20px)',
                     cursor: 'pointer',
                     marginTop: 2,
+                    animation: 'lumiereSceneGuidePulse 2.4s ease-in-out infinite',
                   }}
                   aria-label="Open scene guide"
                 >
