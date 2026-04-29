@@ -51,7 +51,7 @@ import {
 } from "../../../utils/sceneEntities";
 import * as THREE from "three";
 import useHistory   from "../../../hooks/useHistory";
-import useMaterials from "../../../hooks/useMaterials";
+import useMaterials, { DEFAULT_CEILING_MATERIAL, DEFAULT_FLOOR_MATERIAL } from "../../../hooks/useMaterials";
 import useLighting, { LIGHT_BUDGET_CATEGORIES, LIGHT_TYPES } from "../../../hooks/useLighting";
 import FirstPersonControls from "../camera/FirstPersonControls";
 import WalkHUD             from "../camera/WalkHUD";
@@ -75,7 +75,6 @@ import useSpatialAnalysis  from "../../../hooks/useSpatialAnalysis";
 import SaveModal           from "../ui/SaveModal";
 import SavedProjectsPanel  from "../ui/SavedProjectsPanel";
 import { useToast }        from "../../../ui/ToastNotification";
-import { SlidePanel, BottomNav, MobileTopBar } from "./MobileLayout";
 import RevealActionButton from "./RevealActionButton";
 import useProjectSave      from "../../../hooks/useProjectSave";
 import axiosClient from "../../../api/axiosClient";
@@ -123,6 +122,7 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import OnboardingJoyride from "../../onboarding/OnboardingJoyride.jsx";
 import { useOnboardingTour } from "../../onboarding/OnboardingTourProvider.jsx";
+import useThemedDialogs from "../../../hooks/useThemedDialogs.jsx";
 
 
 const CAMERA_PRESETS = {
@@ -149,7 +149,7 @@ const WINDOW_STYLE_OPTIONS = [
 ];
 
 const ROOM_ACTION_BUTTONS = [
-  { key: 'wall', icon: SpaceDashboardRoundedIcon, label: 'Add Wall' },
+  { key: 'wall', icon: HomeWorkRoundedIcon, label: 'Add Wall' },
   { key: 'room', icon: HomeWorkRoundedIcon, label: 'Add Room' },
   { key: 'direction', icon: KeyboardDoubleArrowRightRoundedIcon, label: 'Change Side' },
   { key: 'delete', icon: DeleteOutlined, label: 'Delete Room' },
@@ -567,7 +567,7 @@ export default function RoomScene({ initialScene = null }) {
   const {
     floorMaterial, ceilingMaterial,
     setFloorMaterial, setCeilingMaterial,
-    applyTexture, updateSurface, applyTheme, activeTheme,
+    applyTexture, updateSurface, applyTheme, activeTheme, setActiveTheme,
   } = useMaterials(walls, setWalls);
 
   // Lighting 
@@ -654,6 +654,7 @@ export default function RoomScene({ initialScene = null }) {
   const screens = Grid.useBreakpoint();
   const { navigateTo } = useContextNav(setActiveTab);
   const toast = useToast();
+  const dialogs = useThemedDialogs();
 
   // Whether anything is selected (drives GizmoHelper visibility)
   const anythingSelected = !!(selectedWallId || selectedFurnitureId || selectedLightId || selectedOpening);
@@ -778,17 +779,27 @@ export default function RoomScene({ initialScene = null }) {
 
   const leaveEditorWithSavePrompt = useCallback(async (nextAction, label) => {
     if (isSaving) return;
-    const shouldSave = window.confirm(`Save progress before ${label}?`);
+    const shouldSave = await dialogs.confirm({
+      title: 'Save Before You Leave?',
+      content: `Your latest scene changes are not saved yet. Save progress before ${label}?`,
+      okText: 'Save and Continue',
+      cancelText: 'Continue Without Saving',
+      tone: 'warning',
+    });
     if (shouldSave) {
       try {
         await saveProject(projectName, true);
       } catch (error) {
-        window.alert(error?.response?.data?.detail || error?.message || 'Could not save progress. Please try again.');
+        await dialogs.alert({
+          title: 'Save Failed',
+          content: error?.response?.data?.detail || error?.message || 'Could not save progress. Please try again.',
+          tone: 'danger',
+        });
         return;
       }
     }
     nextAction();
-  }, [isSaving, projectName, saveProject]);
+  }, [dialogs, isSaving, projectName, saveProject]);
 
   const handleLogout = useCallback(() => {
     leaveEditorWithSavePrompt(() => {
@@ -817,6 +828,7 @@ export default function RoomScene({ initialScene = null }) {
   const setBudgetSummary = useBudgetStore((state) => state.setSummary);
   const setBudgetSnapshots = useBudgetStore((state) => state.setSnapshots);
   const hydrateBudgetFromScene = useBudgetStore((state) => state.hydrateFromSceneBudget);
+  const resetBudgetStore = useBudgetStore((state) => state.resetBudgetStore);
   const budgetGrandTotal = budgetSummary?.grandTotal ?? budgetSummary?.totals?.grandTotal ?? 0;
   const budgetBreakdownByTargetId = useMemo(() => {
     const rows = Array.isArray(budgetSummary?.breakdown) ? budgetSummary.breakdown : [];
@@ -1914,6 +1926,58 @@ export default function RoomScene({ initialScene = null }) {
 
   const canUndo = sceneHistoryPastRef.current.length > 0;
   const canRedo = sceneHistoryFutureRef.current.length > 0;
+  const canClearScene = rooms.length > 0 || walls.length > 0 || placedItems.length > 0 || placedLights.length > 0;
+
+  const clearScene = useCallback(() => {
+    if (!canClearScene || isSaving) return;
+    dialogs.confirm({
+      title: 'Clear This Scene?',
+      content: 'This will remove all rooms, walls, furniture, materials, lights, and budget data from the current scene.',
+      okText: 'Clear Scene',
+      cancelText: 'Keep Scene',
+      tone: 'danger',
+    }).then((confirmed) => {
+      if (!confirmed) return;
+
+      pushSceneHistory();
+      setRooms([]);
+      setWalls([], true);
+      setPlacedItems([]);
+      setFloorMaterial({ ...DEFAULT_FLOOR_MATERIAL });
+      setCeilingMaterial({ ...DEFAULT_CEILING_MATERIAL });
+      setActiveTheme(null);
+      lightingState.setPlacedLights([]);
+      setSelectedRoomId(null);
+      setSelectedWallId(null);
+      setSelectedFurnitureId(null);
+      setSelectedLightId(null);
+      setSelectedOpening(null);
+      setOpeningPreview(null);
+      setOpeningContextMenu(null);
+      setElementContextMenu(null);
+      setWallToolbarPinned(false);
+      setWallToolbarPos(null);
+      setWallEdgeLinkStart(null);
+      clearWallEdgeTouchConfirm();
+      resetBudgetStore();
+      localMutationVersionRef.current += 1;
+      toast.success("Scene cleared.");
+    });
+  }, [
+    canClearScene,
+    clearWallEdgeTouchConfirm,
+    dialogs,
+    isSaving,
+    lightingState,
+    pushSceneHistory,
+    resetBudgetStore,
+    setActiveTheme,
+    setCeilingMaterial,
+    setFloorMaterial,
+    setSelectedLightId,
+    setWalls,
+    toast,
+  ]);
 
   // Wall helpers
   const markSceneMutation = useCallback(() => {
@@ -2358,14 +2422,18 @@ export default function RoomScene({ initialScene = null }) {
     return [...layoutWalls, ...manualWalls];
   }, [walls]);
 
-  const deleteRoomById = useCallback((roomId) => {
+  const deleteRoomById = useCallback(async (roomId) => {
     const room = rooms.find((entry) => entry.id === roomId);
     if (!room) return;
 
     const roomName = room.name?.trim() || 'this room';
-    const confirmed = typeof window === 'undefined'
-      ? true
-      : window.confirm(`Delete "${roomName}" and remove the items inside it?`);
+    const confirmed = await dialogs.confirm({
+      title: 'Delete Room?',
+      content: `Delete "${roomName}" and remove the items and lights placed inside it?`,
+      okText: 'Delete Room',
+      cancelText: 'Keep Room',
+      tone: 'danger',
+    });
 
     if (!confirmed) return;
 
@@ -2405,6 +2473,7 @@ export default function RoomScene({ initialScene = null }) {
         : `Deleted ${roomName}.`
     );
   }, [
+    dialogs,
     lightingState,
     markSceneMutation,
     placedItems,
@@ -4040,6 +4109,214 @@ export default function RoomScene({ initialScene = null }) {
     </div>
   );
 
+  const mobilePanelTitle =
+    activeTab === 'room' ? 'Room' :
+    activeTab === 'walls' ? 'Build' :
+    activeTab === 'materials' ? 'Materials & Style' :
+    activeTab === 'lighting' ? 'Lighting' :
+    activeTab === 'furniture' ? 'Furniture' :
+    activeTab === 'projects' ? 'Projects' :
+    activeTab === 'view' ? 'View' :
+    'Project';
+
+  const mobilePanelContent = activeTab === 'room' ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {renderRoomActionPanel('mobile')}
+    </div>
+  ) : activeTab === 'walls' ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {renderRoomActionPanel('mobile')}
+      <WallEditorPanel
+        selectedWall={selectedWall} addWall={addWall} splitWall={splitWall}
+        deleteWall={deleteWall} updateWall={updateWall}
+        gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
+        envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
+        setEnvColors={(updater) => {
+          const next = typeof updater === 'function'
+            ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
+            : updater;
+          if (next.floor !== floorMaterial.color) trackedUpdateSurface('floor', { color: next.floor });
+          if (next.ceiling !== ceilingMaterial.color) trackedUpdateSurface('ceiling', { color: next.ceiling });
+        }}
+      />
+    </div>
+  ) : activeTab === 'materials' ? (
+    <MaterialPanel
+      selectedWall={selectedWall} walls={walls}
+      floorMaterial={floorMaterial} ceilingMaterial={ceilingMaterial}
+      applyTexture={trackedApplyTexture} updateSurface={trackedUpdateSurface}
+      applyTheme={trackedApplyTheme} activeTheme={activeTheme}
+    />
+  ) : activeTab === 'lighting' ? (
+    <LightingPanel {...lightingState} />
+  ) : activeTab === 'furniture' ? (
+    <FurniturePicker
+      selectedItem={selectedFurniture} placedItems={placedItems}
+      addItem={(model) => { addItem(model); setMobilePanelOpen(false); }}
+      deleteItem={deleteItem} gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
+      furnitureRefs={furnitureRefs} tint={selectedFurniture?.tint ?? null} setTint={setSelectedFurnitureTint}
+    />
+  ) : activeTab === 'projects' ? (
+    <SavedProjectsPanel
+      currentProjectId={currentProjectId}
+      currentProjectName={projectSave.projectName}
+      listProjects={projectSave.listProjects}
+      loadProject={async (projectId) => {
+        await projectSave.loadProject(projectId);
+        setMobilePanelOpen(false);
+      }}
+      deleteProject={projectSave.deleteProject}
+      createNewProject={handleCreateNewProject}
+    />
+  ) : activeTab === 'view' ? (
+    renderViewPanel('mobile')
+  ) : (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+        <button type="button" className="room-mobile-action-tile" onClick={() => setSaveModalOpen(true)} data-tour="scene-save">
+          <SaveOutlined />
+          <span>Save</span>
+        </button>
+        <button type="button" className="room-mobile-action-tile" onClick={switchTo2D} data-tour="scene-switch-2d">
+          <SpaceDashboardRoundedIcon style={{ fontSize: 18 }} />
+          <span>2D Plan</span>
+        </button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+        <button type="button" className="room-mobile-action-tile" disabled={!canUndo || isSaving} onClick={undo}>
+          <UndoOutlined />
+          <span>Undo</span>
+        </button>
+        <button type="button" className="room-mobile-action-tile" disabled={!canRedo || isSaving} onClick={redo}>
+          <RedoOutlined />
+          <span>Redo</span>
+        </button>
+        <button type="button" className="room-mobile-action-tile is-danger" disabled={!canClearScene || isSaving} onClick={clearScene}>
+          <DeleteOutlined />
+          <span>Clear</span>
+        </button>
+      </div>
+
+      {selectedRoom && renderRoomActionPanel('mobile')}
+      {renderViewPanel('mobile')}
+
+      <div className="room-mobile-section">
+        <div className="room-mobile-section-title">Scene</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+          <button type="button" className={wallsHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleWallsHidden} data-tour="scene-hide-walls">
+            <ColumnWidthOutlined />
+            <span>{wallsHidden ? 'Show walls' : 'Hide walls'}</span>
+          </button>
+          <button type="button" className={ceilingHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleCeilingHidden} data-tour="scene-hide-ceiling">
+            <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
+            <span>{ceilingHidden ? 'Show ceiling' : 'Hide ceiling'}</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="room-mobile-section">
+        <div className="room-mobile-section-title">Budget</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+          <button
+            type="button"
+            className={budgetEnabled ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
+            disabled={isSaving}
+            onClick={() => handleBudgetActivationChange(!budgetEnabled)}
+            data-tour="scene-budget-activate"
+          >
+            <PoweroffOutlined />
+            <span>{budgetEnabled ? 'Budget active' : 'Activate budget'}</span>
+          </button>
+          <button
+            type="button"
+            className={budgetEnabled && budgetSummaryOpen ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
+            disabled={!budgetEnabled}
+            onClick={() => setBudgetSummaryOpen((open) => !open)}
+          >
+            <WalletOutlined />
+            <span>{formatMoney(budgetGrandTotal, budgetSummary.currency)}</span>
+          </button>
+        </div>
+      </div>
+
+      {budgetEnabled && budgetSummaryOpen && (
+        <div className="room-mobile-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+            <span style={{ color: `${COLORS.text}B8` }}>Unpriced items</span>
+            <strong style={{ color: budgetUnpricedCount > 0 ? '#ffd09a' : COLORS.text }}>{budgetUnpricedCount}</strong>
+          </div>
+          <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+            {budgetCategoryRows.map(([label, total]) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                <span style={{ color: `${COLORS.text}B8` }}>{label}</span>
+                <strong style={{ color: COLORS.text }}>{formatMoney(total, budgetSummary.currency)}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="room-mobile-section">
+        <div className="room-mobile-section-title">Project</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+          <button type="button" className="room-mobile-action-tile" onClick={() => setActiveTab('projects')}>
+            <FolderOpenOutlined />
+            <span>Projects</span>
+          </button>
+          <button type="button" className="room-mobile-action-tile" onClick={handleDashboard} data-tour="scene-dashboard">
+            <AppstoreOutlined />
+            <span>Dashboard</span>
+          </button>
+          <button type="button" className="room-mobile-action-tile" onClick={() => {
+            setManualSceneGuideActive(true);
+            setManualSceneGuideStep("scene-guide-launch");
+          }}>
+            <QuestionCircleOutlined />
+            <span>Guide</span>
+          </button>
+          <button type="button" className="room-mobile-action-tile is-danger" onClick={handleLogout} data-tour="scene-logout">
+            <LogoutOutlined />
+            <span>Logout</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const mobileTopActionLabel = 'Select';
+  const mobileDisplayProjectName = projectSave.projectName?.trim() || 'Untitled Room';
+  const mobileSceneChipLabel = selectedRoom?.name?.trim() || mobileDisplayProjectName;
+  const mobileBottomTabs = [
+    {
+      key: 'lights',
+      label: 'Lights',
+      icon: LightbulbRoundedIcon,
+      active: activeTab === 'lighting',
+      onClick: () => { if (!isSaving) openMobilePanel('lighting'); },
+    },
+    {
+      key: 'objects',
+      label: 'Objects',
+      icon: ChairRoundedIcon,
+      active: activeTab === 'furniture',
+      onClick: () => { if (!isSaving) openMobilePanel('furniture'); },
+    },
+    {
+      key: 'materials',
+      label: 'Materials',
+      icon: TextureRoundedIcon,
+      active: activeTab === 'materials',
+      onClick: () => { if (!isSaving) openMobilePanel('materials'); },
+    },
+    {
+      key: 'settings',
+      label: 'Settings',
+      icon: AppstoreOutlined,
+      active: activeTab === 'more' || activeTab === 'projects' || activeTab === 'view' || activeTab === 'lighting',
+      onClick: () => { if (!isSaving) openMobilePanel('more'); },
+    },
+  ];
+
   const tabItems = [
     ...(selectedRoom ? [{
       key: 'room',
@@ -4344,18 +4621,19 @@ export default function RoomScene({ initialScene = null }) {
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: 10,
-                          minHeight: 44,
-                          padding: '0 14px',
+                          gap: 12,
+                          minHeight: 54,
+                          padding: '7px 10px 7px 18px',
                           borderRadius: 999,
-                          background: 'rgba(24, 18, 15, 0.92)',
-                          border: `1px solid ${COLORS.action}44`,
-                          boxShadow: '0 14px 28px rgba(0, 0, 0, 0.28)',
-                          color: COLORS.action,
-                          fontSize: 14,
+                          background: 'linear-gradient(180deg, rgba(22, 19, 17, 0.96) 0%, rgba(14, 12, 11, 0.94) 100%)',
+                          border: `1px solid rgba(201, 171, 146, 0.18)`,
+                          boxShadow: '0 18px 36px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.04)',
+                          color: '#d9a56a',
+                          fontSize: 15,
                           fontWeight: 700,
-                          letterSpacing: '0.01em',
+                          letterSpacing: '0.02em',
                           whiteSpace: 'nowrap',
+                          backdropFilter: 'blur(18px)',
                         }}
                       >
                         <span>{room.name}</span>
@@ -4367,18 +4645,22 @@ export default function RoomScene({ initialScene = null }) {
                             display: 'inline-flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            width: 30,
-                            height: 30,
-                            borderRadius: '50%',
-                            border: `1px solid ${sceneRoomActionsVisible ? COLORS.action : `${COLORS.secondary}AA`}`,
-                            background: sceneRoomActionsVisible ? COLORS.action : 'rgba(53, 41, 35, 0.92)',
-                            color: sceneRoomActionsVisible ? COLORS.background : COLORS.text,
+                            width: 34,
+                            height: 34,
+                            borderRadius: 16,
+                            border: `1px solid ${sceneRoomActionsVisible ? 'rgba(201, 171, 146, 0.28)' : 'rgba(255,255,255,0.08)'}`,
+                            background: sceneRoomActionsVisible
+                              ? 'linear-gradient(180deg, rgba(88, 66, 48, 0.92) 0%, rgba(58, 43, 32, 0.96) 100%)'
+                              : 'rgba(255,255,255,0.03)',
+                            color: sceneRoomActionsVisible ? '#f4d2ab' : 'rgba(255,255,255,0.82)',
                             cursor: 'pointer',
-                            boxShadow: sceneRoomActionsVisible ? '0 8px 18px rgba(196, 154, 108, 0.28)' : 'none',
-                            transition: 'background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease',
+                            boxShadow: sceneRoomActionsVisible
+                              ? '0 12px 24px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.05)'
+                              : 'inset 0 1px 0 rgba(255,255,255,0.03)',
+                            transition: 'background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
                           }}
                         >
-                          <AppstoreOutlined style={{ fontSize: 14 }} />
+                          <AppstoreOutlined style={{ fontSize: 13 }} />
                         </button>
                       </div>
                       {sceneRoomActionsVisible && renderRoomQuickActions(room, 'scene')}
@@ -4954,256 +5236,176 @@ export default function RoomScene({ initialScene = null }) {
 
       {isMobile ? (
         <>
-          <style>{`
-            @keyframes lumiereSceneGuidePulse {
-              0%, 100% {
-                transform: scale(1);
-                box-shadow:
-                  inset 0 0 0 1px rgba(255, 241, 221, 0.14),
-                  0 0 0 1px rgba(214, 171, 120, 0.42),
-                  0 12px 28px rgba(0,0,0,0.26),
-                  0 0 18px rgba(214, 171, 120, 0.34),
-                  0 0 34px rgba(255, 225, 183, 0.18);
-              }
-              50% {
-                transform: scale(1.07);
-                box-shadow:
-                  inset 0 0 0 1px rgba(255, 241, 221, 0.2),
-                  0 0 0 2px rgba(224, 186, 137, 0.58),
-                  0 16px 32px rgba(0,0,0,0.24),
-                  0 0 24px rgba(224, 186, 137, 0.5),
-                  0 0 42px rgba(255, 231, 195, 0.26);
-              }
-            }
-          `}</style>
-          <MobileTopBar
-            projectName={projectSave.projectName}
-            cameraMode={cameraMode}
-            cameraToggleLabel={supportsFirstPersonWalk
-              ? (cameraMode === 'firstPerson' ? 'Walk' : 'Orbit')
-              : (currentViewPreset === 'top' ? 'Plan' : 'Explore')}
-            cameraToggleActive={supportsFirstPersonWalk
-              ? cameraMode === 'firstPerson'
-              : currentViewPreset === 'top'}
-            editorMode="3D"
-            onSwitchEditor={() => { if (!isSaving) switchTo2D(); }}
-            onCameraToggle={() => {
-              if (isSaving) return;
-              if (supportsFirstPersonWalk) {
-                if (cameraMode === 'orbit') { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }
-                else { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }
-                return;
-              }
+          <div className="room-mobile-reference-topbar">
+            <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+              <div className="room-mobile-reference-brand-text">Lumiere</div>
+              <button
+                type="button"
+                onClick={() => { if (!isSaving) openMobilePanel(selectedRoom ? 'room' : 'walls'); }}
+                className="room-mobile-reference-title-trigger"
+              >
+                <span className="room-mobile-reference-title-text">{mobileDisplayProjectName}</span>
+                <DownOutlined style={{ fontSize: 14, opacity: 0.86 }} />
+              </button>
+            </div>
+            <button
+              type="button"
+              className="room-mobile-top-pill"
+              onClick={() => { if (!isSaving) openMobilePanel('projects'); }}
+            >
+              <FolderCopyRoundedIcon style={{ fontSize: 18 }} />
+              <span>Projects</span>
+            </button>
+            <button
+              type="button"
+              className="room-mobile-top-pill"
+              onClick={() => {
+                if (isSaving) return;
+                if (document.pointerLockElement) document.exitPointerLock();
+                setCameraMode('orbit');
+                setActiveTool('select');
+                openMobilePanel('walls');
+              }}
+            >
+              <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
+              <span>{mobileTopActionLabel}</span>
+            </button>
+          </div>
 
-              setCameraMode('orbit');
-              if (document.pointerLockElement) document.exitPointerLock();
-              applyCameraPreset(currentViewPreset === 'top' ? 'perspective' : 'top');
-            }}
-          />
-          <button
-            type="button"
-            data-tour="scene-guide-launch"
-            onClick={() => {
-              setManualSceneGuideActive(true);
-              setManualSceneGuideStep("scene-guide-launch");
-            }}
-            style={{
-              position: 'fixed',
-              top: 'calc(64px + env(safe-area-inset-top, 0px))',
-              left: 12,
-              zIndex: 1100,
-              width: 42,
-              height: 42,
-              borderRadius: 999,
-              border: '1px solid rgba(224,186,137,0.55)',
-              background: 'radial-gradient(circle at 50% 42%, rgba(138,104,76,0.98) 0%, rgba(93,68,52,0.98) 52%, rgba(54,39,31,1) 100%)',
-              color: '#ffe7c8',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: 'inset 0 0 0 1px rgba(255,241,221,0.14), 0 12px 28px rgba(0,0,0,0.26), 0 0 18px rgba(214,171,120,0.34), 0 0 34px rgba(255,225,183,0.18)',
-              backdropFilter: 'blur(16px)',
-              cursor: 'pointer',
-              animation: 'lumiereSceneGuidePulse 2.4s ease-in-out infinite',
-            }}
-            aria-label="Open scene guide"
-          >
-            <QuestionCircleOutlined style={{ fontSize: 18 }} />
-          </button>
-          <div style={{ position: 'fixed', inset: 0, paddingTop: 64, paddingBottom: 72 }}>
+          <div style={{ position: 'fixed', inset: 0 }}>
             {canvasBlock}
           </div>
-          <BottomNav
-            activeTab={activeTab}
-            onTabChange={(tab) => { if (!isSaving) openMobilePanel(tab); }}
-          />
-          <SlidePanel
-            open={mobilePanelOpen}
-            onClose={() => setMobilePanelOpen(false)}
-            title={
-              activeTab === 'room'      ? 'Room' :
-              activeTab === 'walls'     ? 'Walls' :
-              activeTab === 'materials' ? 'Materials & Style' :
-              activeTab === 'lighting'  ? 'Lighting' :
-              activeTab === 'projects'  ? 'Projects' :
-              activeTab === 'more'      ? 'More' : 'Furniture'
-            }
-            height={activeTab === 'furniture' || activeTab === 'projects' || activeTab === 'more' ? '82vh' : activeTab === 'room' ? '76vh' : '72vh'}
+
+          {mobilePanelOpen && (
+            <button
+              type="button"
+              aria-label="Close panel"
+              onClick={() => setMobilePanelOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 1080,
+                border: 0,
+                background: 'rgba(7, 5, 4, 0.54)',
+                backdropFilter: 'blur(6px)',
+              }}
+            />
+          )}
+          <div
+            style={{
+              position: 'fixed',
+              top: 'calc(140px + env(safe-area-inset-top, 0px))',
+              bottom: 'calc(310px + env(safe-area-inset-bottom, 0px))',
+              left: 12,
+              right: 12,
+              zIndex: 1100,
+              display: 'flex',
+              alignItems: 'stretch',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
           >
-            {activeTab === 'room' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                {renderRoomActionPanel('mobile')}
-              </div>
-            )}
-            {activeTab === 'walls' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                {renderRoomActionPanel('mobile')}
-                <WallEditorPanel
-                  selectedWall={selectedWall} addWall={addWall} splitWall={splitWall}
-                  deleteWall={deleteWall} updateWall={updateWall}
-                  gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
-                  envColors={{ floor: floorMaterial.color, ceiling: ceilingMaterial.color }}
-                  setEnvColors={(updater) => {
-                    const next = typeof updater === 'function'
-                      ? updater({ floor: floorMaterial.color, ceiling: ceilingMaterial.color })
-                      : updater;
-                    if (next.floor   !== floorMaterial.color)   trackedUpdateSurface('floor',   { color: next.floor });
-                    if (next.ceiling !== ceilingMaterial.color) trackedUpdateSurface('ceiling', { color: next.ceiling });
-                  }}
-                />
-              </div>
-            )}
-            {activeTab === 'materials' && (
-              <MaterialPanel
-                selectedWall={selectedWall} walls={walls}
-                floorMaterial={floorMaterial} ceilingMaterial={ceilingMaterial}
-                applyTexture={trackedApplyTexture} updateSurface={trackedUpdateSurface}
-                applyTheme={trackedApplyTheme} activeTheme={activeTheme}
-              />
-            )}
-            {activeTab === 'lighting' && <LightingPanel {...lightingState} />}
-            {activeTab === 'furniture' && (
-              <FurniturePicker
-                selectedItem={selectedFurniture} placedItems={placedItems}
-                addItem={(model) => { addItem(model); setMobilePanelOpen(false); }}
-                deleteItem={deleteItem} gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
-                furnitureRefs={furnitureRefs} tint={selectedFurniture?.tint ?? null} setTint={setSelectedFurnitureTint}
-              />
-            )}
-            {activeTab === 'projects' && (
-              <SavedProjectsPanel
-                currentProjectId={currentProjectId}
-                currentProjectName={projectSave.projectName}
-                listProjects={projectSave.listProjects}
-                loadProject={async (projectId) => {
-                  await projectSave.loadProject(projectId);
-                  setMobilePanelOpen(false);
-                }}
-                deleteProject={projectSave.deleteProject}
-                createNewProject={handleCreateNewProject}
-              />
-            )}
-            {activeTab === 'more' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                  <button type="button" className="room-mobile-action-tile" onClick={() => setSaveModalOpen(true)} data-tour="scene-save">
-                    <SaveOutlined />
-                    <span>Save</span>
-                  </button>
-                  <button type="button" className="room-mobile-action-tile" onClick={switchTo2D} data-tour="scene-switch-2d">
-                    <SpaceDashboardRoundedIcon style={{ fontSize: 18 }} />
-                    <span>2D Plan</span>
-                  </button>
-                  <button type="button" className="room-mobile-action-tile" disabled={!canUndo || isSaving} onClick={undo}>
-                    <UndoOutlined />
-                    <span>Undo</span>
-                  </button>
-                  <button type="button" className="room-mobile-action-tile" disabled={!canRedo || isSaving} onClick={redo}>
-                    <RedoOutlined />
-                    <span>Redo</span>
+            <div
+              className={mobilePanelOpen ? 'room-floating-panel is-open' : 'room-floating-panel'}
+              style={{ width: mobilePanelOpen ? 'min(420px, calc(100vw - 16px))' : undefined }}
+            >
+              <div
+                className={mobilePanelOpen ? 'room-floating-panel-inner is-open' : 'room-floating-panel-inner'}
+                style={{ maxHeight: '100%', borderRadius: 28 }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="room-floating-panel-header">
+                  <div>
+                    <div className="room-floating-kicker">Workspace</div>
+                    <div className="room-floating-title">{mobilePanelTitle}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="room-floating-close"
+                    onClick={() => setMobilePanelOpen(false)}
+                    disabled={isSaving}
+                    aria-label="Close panel"
+                  >
+                    <CloseOutlined />
                   </button>
                 </div>
-
-                {selectedRoom && renderRoomActionPanel('mobile')}
-
-                {renderViewPanel('mobile')}
-
-                <div className="room-mobile-section">
-                  <div className="room-mobile-section-title">Scene</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                    <button type="button" className={wallsHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleWallsHidden} data-tour="scene-hide-walls">
-                      <ColumnWidthOutlined />
-                      <span>{wallsHidden ? 'Show walls' : 'Hide walls'}</span>
-                    </button>
-                    <button type="button" className={ceilingHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleCeilingHidden} data-tour="scene-hide-ceiling">
-                      <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
-                      <span>{ceilingHidden ? 'Show ceiling' : 'Hide ceiling'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="room-mobile-section">
-                  <div className="room-mobile-section-title">Budget</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                    <button
-                      type="button"
-                      className={budgetEnabled ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
-                      disabled={isSaving}
-                      onClick={() => handleBudgetActivationChange(!budgetEnabled)}
-                      data-tour="scene-budget-activate"
-                    >
-                      <PoweroffOutlined />
-                      <span>{budgetEnabled ? 'Budget active' : 'Activate budget'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={budgetEnabled && budgetSummaryOpen ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
-                      disabled={!budgetEnabled}
-                      onClick={() => setBudgetSummaryOpen((open) => !open)}
-                    >
-                      <WalletOutlined />
-                      <span>{formatMoney(budgetGrandTotal, budgetSummary.currency)}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {budgetEnabled && budgetSummaryOpen && (
-                  <div className="room-mobile-section">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                      <span style={{ color: `${COLORS.text}B8` }}>Unpriced items</span>
-                      <strong style={{ color: budgetUnpricedCount > 0 ? '#ffd09a' : COLORS.text }}>{budgetUnpricedCount}</strong>
-                    </div>
-                    <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
-                      {budgetCategoryRows.map(([label, total]) => (
-                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                          <span style={{ color: `${COLORS.text}B8` }}>{label}</span>
-                          <strong style={{ color: COLORS.text }}>{formatMoney(total, budgetSummary.currency)}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="room-mobile-section">
-                  <div className="room-mobile-section-title">Project</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                    <button type="button" className="room-mobile-action-tile" onClick={() => setActiveTab('projects')}>
-                      <FolderOpenOutlined />
-                      <span>Projects</span>
-                    </button>
-                    <button type="button" className="room-mobile-action-tile" onClick={handleDashboard} data-tour="scene-dashboard">
-                      <AppstoreOutlined />
-                      <span>Dashboard</span>
-                    </button>
-                    <button type="button" className="room-mobile-action-tile is-danger" onClick={handleLogout} data-tour="scene-logout">
-                      <LogoutOutlined />
-                      <span>Logout</span>
-                    </button>
-                  </div>
+                <div className="room-floating-panel-scroll">
+                  {mobilePanelContent}
                 </div>
               </div>
-            )}
-          </SlidePanel>
+            </div>
+          </div>
+
+          <div className="room-mobile-reference-sheet">
+            <div className="room-mobile-reference-handle" />
+            <div className="room-mobile-reference-sheet-title">Quick Actions</div>
+            <div className="room-mobile-reference-card-grid">
+              <button
+                type="button"
+                className="room-mobile-reference-card"
+                onClick={() => { if (!isSaving) setSaveModalOpen(true); }}
+                disabled={isSaving}
+                data-tour="scene-save"
+              >
+                <span className="room-mobile-reference-card-icon">
+                  {isSaving ? <LoadingOutlined spin /> : projectSave.saveStatus === 'saved' ? <CheckOutlined /> : <SaveOutlined />}
+                </span>
+                <span className="room-mobile-reference-card-label">{isSaving ? 'Saving' : projectSave.saveStatus === 'saved' ? 'Saved' : 'Save'}</span>
+                <span className="room-mobile-reference-card-copy">Save your project</span>
+              </button>
+              <button
+                type="button"
+                className="room-mobile-reference-card is-accent"
+                onClick={switchTo2D}
+                disabled={isSaving}
+                data-tour="scene-switch-2d"
+              >
+                <span className="room-mobile-reference-card-icon">
+                  <SpaceDashboardRoundedIcon style={{ fontSize: 22 }} />
+                </span>
+                <span className="room-mobile-reference-card-label">2D Plan</span>
+                <span className="room-mobile-reference-card-copy">Switch to 2D view</span>
+              </button>
+              <button
+                type="button"
+                className="room-mobile-reference-card"
+                onClick={handleDashboard}
+                disabled={isSaving}
+                data-tour="scene-dashboard"
+              >
+                <span className="room-mobile-reference-card-icon">
+                  <AppstoreOutlined />
+                </span>
+                <span className="room-mobile-reference-card-label">Dashboard</span>
+                <span className="room-mobile-reference-card-copy">Project overview</span>
+              </button>
+            </div>
+
+            <div className="room-mobile-reference-nav">
+              {mobileBottomTabs.map(({ key, label, icon: Icon, active, onClick }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={active ? 'room-mobile-reference-nav-btn is-active' : 'room-mobile-reference-nav-btn'}
+                  onClick={onClick}
+                >
+                  <span className="room-mobile-reference-nav-icon">
+                    <Icon style={{ fontSize: 24 }} />
+                  </span>
+                  <span>{label}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className="room-mobile-reference-nav-plus"
+                onClick={() => { if (!isSaving) openMobilePanel('view'); }}
+              >
+                <span>
+                  <VisibilityRoundedIcon style={{ fontSize: 18 }} />
+                </span>
+              </button>
+            </div>
+          </div>
         </>
       ) : (
         <>
@@ -5216,6 +5418,9 @@ export default function RoomScene({ initialScene = null }) {
                 </Tooltip>
                 <Tooltip title="Redo (Ctrl+Y)">
                   <Button type="text" disabled={!canRedo || isSaving} icon={<RedoOutlined />} onClick={redo} className="room-action-button" />
+                </Tooltip>
+                <Tooltip title="Clear scene">
+                  <Button type="text" danger disabled={!canClearScene || isSaving} icon={<DeleteOutlined />} onClick={clearScene} className="room-action-button" />
                 </Tooltip>
                 <div style={{ width: 1, height: 24, background: 'rgba(201, 171, 146, 0.45)', margin: '0 6px' }} />
                 <Tooltip title={isSaving ? 'Saving project' : 'Save / Snapshot'}>
@@ -6814,7 +7019,11 @@ export default function RoomScene({ initialScene = null }) {
           display: flex;
           flex-direction: column;
           align-items: center;
+          justify-content: flex-start;
           gap: 18px;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
         }
         .room-floating-brand {
           width: 46px;
@@ -6839,6 +7048,13 @@ export default function RoomScene({ initialScene = null }) {
           gap: 12px;
           align-items: center;
           width: 100%;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          scrollbar-width: none;
+        }
+        .room-floating-rail-items::-webkit-scrollbar {
+          display: none;
         }
         .room-floating-rail-button {
           width: 48px;
@@ -6951,6 +7167,305 @@ export default function RoomScene({ initialScene = null }) {
         }
         .room-floating-panel-scroll > * {
           animation: roomFloatingContentIn 0.28s ease;
+        }
+        .room-mobile-reference-topbar {
+          position: fixed;
+          top: calc(12px + env(safe-area-inset-top, 0px));
+          left: 12px;
+          right: 12px;
+          z-index: 1150;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 16px 18px;
+          border-radius: 28px;
+          background: linear-gradient(180deg, rgba(10,10,10,0.94) 0%, rgba(18,18,18,0.88) 100%);
+          border: 1px solid rgba(201,171,146,0.12);
+          box-shadow: 0 28px 60px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.05);
+          backdrop-filter: blur(24px);
+        }
+        .room-mobile-reference-brand-text {
+          color: ${COLORS.action};
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.28em;
+          text-transform: uppercase;
+          font-family: "Cormorant Garamond", "Times New Roman", serif;
+          margin-bottom: 8px;
+        }
+        .room-mobile-reference-title-trigger {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          border: 0;
+          background: transparent;
+          padding: 0;
+          color: ${COLORS.text};
+          font-size: 17px;
+          font-weight: 700;
+          cursor: pointer;
+          min-width: 0;
+        }
+        .room-mobile-reference-title-text {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 100%;
+        }
+        .room-mobile-top-pill {
+          min-height: 54px;
+          padding: 0 20px;
+          border-radius: 22px;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: linear-gradient(180deg, rgba(34,34,34,0.92) 0%, rgba(24,24,24,0.94) 100%);
+          color: ${COLORS.text};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+          white-space: nowrap;
+        }
+        .room-mobile-top-pill-active {
+          color: ${COLORS.action};
+          border-color: rgba(201,171,146,0.38);
+          background: linear-gradient(180deg, rgba(58,48,43,0.9) 0%, rgba(37,30,27,0.95) 100%);
+          box-shadow: 0 16px 30px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .room-mobile-reference-scene-chip {
+          position: fixed;
+          top: calc(188px + env(safe-area-inset-top, 0px));
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 1120;
+          display: inline-flex;
+          align-items: center;
+          gap: 0;
+          min-height: 62px;
+          padding: 10px 24px;
+          border-radius: 999px;
+          border: 1px solid rgba(201,171,146,0.18);
+          background: linear-gradient(180deg, rgba(24,24,24,0.94) 0%, rgba(14,14,14,0.92) 100%);
+          color: ${COLORS.text};
+          box-shadow: 0 20px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04);
+          backdrop-filter: blur(18px);
+          cursor: pointer;
+        }
+        .room-mobile-reference-scene-label {
+          font-size: 18px;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .room-mobile-reference-scene-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 18px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(201,171,146,0.12);
+        }
+        .room-mobile-reference-rail {
+          pointer-events: auto;
+          width: 86px;
+          padding: 14px 12px 16px;
+          border-radius: 34px;
+          background: linear-gradient(180deg, rgba(26,24,24,0.95) 0%, rgba(18,18,18,0.92) 100%);
+          border: 1px solid rgba(201,171,146,0.12);
+          box-shadow: 0 24px 60px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
+          backdrop-filter: blur(24px);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 14px;
+          height: 100%;
+          min-height: 0;
+        }
+        .room-mobile-reference-divider {
+          width: 100%;
+          height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(201,171,146,0.16), transparent);
+          flex: 0 0 auto;
+        }
+        .room-mobile-reference-rail-items {
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          overflow-y: auto;
+          min-height: 0;
+          padding-right: 2px;
+          scrollbar-width: none;
+        }
+        .room-mobile-reference-rail-items::-webkit-scrollbar {
+          display: none;
+        }
+        .room-mobile-reference-rail-button {
+          width: 100%;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 22px;
+          background: linear-gradient(180deg, rgba(36,36,36,0.9) 0%, rgba(22,22,22,0.92) 100%);
+          color: rgba(255,255,255,0.84);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px 8px 14px;
+          min-height: 88px;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+          text-align: center;
+        }
+        .room-mobile-reference-rail-button.is-active {
+          color: ${COLORS.action};
+          border-color: rgba(201,171,146,0.22);
+          background: linear-gradient(180deg, rgba(56,47,42,0.94) 0%, rgba(28,24,22,0.96) 100%);
+          box-shadow: 0 14px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .room-mobile-reference-rail-icon {
+          width: 50px;
+          height: 50px;
+          border-radius: 18px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+        .room-mobile-reference-rail-button.is-active .room-mobile-reference-rail-icon {
+          background: radial-gradient(circle at 50% 35%, rgba(255,215,163,0.16), rgba(255,255,255,0.03));
+          border-color: rgba(201,171,146,0.18);
+        }
+        .room-mobile-reference-sheet {
+          position: fixed;
+          left: 12px;
+          right: 12px;
+          bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+          z-index: 1110;
+          padding: 12px 12px 10px;
+          border-radius: 28px;
+          background: linear-gradient(180deg, rgba(22,22,22,0.96) 0%, rgba(17,17,17,0.94) 100%);
+          border: 1px solid rgba(201,171,146,0.12);
+          box-shadow: 0 28px 72px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.04);
+          backdrop-filter: blur(24px);
+        }
+        .room-mobile-reference-handle {
+          width: 44px;
+          height: 5px;
+          border-radius: 999px;
+          margin: 0 auto 10px;
+          background: rgba(255,255,255,0.34);
+        }
+        .room-mobile-reference-sheet-title {
+          color: rgba(255,255,255,0.56);
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          margin-bottom: 10px;
+        }
+        .room-mobile-reference-card-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        .room-mobile-reference-card {
+          min-height: 58px;
+          padding: 9px 10px;
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: linear-gradient(180deg, rgba(30,30,30,0.9) 0%, rgba(20,20,20,0.92) 100%);
+          color: ${COLORS.text};
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 8px;
+          text-align: left;
+          cursor: pointer;
+        }
+        .room-mobile-reference-card.is-accent {
+          border-color: rgba(201,171,146,0.18);
+          background: linear-gradient(180deg, rgba(44,37,31,0.94) 0%, rgba(24,21,20,0.94) 100%);
+        }
+        .room-mobile-reference-card-icon {
+          color: ${COLORS.action};
+          font-size: 18px;
+          line-height: 1;
+        }
+        .room-mobile-reference-card-label {
+          font-size: 11px;
+          font-weight: 700;
+        }
+        .room-mobile-reference-card-copy {
+          color: rgba(255,255,255,0.54);
+          font-size: 10px;
+          line-height: 1.25;
+        }
+        .room-mobile-reference-nav {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr)) 92px;
+          gap: 8px;
+          align-items: stretch;
+        }
+        .room-mobile-reference-nav-btn {
+          border: 0;
+          border-radius: 18px;
+          background: transparent;
+          color: rgba(255,255,255,0.72);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          min-height: 72px;
+          padding: 8px 6px;
+          font-size: 10px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .room-mobile-reference-nav-btn.is-active {
+          color: ${COLORS.action};
+          background: linear-gradient(180deg, rgba(58,48,43,0.72) 0%, rgba(30,26,24,0.78) 100%);
+          border: 1px solid rgba(201,171,146,0.12);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+        .room-mobile-reference-nav-icon {
+          font-size: 18px;
+          line-height: 1;
+        }
+        .room-mobile-reference-nav-plus {
+          border: 1px solid rgba(201,171,146,0.3);
+          border-radius: 20px;
+          background: linear-gradient(180deg, rgba(65,53,42,0.9) 0%, rgba(45,38,30,0.92) 100%);
+          color: ${COLORS.action};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 72px;
+          cursor: pointer;
+          box-shadow: 0 18px 32px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .room-mobile-reference-nav-plus span {
+          width: 36px;
+          height: 36px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: radial-gradient(circle at 50% 35%, rgba(255,213,155,0.96), rgba(201,171,146,0.92));
+          color: #1b1714;
+          font-size: 24px;
+          font-weight: 500;
         }
         .room-floating-context-card {
           display: flex;
@@ -7427,6 +7942,126 @@ export default function RoomScene({ initialScene = null }) {
         @media (max-width: 767px) {
           button { min-height: 44px; }
           .ant-btn { min-height: 44px !important; font-size: 15px !important; }
+          .room-mobile-reference-topbar {
+            gap: 8px;
+            padding: 14px 14px;
+          }
+          .room-mobile-reference-brand-text {
+            font-size: 9px;
+            letter-spacing: 0.22em;
+          }
+          .room-mobile-reference-title-trigger {
+            font-size: 15px;
+          }
+          .room-mobile-top-pill {
+            min-height: 48px;
+            padding: 0 14px;
+            border-radius: 18px;
+            font-size: 12px;
+            gap: 8px;
+          }
+          .room-mobile-reference-scene-chip {
+            top: calc(176px + env(safe-area-inset-top, 0px));
+            min-height: 56px;
+            padding: 8px 18px;
+          }
+          .room-mobile-reference-scene-label {
+            font-size: 16px;
+          }
+          .room-mobile-reference-scene-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 16px;
+          }
+          .room-mobile-reference-rail {
+            width: 82px;
+            padding: 12px 10px 14px;
+            border-radius: 30px;
+          }
+          .room-mobile-reference-rail-button {
+            min-height: 82px;
+            padding: 10px 7px 12px;
+            font-size: 10px;
+          }
+          .room-mobile-reference-rail-icon {
+            width: 46px;
+            height: 46px;
+            border-radius: 16px;
+          }
+          .room-mobile-reference-sheet {
+            padding: 10px 10px 10px;
+          }
+          .room-mobile-reference-card-grid {
+            gap: 8px;
+          }
+          .room-mobile-reference-card {
+            min-height: 52px;
+            padding: 8px 8px;
+          }
+          .room-mobile-reference-card-label {
+            font-size: 10px;
+          }
+          .room-mobile-reference-card-copy {
+            display: none;
+          }
+          .room-mobile-reference-nav {
+            grid-template-columns: repeat(4, minmax(0, 1fr)) 82px;
+            gap: 8px;
+          }
+          .room-mobile-reference-nav-btn {
+            min-height: 56px;
+            font-size: 9px;
+            gap: 4px;
+            padding: 6px 4px;
+          }
+          .room-mobile-reference-nav-plus {
+            min-height: 56px;
+          }
+          .room-mobile-reference-nav-plus span {
+            width: 34px;
+            height: 34px;
+            font-size: 22px;
+          }
+          .room-floating-rail {
+            width: 64px !important;
+            padding: 8px 6px 10px !important;
+            gap: 12px;
+            border-radius: 32px;
+          }
+          .room-floating-brand {
+            width: 38px;
+            height: 38px;
+            flex: 0 0 auto;
+          }
+          .room-floating-brand-dot {
+            width: 14px;
+            height: 14px;
+          }
+          .room-floating-rail-items {
+            gap: 8px;
+            padding-right: 1px;
+          }
+          .room-floating-panel.is-open {
+            width: min(392px, calc(100vw - 16px));
+          }
+          .room-floating-panel-inner {
+            max-height: calc(100dvh - 188px);
+            border-radius: 24px;
+          }
+          .room-floating-panel-header {
+            padding: 16px 16px 12px;
+          }
+          .room-floating-title {
+            font-size: 20px;
+          }
+          .room-floating-panel-scroll {
+            max-height: none;
+            padding: 14px 14px 18px;
+          }
+          .room-mobile-action-tile {
+            font-size: 11px;
+            padding: 8px 8px;
+          }
         }
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

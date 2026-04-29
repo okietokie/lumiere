@@ -62,9 +62,23 @@ export const DESIGN_THEMES = [
   },
 ];
 
+export const DEFAULT_FLOOR_MATERIAL = Object.freeze({
+  color: '#C8A060',
+  roughness: 0.60,
+  metalness: 0.0,
+  textureId: 'wood_light',
+});
+
+export const DEFAULT_CEILING_MATERIAL = Object.freeze({
+  color: '#FAFAFA',
+  roughness: 0.90,
+  metalness: 0.0,
+  textureId: null,
+});
+
 export default function useMaterials(walls, setWalls) {
-  const [floorMaterial,   setFloorMaterial]   = useState({ color: '#C8A060', roughness: 0.60, metalness: 0.0, textureId: 'wood_light' });
-  const [ceilingMaterial, setCeilingMaterial] = useState({ color: '#FAFAFA', roughness: 0.90, metalness: 0.0, textureId: null });
+  const [floorMaterial,   setFloorMaterial]   = useState(DEFAULT_FLOOR_MATERIAL);
+  const [ceilingMaterial, setCeilingMaterial] = useState(DEFAULT_CEILING_MATERIAL);
   const [activeTheme,     setActiveTheme]     = useState(null);
 
   const applyTexture = useCallback((surface, texture, wallId = null) => {
@@ -97,5 +111,5 @@ export default function useMaterials(walls, setWalls) {
     setWalls((prev) => prev.map((w) => ({ ...w, ...theme.wall })));
   }, [setWalls]);
 
-  return { floorMaterial, ceilingMaterial, setFloorMaterial, setCeilingMaterial, applyTexture, updateSurface, applyTheme, activeTheme };
+  return { floorMaterial, ceilingMaterial, setFloorMaterial, setCeilingMaterial, applyTexture, updateSurface, applyTheme, activeTheme, setActiveTheme };
 }

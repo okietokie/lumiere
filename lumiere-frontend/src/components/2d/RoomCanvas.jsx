@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { Stage, Layer, Line, Circle, Rect, Arc, Group, Text, RegularPolygon } from "react-konva";
-import { AppstoreOutlined, DeleteOutlined, LogoutOutlined, SaveOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, DeleteOutlined, LogoutOutlined, RedoOutlined, SaveOutlined, UndoOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   useFloorPlan, buildWalls, PX_PER_M, GRID_SIZES,
@@ -16,6 +16,8 @@ import {
   saveLive3DSceneSnapshot,
 } from "../../utils/editorSceneBridge";
 import { fetchModelManifest } from "../../hooks/useModelPrefetch";
+import { resolveModelPreviewUrls } from "../threeD/furniture/FurnitureItem";
+import { CardPreview as LiveFurnitureCardPreview } from "../threeD/furniture/FurnitureModelCard";
 import SaveModal from "../threeD/ui/SaveModal";
 import axiosClient from "../../api/axiosClient";
 import { clearAuthSession } from "../../utils/authStorage";
@@ -23,6 +25,7 @@ import { normalizeShareUrl } from "../../utils/shareUrl";
 import "./RoomCanvas.css";
 import OnboardingJoyride from "../onboarding/OnboardingJoyride.jsx";
 import { useOnboardingTour } from "../onboarding/OnboardingTourProvider.jsx";
+import useThemedDialogs from "../../hooks/useThemedDialogs.jsx";
 
 const MIN_STAGE_SCALE = 0.25;
 const MAX_STAGE_SCALE = 4;
@@ -562,12 +565,13 @@ function CornerJoint({ x, y, thickness }) {
 }
 
 function WallLabel({ wall }) {
-  if (wall.length < 30) return null;
+  if (wall.length < 56) return null;
   const mx = (wall.start.x+wall.end.x)/2, my = (wall.start.y+wall.end.y)/2;
   return <Text x={mx+wall.nx*(wall.thickness+14)} y={my+wall.ny*(wall.thickness+14)}
     text={`${(wall.length/PX_PER_M).toFixed(2)} m`}
-    fontSize={9} fontFamily="'Archivo', sans-serif" fill="rgba(201,169,110,0.6)"
-    align="center" offsetX={18} offsetY={4} listening={false}/>;
+    fontSize={7} fontFamily="'Archivo', sans-serif" fill="rgba(201,169,110,0.46)"
+    letterSpacing={0.8}
+    align="center" offsetX={16} offsetY={3.5} listening={false}/>;
 }
 
 function getOpeningGeometry(wall, opening) {
@@ -771,6 +775,8 @@ function RoomShape({
   const inOpening = mode === "door" || mode === "window";
   const floor     = room.floor ?? { color:"#c9a96e", opacity:0.08, pattern:"solid" };
   const [r,g,b]   = hexToRgbArr(floor.color);
+  const roomLabelWidth = Math.max(84, Math.min(148, room.name.length * 9.5));
+  const areaLabelWidth = 76;
 
   return (
     <Group>
@@ -834,14 +840,44 @@ function RoomShape({
       {room.walls.map(wall=><WallLabel key={wall.id} wall={wall}/>)}
 
       {/* ⑧ Room name + area */}
-      <Text x={cx} y={cy-13} text={room.name}
-        fontSize={12} fontFamily="'Cormorant Garamond', serif" fontStyle="600"
-        fill={floor.color} opacity={0.95} align="center" offsetX={50} listening={false}/>
+      <Rect
+        x={cx - roomLabelWidth / 2}
+        y={cy - 20}
+        width={roomLabelWidth}
+        height={20}
+        cornerRadius={10}
+        fill="rgba(31, 26, 23, 0.72)"
+        stroke="rgba(201,169,110,0.16)"
+        strokeWidth={0.8}
+        listening={false}
+      />
+      <Text x={cx} y={cy-17} text={room.name}
+        width={roomLabelWidth}
+        offsetX={roomLabelWidth / 2}
+        fontSize={11} fontFamily="'Cormorant Garamond', serif" fontStyle="600"
+        fill="rgba(233,199,136,0.92)" align="center" listening={false}/>
       <Text x={cx} y={cy+3} text={`${aM2} m²`}
         fontSize={9} fontFamily="'Archivo', sans-serif"
         fill={floor.color} opacity={0.55} align="center" offsetX={20} listening={false}/>
 
       {/* ⑨ Drag handles */}
+      <Rect
+        x={cx - areaLabelWidth / 2}
+        y={cy + 2}
+        width={areaLabelWidth}
+        height={18}
+        cornerRadius={8}
+        fill="rgba(31, 26, 23, 0.86)"
+        stroke="rgba(201,169,110,0.12)"
+        strokeWidth={0.8}
+        listening={false}
+      />
+      <Text x={cx} y={cy+7} text={`${aM2} m²`}
+        width={areaLabelWidth}
+        offsetX={areaLabelWidth / 2}
+        fontSize={7} fontFamily="'Archivo', sans-serif"
+        fill="rgba(231,217,198,0.7)" letterSpacing={1.2} align="center" listening={false}/>
+
       {inSelect && room.points.map((p,ptIdx)=>{
         const isSel = selectedCorner?.roomId===room.id && selectedCorner?.ptIdx===ptIdx;
         return <DragHandle key={ptIdx} x={p.x} y={p.y} isSelected={isSel}
@@ -1056,11 +1092,58 @@ function getPendingKey(pending) {
   return getModelKey(pending.model ?? pending);
 }
 
+function ResolvedFurniturePreview({ item, className = "", alt = "" }) {
+  const candidates = useMemo(
+    () => resolveModelPreviewUrls(item?.model?.url, item?.model?.filename, item?.model?.preview_url ?? item?.previewUrl),
+    [item]
+  );
+  const [candidateIndex, setCandidateIndex] = useState(0);
+
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [candidates, item?.key]);
+
+  const src = candidates[candidateIndex] || null;
+  if (!src) return null;
+
+  return (
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={() => {
+        setCandidateIndex((current) => (current + 1 < candidates.length ? current + 1 : current));
+      }}
+    />
+  );
+}
+
 function FurnitureCatalogue({ onSelect, pending }) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hoveredItemKey, setHoveredItemKey] = useState(null);
+  const [expandedItemKey, setExpandedItemKey] = useState(null);
+  const [isMobileCatalogue, setIsMobileCatalogue] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth <= 900 : false
+  ));
   const pendingKey = getPendingKey(pending);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleResize = () => setIsMobileCatalogue(window.innerWidth <= 900);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (pendingKey) {
+      setExpandedItemKey(pendingKey);
+    }
+  }, [pendingKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1090,15 +1173,33 @@ function FurnitureCatalogue({ onSelect, pending }) {
       ...getFurnitureDefinitionForModel(model),
       model,
       key: getModelKey(model),
-      previewUrl: model.preview_url || model.thumbnail_url || null,
+      previewUrl: resolveModelPreviewUrls(model.url, model.filename, model.preview_url || model.thumbnail_url || null)[0] || null,
     })).filter((item) => item.key),
     [models]
   );
   const categories = [...new Set(catalogueItems.map(f=>f.category || "Furniture"))];
 
+  const handleItemClick = useCallback((item) => {
+    if (!isMobileCatalogue) {
+      onSelect(item);
+      return;
+    }
+
+    if (expandedItemKey !== item.key) {
+      setExpandedItemKey(item.key);
+      return;
+    }
+
+    onSelect(item);
+  }, [expandedItemKey, isMobileCatalogue, onSelect]);
+
   return (
     <div className="catalogue-panel">
-      <div className="catalogue-hint">Click an item, then click the canvas to place it</div>
+      <div className="catalogue-hint">
+        {isMobileCatalogue
+          ? "Tap once to preview a model, then tap the same item again to place it."
+          : "Click an item, then click the canvas to place it"}
+      </div>
       {loading && <div className="catalogue-hint">Loading backend furniture...</div>}
       {error && <div className="catalogue-error">{error}</div>}
       {categories.map(cat=>(
@@ -1106,19 +1207,68 @@ function FurnitureCatalogue({ onSelect, pending }) {
           <div className="catalogue-cat-label">{cat}</div>
           <div className="catalogue-grid">
             {catalogueItems.filter(f=>f.category===cat).map((f, index)=>(
-              <button key={f.key}
-                className={`catalogue-item${pendingKey===f.key?" active":""}`}
-                onClick={()=>onSelect(f)}
-                title={f.label}
-                data-tour={index === 0 ? "planner-furniture-catalogue-item" : undefined}
-              >
-                {f.previewUrl ? (
-                  <img className="catalogue-thumb" src={f.previewUrl} alt="" loading="lazy" decoding="async"/>
-                ) : (
-                  <span className="catalogue-color-chip" style={{background:f.color}}/>
+              <div key={f.key} className="catalogue-item-shell">
+                <button
+                  className={`catalogue-item${pendingKey===f.key?" active":""}${expandedItemKey===f.key?" preview-open":""}`}
+                  onClick={()=>handleItemClick(f)}
+                  aria-label={f.label}
+                  data-tour={index === 0 ? "planner-furniture-catalogue-item" : undefined}
+                  onMouseEnter={() => setHoveredItemKey(f.key)}
+                  onMouseLeave={() => setHoveredItemKey((current) => current === f.key ? null : current)}
+                  onFocus={() => setHoveredItemKey(f.key)}
+                  onBlur={() => setHoveredItemKey((current) => current === f.key ? null : current)}
+                >
+                  {f.previewUrl ? (
+                    <ResolvedFurniturePreview item={f} className="catalogue-thumb" alt="" />
+                  ) : (
+                    <span className="catalogue-color-chip" style={{background:f.color}}/>
+                  )}
+                  <span className="catalogue-item-label">{f.label}</span>
+                  {isMobileCatalogue && expandedItemKey === f.key && pendingKey !== f.key && (
+                    <span className="catalogue-item-tap-hint">Tap again</span>
+                  )}
+                  {!isMobileCatalogue && hoveredItemKey === f.key && (
+                    <div className="catalogue-hover-preview" aria-hidden="true">
+                      <div className="catalogue-hover-preview-media">
+                        {f.model?.url ? (
+                          <div className="catalogue-hover-preview-live">
+                            <LiveFurnitureCardPreview url={f.model.url} filename={f.model.filename} />
+                          </div>
+                        ) : f.previewUrl ? (
+                          <ResolvedFurniturePreview item={f} alt="" />
+                        ) : (
+                          <span className="catalogue-hover-preview-swatch" style={{ background: f.color }} />
+                        )}
+                      </div>
+                      <div className="catalogue-hover-preview-body">
+                        <div className="catalogue-hover-preview-title">{f.label}</div>
+                        <div className="catalogue-hover-preview-meta">{f.category || "Furniture"}</div>
+                      </div>
+                    </div>
+                  )}
+                </button>
+                {isMobileCatalogue && expandedItemKey === f.key && (
+                  <div className={`catalogue-mobile-preview${pendingKey===f.key ? " is-selected" : ""}`}>
+                    <div className="catalogue-mobile-preview-media">
+                      {f.model?.url ? (
+                        <div className="catalogue-mobile-preview-live">
+                          <LiveFurnitureCardPreview url={f.model.url} filename={f.model.filename} />
+                        </div>
+                      ) : f.previewUrl ? (
+                        <ResolvedFurniturePreview item={f} alt="" />
+                      ) : (
+                        <span className="catalogue-hover-preview-swatch" style={{ background: f.color }} />
+                      )}
+                    </div>
+                    <div className="catalogue-mobile-preview-copy">
+                      <div className="catalogue-hover-preview-title">{f.label}</div>
+                      <div className="catalogue-hover-preview-meta">
+                        {pendingKey===f.key ? "Selected - tap inside a room to place it" : "Preview open - tap the same item again to select"}
+                      </div>
+                    </div>
+                  </div>
                 )}
-                <span className="catalogue-item-label">{f.label}</span>
-              </button>
+              </div>
             ))}
           </div>
         </div>
@@ -1147,10 +1297,10 @@ function ThicknessSlider({ value, onChange }) {
   );
 }
 
-function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick, ...props }) {
+function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick, className = "", ...props }) {
   return (
     <button
-      className={`tool-btn${active?" active":""}${danger?" danger":""}`}
+      className={`tool-btn${active?" active":""}${danger?" danger":""}${className ? ` ${className}` : ""}`}
       onClick={onClick}
       disabled={disabled}
       {...props}
@@ -1158,7 +1308,7 @@ function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick, ...
       <svg className="tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d={icon}/>
       </svg>
-      {label}
+      <span className="tool-label">{label}</span>
       {shortcut && <span className="tool-shortcut">{shortcut}</span>}
     </button>
   );
@@ -1169,6 +1319,7 @@ function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick, ...
 // ─────────────────────────────────────────────────────────────────────────────
 export default function RoomCanvas({ initialPlan = null }) {
   const navigate = useNavigate();
+  const dialogs = useThemedDialogs();
   const onboardingTour = useOnboardingTour();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
@@ -1201,12 +1352,53 @@ export default function RoomCanvas({ initialPlan = null }) {
   const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: "idle", usdz: "idle" });
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
   const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState("tools");
+  const [showSelectIntro, setShowSelectIntro] = useState(false);
+  const [hasShownSelectIntro, setHasShownSelectIntro] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth <= 900 : false
+  ));
   const autosaveRef = useRef(null);
+  const selectIntroTimeoutRef = useRef(null);
   const isSaving = saveStatus === "saving";
 
   const collapseMobileControls = useCallback(() => {
     setMobileControlsOpen(false);
   }, []);
+
+  const toggleMobilePanel = useCallback((panel) => {
+    setMobilePanel(panel);
+    setMobileControlsOpen(true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (selectIntroTimeoutRef.current) {
+        clearTimeout(selectIntroTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleResize = () => setIsMobileViewport(window.innerWidth <= 900);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const triggerSelectIntro = useCallback(() => {
+    if (hasShownSelectIntro) return;
+    if (selectIntroTimeoutRef.current) {
+      clearTimeout(selectIntroTimeoutRef.current);
+    }
+    setHasShownSelectIntro(true);
+    setShowSelectIntro(true);
+    selectIntroTimeoutRef.current = setTimeout(() => {
+      setShowSelectIntro(false);
+      selectIntroTimeoutRef.current = null;
+    }, 4000);
+  }, [hasShownSelectIntro]);
 
   const isTypingTarget = useCallback((target) => {
     if (!target) return false;
@@ -1236,6 +1428,12 @@ export default function RoomCanvas({ initialPlan = null }) {
     doorWidth, setDoorWidth, windowWidth, setWindowWidth,
     replacePlan,
   } = fp;
+
+  const activateSelectMode = useCallback(() => {
+    setMode("select");
+    cancelDraft();
+    triggerSelectIntro();
+  }, [cancelDraft, setMode, triggerSelectIntro]);
 
   const switchTo3DUrl = (() => {
     const nextSearch = new URLSearchParams(searchParams);
@@ -1515,10 +1713,41 @@ export default function RoomCanvas({ initialPlan = null }) {
     }
   }, []);
 
+  const isBlankSceneData = useCallback((sceneData) => {
+    if (!sceneData || typeof sceneData !== "object") return true;
+
+    const rooms = Array.isArray(sceneData.rooms) ? sceneData.rooms : [];
+    const walls = Array.isArray(sceneData.walls) ? sceneData.walls : [];
+    const furniture = Array.isArray(sceneData.furniture) ? sceneData.furniture : [];
+    const placedItems = Array.isArray(sceneData.placedItems) ? sceneData.placedItems : [];
+
+    return (
+      rooms.length === 0 &&
+      walls.length === 0 &&
+      furniture.length === 0 &&
+      placedItems.length === 0
+    );
+  }, []);
+
   const loadProjectIntoPlanner = useCallback((data) => {
     const sceneData = data?.scene_data || data?.scene;
     const plan = convert3DSceneTo2DPlan(sceneData);
     if (!plan) {
+      if (isBlankSceneData(sceneData)) {
+        replacePlan(null);
+        setProjectName(data.title || data.name || "Untitled Room");
+        setCurrentProjectId(data.id);
+        setShareUrl(normalizeShareUrl(data.share_url));
+        setModelAssets(data.model_assets || {
+          glb_url: null,
+          usdz_url: null,
+          glb_filename: null,
+          usdz_filename: null,
+        });
+        syncProjectQuery(data.id);
+        return;
+      }
+
       throw new Error("This project does not contain a compatible scene.");
     }
     replacePlan(plan);
@@ -1532,7 +1761,7 @@ export default function RoomCanvas({ initialPlan = null }) {
       usdz_filename: null,
     });
     syncProjectQuery(data.id);
-  }, [replacePlan, syncProjectQuery]);
+  }, [isBlankSceneData, replacePlan, syncProjectQuery]);
 
   const saveProject = useCallback(async (name = projectName, withThumbnail = true, options = {}) => {
     setSaveStatus("saving");
@@ -1612,17 +1841,27 @@ export default function RoomCanvas({ initialPlan = null }) {
 
   const leaveEditorWithSavePrompt = useCallback(async (nextAction, label) => {
     if (isSaving) return;
-    const shouldSave = window.confirm(`Save progress before ${label}?`);
+    const shouldSave = await dialogs.confirm({
+      title: 'Save Before You Leave?',
+      content: `Your latest plan changes are not saved yet. Save progress before ${label}?`,
+      okText: 'Save and Continue',
+      cancelText: 'Continue Without Saving',
+      tone: 'warning',
+    });
     if (shouldSave) {
       try {
         await saveProject(projectName, true);
       } catch (error) {
-        window.alert(error?.response?.data?.detail || error?.message || "Could not save progress. Please try again.");
+        await dialogs.alert({
+          title: 'Save Failed',
+          content: error?.response?.data?.detail || error?.message || "Could not save progress. Please try again.",
+          tone: 'danger',
+        });
         return;
       }
     }
     nextAction();
-  }, [isSaving, projectName, saveProject]);
+  }, [dialogs, isSaving, projectName, saveProject]);
 
   const handleDashboard = useCallback(() => {
     leaveEditorWithSavePrompt(() => navigate("/user/dashboard"), "going to the dashboard");
@@ -1666,13 +1905,17 @@ export default function RoomCanvas({ initialPlan = null }) {
           setProjectName(file.name.replace(/\.(lumiere\.json|json)$/i, ""));
           syncProjectQuery(null);
         } catch {
-          alert("Invalid project file.");
+          dialogs.alert({
+            title: 'Import Failed',
+            content: 'Invalid project file.',
+            tone: 'danger',
+          });
         }
       };
       reader.readAsText(file);
     };
     input.click();
-  }, [replacePlan, syncProjectQuery]);
+  }, [dialogs, replacePlan, syncProjectQuery]);
 
   const exportJSON = useCallback(() => {
     const blob = new Blob([JSON.stringify(buildPlanSnapshot(), null, 2)], { type: "application/json" });
@@ -1939,6 +2182,20 @@ export default function RoomCanvas({ initialPlan = null }) {
   const hasRooms = rooms.length > 0;
   const hasEnclosedRooms = enclosedRooms.length > 0;
   const hasDraft = draftPts.length > 0;
+  const handleClearAll = useCallback(async () => {
+    if (!hasDraft && !hasRooms) return;
+
+    const confirmed = await dialogs.confirm({
+      title: 'Clear This Plan?',
+      content: 'This will remove all walls, rooms, doors, windows, and furniture from the 2D plan.',
+      okText: 'Clear Plan',
+      cancelText: 'Keep Plan',
+      tone: 'danger',
+    });
+
+    if (!confirmed) return;
+    clearAll();
+  }, [clearAll, dialogs, hasDraft, hasRooms]);
   const selRoom  = selectedRoom ? rooms.find(r=>r.id===selectedRoom.roomId) : null;
   const selFurn  = selectedFurnitureId ? furniture.find(f=>f.id===selectedFurnitureId) : null;
   const selWallObj = selectedWall ? rooms.flatMap(r=>r.walls).find(w=>w.id===selectedWall.wallId) : null;
@@ -2045,6 +2302,191 @@ export default function RoomCanvas({ initialPlan = null }) {
       : mode === "furniture"
         ? (pendingFurniture ? "Click inside a room to place furniture" : "Choose an item from the catalogue below")
         : modeHint[mode];
+  const mobileProjectTitle = (projectName || "Untitled Room").trim() || "Untitled Room";
+  const [desktopSidebarPanel, setDesktopSidebarPanel] = useState(null);
+  const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(null);
+  const desktopSidebarTimeoutRef = useRef(null);
+  const effectiveDesktopSidebarPanel = desktopSidebarPinned ?? desktopSidebarPanel;
+  const activeToolMeta = {
+    draw: { label: "Draw Room", shortcut: "D" },
+    select: { label: "Select & Edit", shortcut: "S" },
+    door: { label: "Place Door", shortcut: "O" },
+    window: { label: "Place Window", shortcut: "W" },
+    furniture: { label: "Furniture", shortcut: "F" },
+  }[mode];
+  const desktopPanelMeta = {
+    draw: {
+      label: "Draw Room",
+      shortcut: "D",
+      description: "Sketch walls point by point and close them into rooms.",
+      bullets: ["Place corners", "Close rooms", "Finish open walls"],
+    },
+    select: {
+      label: "Select & Edit",
+      shortcut: "S",
+      description: "Select, move and edit walls, rooms and objects.",
+      bullets: ["Select walls", "Move objects", "Adjust dimensions", "Rotate items"],
+    },
+    door: {
+      label: "Place Door",
+      shortcut: "O",
+      description: "Add a door to walls and tune its width.",
+      bullets: ["Insert on walls", "Resize width", "Reposition opening"],
+    },
+    window: {
+      label: "Place Window",
+      shortcut: "W",
+      description: "Add windows to walls and refine the opening.",
+      bullets: ["Insert on walls", "Resize opening", "Adjust placement"],
+    },
+    furniture: {
+      label: "Furniture",
+      shortcut: "F",
+      description: "Choose furniture and place it inside enclosed rooms.",
+      bullets: ["Browse catalogue", "Place items", "Rotate and recolor"],
+    },
+    snap: {
+      label: "Grid & Snap",
+      shortcut: "G",
+      description: "Control snapping and grid precision.",
+    },
+    wall: {
+      label: "Wall Settings",
+      shortcut: "WT",
+      description: "Set the global wall thickness.",
+    },
+    actions: {
+      label: "Actions",
+      shortcut: "AX",
+      description: "Export, cancel drawing, or clear the plan.",
+    },
+    rooms: {
+      label: "Plan Elements",
+      shortcut: "RM",
+      description: "Review and jump between rooms in the plan.",
+    },
+  };
+  const activeDesktopPanelMeta = effectiveDesktopSidebarPanel ? desktopPanelMeta[effectiveDesktopSidebarPanel] : null;
+  const mobilePanelMeta = {
+    tools: {
+      label: "Tools",
+      shortcut: activeToolMeta?.shortcut ?? "D",
+      description: "Choose a drawing mode, then keep the panel open for focused actions.",
+    },
+    snap: desktopPanelMeta.snap,
+    wall: desktopPanelMeta.wall,
+    actions: {
+      label: "Project",
+      shortcut: "AX",
+      description: "Save, switch views, export, and manage the current plan.",
+    },
+    rooms: {
+      label: "Plan Elements",
+      shortcut: "RM",
+      description: "Review rooms, selections, and everything already placed in the plan.",
+    },
+  };
+  const activeMobilePanelMeta = mobilePanelMeta[mobilePanel] ?? mobilePanelMeta.tools;
+  const mobileModeLabel = {
+    draw: "Draw Room",
+    select: "Select & Edit",
+    door: "Place Door",
+    window: "Place Window",
+    furniture: "Furniture",
+  }[mode];
+  const clearDesktopPanelTimer = useCallback(() => {
+    if (desktopSidebarTimeoutRef.current) {
+      clearTimeout(desktopSidebarTimeoutRef.current);
+      desktopSidebarTimeoutRef.current = null;
+    }
+  }, []);
+  const scheduleDesktopPanelClose = useCallback(() => {
+    clearDesktopPanelTimer();
+    desktopSidebarTimeoutRef.current = setTimeout(() => {
+      setDesktopSidebarPanel(null);
+      setDesktopSidebarPinned(null);
+      desktopSidebarTimeoutRef.current = null;
+    }, 5000);
+  }, [clearDesktopPanelTimer]);
+  const previewDesktopPanel = useCallback((panel) => {
+    setDesktopSidebarPanel(panel);
+    scheduleDesktopPanelClose();
+  }, [scheduleDesktopPanelClose]);
+  const clearDesktopPreview = useCallback(() => {
+    scheduleDesktopPanelClose();
+  }, [scheduleDesktopPanelClose]);
+  const toggleDesktopPanel = useCallback((panel) => {
+    setDesktopSidebarPanel(panel);
+    setDesktopSidebarPinned((current) => current === panel ? null : panel);
+    scheduleDesktopPanelClose();
+  }, [scheduleDesktopPanelClose]);
+
+  useEffect(() => {
+    return () => {
+      clearDesktopPanelTimer();
+    };
+  }, [clearDesktopPanelTimer]);
+
+  const handleDrawToolSelect = useCallback(() => {
+    setMode("draw");
+    cancelDraft();
+    if (isMobileViewport) {
+      toggleMobilePanel("tools");
+    } else {
+      toggleDesktopPanel("draw");
+    }
+    if (onboardingTour.isActive && onboardingTour.state.step === "create-room") {
+      onboardingTour.setStep("draw-room");
+    }
+  }, [cancelDraft, isMobileViewport, onboardingTour, setMode, toggleDesktopPanel, toggleMobilePanel]);
+
+  const handleSelectToolSelect = useCallback(() => {
+    activateSelectMode();
+    if (isMobileViewport) {
+      toggleMobilePanel("tools");
+    } else {
+      toggleDesktopPanel("select");
+    }
+  }, [activateSelectMode, isMobileViewport, toggleDesktopPanel, toggleMobilePanel]);
+
+  const handleDoorToolSelect = useCallback(() => {
+    setMode("door");
+    cancelDraft();
+    if (isMobileViewport) {
+      toggleMobilePanel("tools");
+    } else {
+      toggleDesktopPanel("door");
+    }
+    if (onboardingTour.isActive && onboardingTour.state.step === "door-tool") {
+      onboardingTour.setStep("place-door");
+    }
+  }, [cancelDraft, isMobileViewport, onboardingTour, setMode, toggleDesktopPanel, toggleMobilePanel]);
+
+  const handleWindowToolSelect = useCallback(() => {
+    setMode("window");
+    cancelDraft();
+    if (isMobileViewport) {
+      toggleMobilePanel("tools");
+    } else {
+      toggleDesktopPanel("window");
+    }
+    if (onboardingTour.isActive && onboardingTour.state.step === "window-tool") {
+      onboardingTour.setStep("place-window");
+    }
+  }, [cancelDraft, isMobileViewport, onboardingTour, setMode, toggleDesktopPanel, toggleMobilePanel]);
+
+  const handleFurnitureToolSelect = useCallback(() => {
+    setMode("furniture");
+    cancelDraft();
+    if (isMobileViewport) {
+      toggleMobilePanel("tools");
+    } else {
+      toggleDesktopPanel("furniture");
+    }
+    if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
+      onboardingTour.setStep("select-furniture");
+    }
+  }, [cancelDraft, isMobileViewport, onboardingTour, setMode, toggleDesktopPanel, toggleMobilePanel]);
 
   return (
     <div className="lumiere-wrapper">
@@ -2116,70 +2558,272 @@ export default function RoomCanvas({ initialPlan = null }) {
           ].includes(onboardingTour.state.step)
         }
       />
-      <button
-        type="button"
-        className={`mobile-editor-menu-button${mobileControlsOpen ? " is-open" : ""}`}
-        aria-label={mobileControlsOpen ? "Close editor controls" : "Open editor controls"}
-        aria-expanded={mobileControlsOpen}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => setMobileControlsOpen((open) => !open)}
-      >
-        <span />
-        <span />
-        <span />
-      </button>
       {/* ══════════════════════════════ SIDEBAR */}
       <aside
-        className={`lumiere-sidebar${mobileControlsOpen ? " mobile-open" : ""}`}
+        className={`lumiere-sidebar${mobileControlsOpen ? " mobile-open" : ""}${effectiveDesktopSidebarPanel ? " desktop-panel-open" : ""}`}
         onPointerDown={(event) => event.stopPropagation()}
+        onMouseLeave={clearDesktopPreview}
       >
-        <div className="sidebar-header">
-          <div className="sidebar-logo">Lumière <span>Maison Studio</span></div>
-        </div>
-
-        <div className="mobile-editor-menu-actions">
-          <button
-            type="button"
-            onClick={() => setSaveModalOpen(true)}
-            disabled={isSaving}
-            className="canvas-action-btn canvas-action-btn-save"
-          >
-            <SaveOutlined />
-            {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
-          </button>
-          <button
-            type="button"
-            onClick={switchTo3D}
-            disabled={isSaving}
-            data-tour="planner-switch-3d"
-            className="canvas-action-btn canvas-action-btn-view"
-          >
-            Switch to 3D
-          </button>
-          <div className="canvas-nav-segment" role="group" aria-label="Editor navigation">
-            <button
-              type="button"
-              onClick={handleDashboard}
-              disabled={isSaving}
-              className="canvas-segment-btn"
-            >
-              <AppstoreOutlined />
-              Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={handleLogout}
-              disabled={isSaving}
-              className="canvas-segment-btn canvas-segment-btn-danger"
-            >
-              <LogoutOutlined />
-              Logout
-            </button>
+        <div className="sidebar-rail">
+          <div className="sidebar-rail-group">
+            <ToolBtn label="Draw Room" shortcut="D" active={mode==="draw"} data-tour="planner-draw-room"
+              data-tooltip="Draw Room"
+              data-description="Sketch walls point by point and close a shape into a room."
+              data-keycap="D"
+              title="Draw Room"
+              onMouseEnter={() => previewDesktopPanel("draw")}
+              onFocus={() => previewDesktopPanel("draw")}
+              icon="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+              onClick={handleDrawToolSelect}/>
+            <ToolBtn label="Select & Edit" shortcut="S" active={mode==="select"} data-tour="planner-select-edit"
+              data-tooltip="Select & Edit"
+              data-description="Select walls and objects to move, resize, and refine."
+              data-keycap="S"
+              title="Select & Edit"
+              onMouseEnter={() => previewDesktopPanel("select")}
+              onFocus={() => previewDesktopPanel("select")}
+              icon="M5 3l14 9-7 1-3 7z"
+              onClick={handleSelectToolSelect}/>
+            <ToolBtn label="Place Door" shortcut="O" active={mode==="door"} disabled={!hasRooms} data-tour="planner-place-door"
+              data-tooltip="Place Door"
+              data-description="Add a door to any wall, then fine-tune its width."
+              data-keycap="O"
+              title="Place Door"
+              onMouseEnter={() => previewDesktopPanel("door")}
+              onFocus={() => previewDesktopPanel("door")}
+              icon="M3 21V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v16M9 21V10h6v11"
+              onClick={handleDoorToolSelect}/>
+            <ToolBtn label="Place Window" shortcut="W" active={mode==="window"} disabled={!hasRooms} data-tour="planner-place-window"
+              data-tooltip="Place Window"
+              data-description="Insert windows on walls and adjust their placement."
+              data-keycap="W"
+              title="Place Window"
+              onMouseEnter={() => previewDesktopPanel("window")}
+              onFocus={() => previewDesktopPanel("window")}
+              icon="M3 9h18M3 15h18M9 3v18M15 3v18"
+              onClick={handleWindowToolSelect}/>
+            <ToolBtn label="Furniture" shortcut="F" active={mode==="furniture"} disabled={!hasEnclosedRooms} data-tour="planner-furniture-tool"
+              data-tooltip="Furniture"
+              data-description="Choose furniture models and place them inside enclosed rooms."
+              data-keycap="F"
+              title="Furniture"
+              onMouseEnter={() => previewDesktopPanel("furniture")}
+              onFocus={() => previewDesktopPanel("furniture")}
+              icon="M4 12h16M6 12V9a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v3M6 12v5M18 12v5M4 17h16"
+              onClick={handleFurnitureToolSelect}/>
+            <ToolBtn label="Grid & Snap" shortcut="G"
+              data-tooltip="Grid & Snap"
+              data-description="Control snapping and grid precision."
+              data-keycap="G"
+              title="Grid & Snap"
+              active={isMobileViewport ? (mobileControlsOpen && mobilePanel === "snap") : effectiveDesktopSidebarPanel === "snap"}
+              onMouseEnter={() => previewDesktopPanel("snap")}
+              onFocus={() => previewDesktopPanel("snap")}
+              onClick={() => isMobileViewport ? toggleMobilePanel("snap") : toggleDesktopPanel("snap")}
+              icon="M4 7h16M4 12h16M4 17h16M7 4v16M12 4v16M17 4v16"/>
+            <ToolBtn label="Wall Settings" shortcut="WT"
+              data-tooltip="Wall Settings"
+              data-description="Set the global wall thickness."
+              data-keycap="WT"
+              title="Wall Settings"
+              active={isMobileViewport ? (mobileControlsOpen && mobilePanel === "wall") : effectiveDesktopSidebarPanel === "wall"}
+              onMouseEnter={() => previewDesktopPanel("wall")}
+              onFocus={() => previewDesktopPanel("wall")}
+              onClick={() => isMobileViewport ? toggleMobilePanel("wall") : toggleDesktopPanel("wall")}
+              icon="M4 6h16M4 12h16M4 18h16"/>
+            <ToolBtn label="Actions" shortcut="AX"
+              data-tooltip="Actions"
+              data-description="Export, cancel drawing, or clear the plan."
+              data-keycap="AX"
+              title="Actions"
+              active={isMobileViewport ? (mobileControlsOpen && mobilePanel === "actions") : effectiveDesktopSidebarPanel === "actions"}
+              onMouseEnter={() => previewDesktopPanel("actions")}
+              onFocus={() => previewDesktopPanel("actions")}
+              onClick={() => isMobileViewport ? toggleMobilePanel("actions") : toggleDesktopPanel("actions")}
+              icon="M6 7h12M9 7V5h6v2M8 11h8M8 15h8M8 19h8"/>
+            <ToolBtn label="Plan Elements" shortcut="RM"
+              data-tooltip="Plan Elements"
+              data-description="Review and jump between rooms in the plan."
+              data-keycap="RM"
+              title="Plan Elements"
+              active={isMobileViewport ? (mobileControlsOpen && mobilePanel === "rooms") : effectiveDesktopSidebarPanel === "rooms"}
+              onMouseEnter={() => previewDesktopPanel("rooms")}
+              onFocus={() => previewDesktopPanel("rooms")}
+              onClick={() => isMobileViewport ? toggleMobilePanel("rooms") : toggleDesktopPanel("rooms")}
+              icon="M5 6h14M5 12h14M5 18h14"/>
           </div>
+          {showSelectIntro && mode === "select" && (
+            <div className="sidebar-select-intro" role="status" aria-live="polite">
+              <div className="sidebar-select-intro-title">
+                <span>Select & Edit</span>
+                <strong>S</strong>
+              </div>
+              <p>Select walls and objects to edit or move.</p>
+              <div className="sidebar-select-intro-list-title">What you can do</div>
+              <ul className="sidebar-select-intro-list">
+                <li>Select walls</li>
+                <li>Move objects</li>
+                <li>Adjust dimensions</li>
+                <li>Rotate items</li>
+              </ul>
+            </div>
+          )}
         </div>
 
+        <div className={`sidebar-popout${effectiveDesktopSidebarPanel === "furniture" ? " sidebar-popout-furniture" : ""}${isMobileViewport && mobileControlsOpen ? " mobile-visible" : ""}`}>
+          <div onMouseEnter={clearDesktopPanelTimer} onMouseLeave={scheduleDesktopPanelClose}>
+          {activeDesktopPanelMeta && !isMobileViewport && (
+            <div className="desktop-sidebar-panel">
+              <div className="sidebar-header">
+                <div className="sidebar-popout-summary">
+                  <span>{activeDesktopPanelMeta.label}</span>
+                  <strong>{activeDesktopPanelMeta.shortcut}</strong>
+                </div>
+                <p className="sidebar-popout-hint">{activeDesktopPanelMeta.description}</p>
+              </div>
+              {activeDesktopPanelMeta.bullets && (
+                <div className="sidebar-section desktop-sidebar-card desktop-sidebar-card-furniture">
+                  <div className="sidebar-section-title">What You Can Do</div>
+                  <ul className="desktop-sidebar-bullet-list">
+                    {activeDesktopPanelMeta.bullets.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {effectiveDesktopSidebarPanel === "snap" && (
+                <div className="sidebar-section desktop-sidebar-card">
+                  <div className="sidebar-section-title">Grid & Snap</div>
+                  <div className="snap-toggle-row">
+                    <span className="snap-toggle-label">Snap to Grid</span>
+                    <button className={`snap-toggle-btn${snapEnabled?" on":""}`} onClick={()=>setSnapEnabled(v=>!v)}>
+                      <span className="snap-toggle-thumb"/>
+                    </button>
+                  </div>
+                  <div className="grid-size-label">Grid size</div>
+                  <div className="grid-size-options">
+                    {GRID_SIZES.map(({px,label})=>(
+                      <button key={px} className={`grid-size-btn${gridPx===px?" active":""}`} onClick={()=>setGridPx(px)}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {effectiveDesktopSidebarPanel === "wall" && (
+                <div className="sidebar-section desktop-sidebar-card">
+                  <div className="sidebar-section-title">Wall Settings</div>
+                  <ThicknessSlider value={wallThickness} onChange={applyGlobalThickness}/>
+                </div>
+              )}
+              {effectiveDesktopSidebarPanel === "actions" && (
+                <div className="sidebar-section desktop-sidebar-card">
+                  <div className="sidebar-section-title">Actions</div>
+                  {mode==="draw" && <ToolBtn label="Cancel Drawing" disabled={!hasDraft} icon="M18 6L6 18M6 6l12 12" onClick={cancelDraft}/>}
+                  <ToolBtn label="Export PNG" icon="M4 16l4-4 4 4 4-8 4 8M3 20h18" onClick={exportImage} disabled={!hasRooms}/>
+                  <ToolBtn label="Clear Plan" danger icon="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" onClick={handleClearAll} disabled={!hasDraft&&!hasRooms}/>
+                </div>
+              )}
+              {effectiveDesktopSidebarPanel === "furniture" && (
+                <div className="sidebar-section desktop-sidebar-card">
+                  <div className="sidebar-section-title">Furniture</div>
+                  <div className="desktop-sidebar-scroll-shell furniture-scroll-shell">
+                    <FurnitureCatalogue
+                      onSelect={(item) => {
+                        const currentKey = getPendingKey(pendingFurniture);
+                        const nextKey = getModelKey(item.model ?? item);
+                        setPendingFurniture(currentKey === nextKey ? null : item);
+                        if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
+                          onboardingTour.setStep("select-furniture");
+                        }
+                      }}
+                      pending={pendingFurniture}
+                    />
+                  </div>
+                  {selFurn && mode!=="furniture" && (
+                    <div className="desktop-sidebar-inline-panel">
+                      <div className="sidebar-section-title">Selected Furniture</div>
+                      <FurniturePanel
+                        item={selFurn}
+                        onRotate={()=>rotateFurniture(selFurn.id)}
+                        onDelete={()=>deleteFurniture(selFurn.id)}
+                        onColorChange={c=>updateFurnitureColor(selFurn.id,c)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {effectiveDesktopSidebarPanel === "rooms" && (
+                <div className="room-list desktop-sidebar-room-list">
+                  {hasRooms && <div className="room-list-title">Plan Elements ({rooms.length})</div>}
+                  {rooms.map(room=>{
+                    const aM2  = (room.area/(PX_PER_M*PX_PER_M)).toFixed(1);
+                    const furn = furniture.filter(f=>f.roomId===room.id).length;
+                    const ops  = room.walls.reduce((s,w)=>s+w.openings.length,0);
+                    const isA  = selectedRoom?.roomId===room.id;
+                    return (
+                      <div key={room.id} className={`room-item${isA?" room-item-active":""}`}
+                        onClick={()=>setSelectedRoom({roomId:room.id})}
+                        style={{borderLeft:`3px solid ${room.floor?.color??'#c9a96e'}44`}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div className="room-item-label">{room.name}</div>
+                          <div className="room-item-meta">
+                            {aM2} m²{ops>0?` · ${ops} opening${ops!==1?"s":""}`:""}
+                            {furn>0?` · ${furn} item${furn!==1?"s":""}` :""}
+                          </div>
+                        </div>
+                        <button className="room-delete-btn" onClick={e=>{e.stopPropagation();deleteRoom(room.id);}}>×</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          </div>
+
+          <div className="mobile-editor-menu-actions">
+            <button
+              type="button"
+              onClick={() => setSaveModalOpen(true)}
+              disabled={isSaving}
+              className="canvas-action-btn canvas-action-btn-save"
+            >
+              <SaveOutlined />
+              {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={switchTo3D}
+              disabled={isSaving}
+              data-tour="planner-switch-3d"
+              className="canvas-action-btn canvas-action-btn-view"
+            >
+              Switch to 3D
+            </button>
+            <div className="canvas-nav-segment" role="group" aria-label="Editor navigation">
+              <button
+                type="button"
+                onClick={handleDashboard}
+                disabled={isSaving}
+                className="canvas-segment-btn"
+              >
+                <AppstoreOutlined />
+                Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={isSaving}
+                className="canvas-segment-btn canvas-segment-btn-danger"
+              >
+                <LogoutOutlined />
+                Logout
+              </button>
+            </div>
+          </div>
+
+        <div className="sidebar-mobile-legacy-content">
         {/* Tools */}
-        <div className="sidebar-section">
+        <div className="sidebar-section sidebar-main-tools-section">
           <div className="sidebar-section-title">Tools</div>
           <ToolBtn label="Draw Room"     shortcut="D" active={mode==="draw"} data-tour="planner-draw-room"
             icon="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
@@ -2192,7 +2836,7 @@ export default function RoomCanvas({ initialPlan = null }) {
             }}/>
           <ToolBtn label="Select & Edit" shortcut="S" active={mode==="select"} data-tour="planner-select-edit"
             icon="M5 3l14 9-7 1-3 7z"
-            onClick={()=>{setMode("select");cancelDraft();}}/>
+            onClick={activateSelectMode}/>
           <ToolBtn label="Place Door"    shortcut="O" active={mode==="door"} disabled={!hasRooms} data-tour="planner-place-door"
             icon="M3 21V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v16M9 21V10h6v11"
             onClick={()=>{
@@ -2225,14 +2869,16 @@ export default function RoomCanvas({ initialPlan = null }) {
             onClick={()=>setSaveModalOpen(true)}/>
           <ToolBtn label="Export PNG" icon="M4 16l4-4 4 4 4-8 4 8M3 20h18"
             onClick={exportImage} disabled={!hasRooms}/>
+          <ToolBtn label="Clear Plan" danger icon="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
+            onClick={handleClearAll} disabled={!hasDraft&&!hasRooms}/>
         </div>
 
         <div className="sidebar-divider"/>
 
         {/* Undo / Redo */}
-        <div className="sidebar-section">
+        <div className="sidebar-section mobile-history-section">
           <div className="sidebar-section-title">History</div>
-          <div style={{display:"flex",gap:4}}>
+          <div className="history-actions">
             <ToolBtn label="Undo" shortcut="⌘Z" icon="M9 14L4 9l5-5M4 9h10.5a4.5 4.5 0 0 1 0 9H11" onClick={undo} disabled={!canUndo}/>
             <ToolBtn label="Redo" shortcut="⌘Y" icon="M15 14l5-5-5-5M19 9H8.5a4.5 4.5 0 0 0 0 9H13" onClick={redo} disabled={!canRedo}/>
           </div>
@@ -2398,7 +3044,10 @@ export default function RoomCanvas({ initialPlan = null }) {
           {mode==="draw" && <>
             <ToolBtn label="Cancel Drawing" disabled={!hasDraft} icon="M18 6L6 18M6 6l12 12" onClick={cancelDraft}/>
           </>}
-          <ToolBtn label="Clear All" danger disabled={!hasDraft&&!hasRooms} icon="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" onClick={clearAll}/>
+          <ToolBtn label="Export PNG" icon="M4 16l4-4 4 4 4-8 4 8M3 20h18"
+            className="desktop-only-tool"
+            onClick={exportImage} disabled={!hasRooms}/>
+          <ToolBtn label="Clear All" danger disabled={!hasDraft&&!hasRooms} icon="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" onClick={handleClearAll}/>
         </div>
 
         <div className="sidebar-divider"/>
@@ -2429,13 +3078,218 @@ export default function RoomCanvas({ initialPlan = null }) {
           })}
           {!hasRooms&&!hasDraft&&<div style={{padding:"8px",fontSize:"11px",color:"rgba(122,112,104,0.5)",textAlign:"center"}}>No rooms or walls yet</div>}
         </div>
+        </div>
+        </div>
       </aside>
+
+      {isMobileViewport && mobileControlsOpen && (
+        <>
+          <div className="mobile-dialog-backdrop" onPointerDown={collapseMobileControls} />
+          <div className="sidebar-mobile-full-content" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="sidebar-header mobile-panel-header">
+              <div className="mobile-panel-brand">
+                <div className="sidebar-logo">LUMIERE<span>Maison Studio</span></div>
+                <div className="mobile-panel-caption">{mobileProjectTitle}</div>
+              </div>
+              <button
+                type="button"
+                className="mobile-panel-close"
+                onClick={collapseMobileControls}
+                aria-label="Close mobile panel"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="sidebar-section mobile-panel-intro">
+              <div className="sidebar-popout-summary">
+                <span>{activeMobilePanelMeta.label}</span>
+                <strong>{activeMobilePanelMeta.shortcut}</strong>
+              </div>
+              <p className="sidebar-popout-hint">{activeMobilePanelMeta.description}</p>
+            </div>
+
+            {mobilePanel === "tools" && (
+              <>
+                <div className="sidebar-section">
+                  <div className="sidebar-section-title">Active Tool</div>
+                  <div className="selection-info mobile-current-mode-card">
+                    <div>{mobileModeLabel}</div>
+                    <div style={{ color: "rgba(244, 237, 227, 0.58)", marginTop: 6 }}>{activeModeHint}</div>
+                  </div>
+                </div>
+                <div className="sidebar-section mobile-history-section">
+                  <div className="sidebar-section-title">History</div>
+                  <div className="history-actions">
+                    <ToolBtn label="Undo" shortcut="Z" icon="M9 14L4 9l5-5M4 9h10.5a4.5 4.5 0 0 1 0 9H11" onClick={undo} disabled={!canUndo}/>
+                    <ToolBtn label="Redo" shortcut="Y" icon="M15 14l5-5-5-5M19 9H8.5a4.5 4.5 0 0 0 0 9H13" onClick={redo} disabled={!canRedo}/>
+                  </div>
+                </div>
+                {mode==="furniture" && (
+                  <div className="sidebar-section">
+                    <div className="sidebar-section-title">Furniture</div>
+                    <FurnitureCatalogue
+                      onSelect={(item) => {
+                        const currentKey = getPendingKey(pendingFurniture);
+                        const nextKey = getModelKey(item.model ?? item);
+                        setPendingFurniture(currentKey === nextKey ? null : item);
+                        if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
+                          onboardingTour.setStep("select-furniture");
+                        }
+                      }}
+                      pending={pendingFurniture}
+                    />
+                  </div>
+                )}
+                {selFurn && mode!=="furniture" && (
+                  <div className="sidebar-section">
+                    <div className="sidebar-section-title">Selected Furniture</div>
+                    <FurniturePanel item={selFurn} onRotate={()=>rotateFurniture(selFurn.id)} onDelete={()=>deleteFurniture(selFurn.id)} onColorChange={c=>updateFurnitureColor(selFurn.id,c)}/>
+                  </div>
+                )}
+                {selRoom && (
+                  <div className="sidebar-section">
+                    <div className="sidebar-section-title">Room Properties</div>
+                    <RoomPanel
+                      room={selRoom}
+                      onRename={n=>renameRoom(selRoom.id,n)}
+                      onPreset={t=>applyRoomPreset(selRoom.id,t)}
+                      onFloorColor={c=>updateFloor(selRoom.id,{color:c})}
+                      onFloorPattern={p=>updateFloor(selRoom.id,{pattern:p})}
+                      onFloorScale={s=>updateFloor(selRoom.id,{scale:s})}
+                      onFloorRotation={r=>updateFloor(selRoom.id,{rotation:r})}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {mobilePanel === "snap" && (
+              <div className="sidebar-section">
+                <div className="sidebar-section-title">Grid & Snap</div>
+                <div className="snap-toggle-row">
+                  <span className="snap-toggle-label">Snap to Grid</span>
+                  <button className={`snap-toggle-btn${snapEnabled?" on":""}`} onClick={()=>setSnapEnabled(v=>!v)}>
+                    <span className="snap-toggle-thumb"/>
+                  </button>
+                </div>
+                <div className="grid-size-label">Grid size</div>
+                <div className="grid-size-options">
+                  {GRID_SIZES.map(({px,label})=>(
+                    <button key={px} className={`grid-size-btn${gridPx===px?" active":""}`} onClick={()=>setGridPx(px)}>{label}</button>
+                  ))}
+                </div>
+                {displayPos && (
+                  <div className="snap-coords">
+                    <span className="snap-coord-label">cursor</span>
+                    <span>{(displayPos.x/PX_PER_M).toFixed(2)} m</span>
+                    <span style={{opacity:0.3}}>x</span>
+                    <span>{(displayPos.y/PX_PER_M).toFixed(2)} m</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mobilePanel === "wall" && (
+              <>
+                <div className="sidebar-section">
+                  <div className="sidebar-section-title">Wall Settings</div>
+                  <ThicknessSlider value={wallThickness} onChange={applyGlobalThickness}/>
+                </div>
+                {(mode==="door"||mode==="window") && (
+                  <div className="sidebar-section">
+                    <div className="sidebar-section-title">{mode==="door"?"Door":"Window"} Size</div>
+                    <div className="thickness-control">
+                      <div className="thickness-label">
+                        <span>Width</span>
+                        <span className="thickness-value">{Math.round(((mode==="door"?doorWidth:windowWidth)/PX_PER_M)*100)} cm</span>
+                      </div>
+                      <input type="range" min={20} max={80} value={mode==="door"?doorWidth:windowWidth} onChange={e=>mode==="door"?setDoorWidth(Number(e.target.value)):setWindowWidth(Number(e.target.value))} className="thickness-slider"/>
+                    </div>
+                  </div>
+                )}
+                {selWallObj && (
+                  <div className="sidebar-section">
+                    <div className="sidebar-section-title">Selected Wall</div>
+                    <div className="selection-info">
+                      Length: {(selWallObj.length/PX_PER_M).toFixed(2)} m
+                      {selWallObj.openings.map(op=>(
+                        <div
+                          key={op.id}
+                          className="opening-tag"
+                          onClick={()=>setSelectedOpening({ roomId: selectedWall.roomId, wallId: selWallObj.id, openingId: op.id })}
+                          style={{
+                            cursor: "pointer",
+                            borderColor: selectedOpening?.openingId === op.id ? "rgba(255,216,108,0.8)" : undefined,
+                            background: selectedOpening?.openingId === op.id ? "rgba(255,216,108,0.08)" : undefined,
+                          }}
+                        >
+                          {op.type==="door"?"Door":"Window"} @ {Math.round(op.t*100)}%
+                          <button className="opening-del" onClick={(e)=>{e.stopPropagation();deleteOpening(selectedWall.roomId,selWallObj.id,op.id);}}>x</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {mobilePanel === "actions" && (
+              <div className="sidebar-section mobile-project-actions">
+                <div className="sidebar-section-title">Project</div>
+                <ToolBtn label="Save Project" icon="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zM7 3v5h8V3M8 17h8" onClick={()=>setSaveModalOpen(true)}/>
+                <ToolBtn label="Switch to 3D" icon="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" onClick={switchTo3D} disabled={isSaving}/>
+                <ToolBtn label="Export PNG" icon="M4 16l4-4 4 4 4-8 4 8M3 20h18" onClick={exportImage} disabled={!hasRooms}/>
+                {mode==="draw" && <ToolBtn label="Cancel Drawing" icon="M18 6L6 18M6 6l12 12" onClick={cancelDraft} disabled={!hasDraft}/>}
+                <ToolBtn label="Clear Plan" danger icon="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" onClick={handleClearAll} disabled={!hasDraft&&!hasRooms}/>
+                <ToolBtn label="Log Out" danger icon="M10 17l5-5-5-5M15 12H3M13 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" onClick={handleLogout} disabled={isSaving}/>
+              </div>
+            )}
+
+            {mobilePanel === "rooms" && (
+              <>
+                <div className="sidebar-section">
+                  <div className="sidebar-section-title">Plan Summary</div>
+                  <div className="room-stats mobile-summary-stats">
+                    <div className="room-stat"><span className="room-stat-label">Rooms</span><span className="room-stat-value">{rooms.length}</span></div>
+                    <div className="room-stat"><span className="room-stat-label">Items</span><span className="room-stat-value">{furniture.length}</span></div>
+                    <div className="room-stat"><span className="room-stat-label">Wall</span><span className="room-stat-value">{Math.round((wallThickness/PX_PER_M)*100)} cm</span></div>
+                  </div>
+                </div>
+                <div className="room-list">
+                  {hasRooms && <div className="room-list-title">Plan Elements ({rooms.length})</div>}
+                  {rooms.map(room=>{
+                    const aM2  = (room.area/(PX_PER_M*PX_PER_M)).toFixed(1);
+                    const furn = furniture.filter(f=>f.roomId===room.id).length;
+                    const ops  = room.walls.reduce((s,w)=>s+w.openings.length,0);
+                    const isA  = selectedRoom?.roomId===room.id;
+                    return (
+                      <div key={room.id} className={`room-item${isA?" room-item-active":""}`} onClick={()=>setSelectedRoom({roomId:room.id})} style={{borderLeft:`3px solid ${room.floor?.color??'#c9a96e'}44`}}>
+                        <div style={{flex:1}}>
+                          <div className="room-item-label">{room.name}</div>
+                          <div className="room-item-meta">
+                            {aM2} m²{ops>0?` · ${ops} opening${ops!==1?"s":""}`:""}
+                            {furn>0?` · ${furn} item${furn!==1?"s":""}` :""}
+                          </div>
+                        </div>
+                        <button className="room-delete-btn" onClick={e=>{e.stopPropagation();deleteRoom(room.id);}}>x</button>
+                      </div>
+                    );
+                  })}
+                  {!hasRooms&&!hasDraft&&<div style={{padding:"8px",fontSize:"11px",color:"rgba(122,112,104,0.5)",textAlign:"center"}}>No rooms or walls yet</div>}
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
 
       {/* ══════════════════════════════ CANVAS */}
       <div className="canvas-area" onPointerDown={collapseMobileControls}>
         <div className="canvas-topbar">
           <div className="topbar-breadcrumb">
-            <strong>Floor Plan</strong>
+            <strong className="topbar-title-desktop">Floor Plan</strong>
+            <strong className="topbar-title-mobile">{mobileProjectTitle}</strong>
             <span className={`tool-badge tool-badge-${mode}`}>
               {{draw:"✏ Draw",select:"↖ Edit",door:"🚪 Door",window:"🪟 Window",furniture:"🛋 Furniture"}[mode]}
             </span>
@@ -2482,6 +3336,26 @@ export default function RoomCanvas({ initialPlan = null }) {
               className="canvas-action-btn canvas-action-btn-view"
             >
               Switch to 3D View
+            </button>
+          </div>
+          <div className="canvas-topbar-mobile-actions" role="group" aria-label="Mobile editor actions">
+            <button
+              type="button"
+              className="canvas-topbar-icon-btn"
+              onClick={undo}
+              disabled={!canUndo}
+              aria-label="Undo"
+            >
+              <UndoOutlined />
+            </button>
+            <button
+              type="button"
+              className="canvas-topbar-icon-btn"
+              onClick={redo}
+              disabled={!canRedo}
+              aria-label="Redo"
+            >
+              <RedoOutlined />
             </button>
           </div>
         </div>

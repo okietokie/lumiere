@@ -40,7 +40,17 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(_normalize_password(password), hashed_password.encode("utf-8"))
+    try:
+        return bcrypt.checkpw(_normalize_password(password), hashed_password.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def verify_password_legacy(password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def create_access_token(*, user_id: str, email: str, name: str | None = None) -> str:

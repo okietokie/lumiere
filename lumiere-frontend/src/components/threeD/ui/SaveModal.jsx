@@ -9,6 +9,7 @@ import {
 import { gsap } from 'gsap';
 import { COLORS } from '../../../utils/colors';
 import RecordingPanel from './RecordingPanel';
+import useThemedDialogs from '../../../hooks/useThemedDialogs.jsx';
 
 const C = {
   bg: COLORS.surface,
@@ -52,6 +53,7 @@ export default function SaveModal({
   autosaveEnabled, setAutosaveEnabled,
   recorderProps,
 }) {
+  const dialogs = useThemedDialogs();
   const [localName, setLocalName] = useState(projectName);
   const [renameChoiceOpen, setRenameChoiceOpen] = useState(false);
   const btnRef = useRef(null);
@@ -74,7 +76,11 @@ export default function SaveModal({
       setProjectName(nextName);
       setRenameChoiceOpen(false);
     } catch (error) {
-      alert(error?.response?.data?.detail || error?.message || 'Failed to save project.');
+      await dialogs.alert({
+        title: 'Save Failed',
+        content: error?.response?.data?.detail || error?.message || 'Failed to save project.',
+        tone: 'danger',
+      });
     }
   };
 

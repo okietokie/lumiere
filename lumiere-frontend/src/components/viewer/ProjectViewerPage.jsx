@@ -13,6 +13,7 @@ import SurfaceMaterial from '../threeD/materials/SurfaceMaterial';
 import SceneLighting from '../threeD/lighting/SceneLighting';
 import { getTimeOfDayLighting, MOOD_PRESETS } from '../../hooks/useLighting';
 import { fetchModelManifest } from '../../hooks/useModelPrefetch';
+import useThemedDialogs from '../../hooks/useThemedDialogs.jsx';
 
 const VIEWER_BACKDROP = '#050505';
 const VIEWER_FOG = '#050505';
@@ -278,6 +279,7 @@ function ProjectFurniture({ item }) {
 }
 
 export default function ProjectViewerPage() {
+  const dialogs = useThemedDialogs();
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
@@ -324,10 +326,14 @@ export default function ProjectViewerPage() {
   const projectScene = project?.scene_data || project?.scene;
   const sceneBounds = useMemo(() => getSceneBounds(projectScene), [projectScene]);
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     const editPath = `/user/room?projectId=${projectId}`;
     if (!getAccessToken()) {
-      alert('Please log in to edit this Lumiere Maison model.');
+      await dialogs.alert({
+        title: 'Login Required',
+        content: 'Please log in to edit this Lumiere Maison model.',
+        tone: 'warning',
+      });
       navigate(`/login?redirect=${encodeURIComponent(editPath)}`);
       return;
     }

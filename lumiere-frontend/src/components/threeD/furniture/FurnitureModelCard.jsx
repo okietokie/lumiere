@@ -64,7 +64,7 @@ function RotatingModel({ url, filename }) {
   );
 }
 
-function CardPreview({ url, filename }) {
+export function CardPreview({ url, filename }) {
   const [ready, setReady] = useState(false);
 
   return (

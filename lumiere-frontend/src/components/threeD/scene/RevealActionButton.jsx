@@ -10,6 +10,7 @@ export default function RevealActionButton({
   dataTour,
   endAdornment = null,
   expandedWidthOverride = null,
+  compactSidebar = false,
 }) {
   const revealCollapsedSize = 44;
   const revealExpandedWidth = 124;
@@ -47,6 +48,12 @@ export default function RevealActionButton({
   const iconColor = active ? COLORS.background : textColor;
 
   if (isSidebar) {
+    const sidebarButtonSize = compactSidebar ? 48 : 62;
+    const sidebarOrbSize = compactSidebar ? 38 : 50;
+    const sidebarOrbRadius = compactSidebar ? 13 : 18;
+    const sidebarTopOffset = compactSidebar ? 5 : 5;
+    const sidebarIconSize = compactSidebar ? 18 : 24;
+
     return (
       <button
         type="button"
@@ -62,8 +69,8 @@ export default function RevealActionButton({
         }}
         style={{
           position: "relative",
-          width: 62,
-          height: 62,
+          width: sidebarButtonSize,
+          height: sidebarButtonSize,
           padding: 0,
           border: "none",
           background: "transparent",
@@ -80,10 +87,10 @@ export default function RevealActionButton({
         <span
           style={{
             position: "absolute",
-            top: 5,
-            width: 50,
-            height: 50,
-            borderRadius: "50%",
+            top: sidebarTopOffset,
+            width: sidebarOrbSize,
+            height: sidebarOrbSize,
+            borderRadius: sidebarOrbRadius,
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
@@ -98,7 +105,7 @@ export default function RevealActionButton({
             transition: "transform 0.3s ease, background 0.3s ease, box-shadow 0.3s ease",
           }}
         >
-          {showIcon && <Icon style={{ fontSize: 24, color: iconColor }} />}
+          {showIcon && <Icon style={{ fontSize: sidebarIconSize, color: iconColor }} />}
         </span>
         <span
           style={{
@@ -109,7 +116,7 @@ export default function RevealActionButton({
             opacity: expanded ? 1 : 0,
             transition: "bottom 0.3s ease, opacity 0.3s ease",
             color: active ? COLORS.action : textColor,
-            fontSize: 10,
+            fontSize: compactSidebar ? 9 : 10,
             fontWeight: 800,
             letterSpacing: "0.04em",
             textTransform: "uppercase",

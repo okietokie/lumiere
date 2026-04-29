@@ -1,13 +1,22 @@
-from pymongo import ASCENDING, DESCENDING, ssl_support
+import certifi
+from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import PyMongoError
 from motor.motor_asyncio import AsyncIOMotorClient
+import logging
 
 from app.core.config import MONGO_DB_NAME, MONGO_URI
 
-if getattr(ssl_support, "HAVE_PYSSL", False):
-    ssl_support.HAVE_PYSSL = False
+logger = logging.getLogger(__name__)
 
-client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI is not set. Check the backend environment configuration.")
+
+client = AsyncIOMotorClient(
+    MONGO_URI,
+    serverSelectionTimeoutMS=5000,
+    tls=True,
+    tlsCAFile=certifi.where(),
+)
 database = client[MONGO_DB_NAME]
 
 users_collection = database["users"]
@@ -19,7 +28,8 @@ async def ping_database() -> bool:
     try:
         await client.admin.command("ping")
         return True
-    except PyMongoError:
+    except PyMongoError as exc:
+        logger.error("MongoDB ping failed: %s", exc)
         return False
 
 

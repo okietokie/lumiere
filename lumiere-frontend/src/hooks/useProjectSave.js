@@ -14,6 +14,7 @@ import {
 import { createEmptySceneBudget } from '../utils/budgetContract';
 import { normalizeShareUrl } from '../utils/shareUrl';
 import { useBudgetStore } from '../stores/useBudgetStore';
+import useThemedDialogs from './useThemedDialogs.jsx';
 
 const AUTOSAVE_MS = 30_000;
 const DEFAULT_PROJECT_NAME = 'Untitled Room';
@@ -270,6 +271,7 @@ export default function useProjectSave({
   skipInitialLatestLoad = false,
   localMutationVersionRef = null,
 }) {
+  const dialogs = useThemedDialogs();
   const [saveStatus, setSaveStatus] = useState('idle');
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
   const [shareUrl, setShareUrl] = useState('');
@@ -361,7 +363,11 @@ export default function useProjectSave({
       requestAnimationFrame(() => {
         const url = captureSnapshot();
         if (!url) {
-          alert('Snapshot failed - make sure the 3D scene is visible.');
+          dialogs.alert({
+            title: 'Snapshot Unavailable',
+            content: 'Snapshot failed. Make sure the 3D scene is visible before downloading.',
+            tone: 'danger',
+          });
           return;
         }
         const link = document.createElement('a');
@@ -370,7 +376,7 @@ export default function useProjectSave({
         link.click();
       });
     });
-  }, [captureSnapshot, projectName]);
+  }, [captureSnapshot, dialogs, projectName]);
 
   const exportJSON = useCallback(() => {
     const scene = getSceneData();
@@ -408,13 +414,17 @@ export default function useProjectSave({
           setShareUrl('');
           setModelAssets(EMPTY_MODEL_ASSETS);
         } catch {
-          alert('Invalid project file.');
+          dialogs.alert({
+            title: 'Import Failed',
+            content: 'Invalid project file.',
+            tone: 'danger',
+          });
         }
       };
       reader.readAsText(file);
     };
     input.click();
-  }, [hydrateBudgetFromScene, setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
+  }, [dialogs, hydrateBudgetFromScene, setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
   const loadProject = useCallback(async (projectId, options = {}) => {
     const startMutationVersion = getLocalMutationVersion();

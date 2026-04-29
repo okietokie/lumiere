@@ -1427,99 +1427,101 @@ const AntTopbar = ({ user, onLogout, activeTab, setActiveTab, onCreateNew, onSea
   const mobileItems = navItems.map(({ id, label }) => ({ key: id, label }));
 
   return (
-    <Header style={{ ...antdStyles.header, padding: compact ? "0 16px" : "0 32px" }}>
-      <Flex align="center" justify="space-between" gap={16} style={{ height: "100%" }}>
-        <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
-          {compact && (
-            <Dropdown
-              menu={{
-                items: mobileItems,
-                selectedKeys: [activeTab],
-                onClick: ({ key }) => setActiveTab(key),
+    <>
+      <Header style={{ ...antdStyles.header, padding: compact ? "0 16px" : "0 32px" }}>
+        <Flex align="center" justify="space-between" gap={16} style={{ height: "100%" }}>
+          <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
+            {compact && (
+              <Dropdown
+                menu={{
+                  items: mobileItems,
+                  selectedKeys: [activeTab],
+                  onClick: ({ key }) => setActiveTab(key),
+                }}
+                trigger={["click"]}
+              >
+                <Button
+                  type="text"
+                  icon={<Grid2X2 size={18} />}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 18,
+                    color: palette.text,
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                />
+              </Dropdown>
+            )}
+            <Input
+              allowClear
+              prefix={<Search size={17} color="rgba(234,216,195,0.38)" />}
+              placeholder="Search projects"
+              onChange={(event) => onSearch?.(event.target.value)}
+              style={{
+                maxWidth: compact ? "100%" : 700,
+                height: 48,
+                border: 0,
+                borderRadius: 24,
+                color: palette.text,
+                background: "rgba(255,255,255,0.045)",
+                boxShadow: "inset 0 1px 0 rgba(234,216,195,0.035)",
               }}
+            />
+          </Flex>
+          <Space size={12}>
+            {!compact && (
+              <AntDashboardButton variant="primary" onClick={onCreateNew}>
+                New Project
+              </AntDashboardButton>
+            )}
+            <Button
+              type="text"
+              aria-label="Notifications"
+              icon={<Bell size={17} />}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                color: "rgba(234,216,195,0.5)",
+                background: "rgba(255,255,255,0.035)",
+              }}
+            />
+            <Dropdown
               trigger={["click"]}
+              menu={{
+                items: accountItems,
+                onClick: ({ key }) => {
+                  if (key === "logout") onLogout?.();
+                  if (key === "settings") setActiveTab("settings");
+                },
+              }}
             >
               <Button
                 type="text"
-                icon={<Grid2X2 size={18} />}
                 style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 18,
+                  height: 48,
+                  borderRadius: 24,
+                  paddingInline: 12,
                   color: palette.text,
-                  background: "rgba(255,255,255,0.04)",
+                  background: "rgba(255,255,255,0.035)",
                 }}
-              />
+              >
+                <Space size={10}>
+                  <Avatar
+                    size={30}
+                    icon={<UserCircle size={20} />}
+                    style={{ color: palette.accent, background: palette.accentSoft }}
+                  />
+                  {!compact && <Text style={{ color: palette.text }}>{user?.name ?? "loco"}</Text>}
+                  <ChevronDown size={14} color="rgba(234,216,195,0.45)" />
+                </Space>
+              </Button>
             </Dropdown>
-          )}
-          <Input
-            allowClear
-            prefix={<Search size={17} color="rgba(234,216,195,0.38)" />}
-            placeholder="Search projects"
-            onChange={(event) => onSearch?.(event.target.value)}
-            style={{
-              maxWidth: compact ? "100%" : 700,
-              height: 48,
-              border: 0,
-              borderRadius: 24,
-              color: palette.text,
-              background: "rgba(255,255,255,0.045)",
-              boxShadow: "inset 0 1px 0 rgba(234,216,195,0.035)",
-            }}
-          />
+          </Space>
         </Flex>
-        <Space size={12}>
-          {!compact && (
-            <AntDashboardButton variant="primary" onClick={onCreateNew}>
-              New Project
-            </AntDashboardButton>
-          )}
-          <Button
-            type="text"
-            aria-label="Notifications"
-            icon={<Bell size={17} />}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              color: "rgba(234,216,195,0.5)",
-              background: "rgba(255,255,255,0.035)",
-            }}
-          />
-          <Dropdown
-            trigger={["click"]}
-            menu={{
-              items: accountItems,
-              onClick: ({ key }) => {
-                if (key === "logout") onLogout?.();
-                if (key === "settings") setActiveTab("settings");
-              },
-            }}
-          >
-            <Button
-              type="text"
-              style={{
-                height: 48,
-                borderRadius: 24,
-                paddingInline: 12,
-                color: palette.text,
-                background: "rgba(255,255,255,0.035)",
-              }}
-            >
-              <Space size={10}>
-                <Avatar
-                  size={30}
-                  icon={<UserCircle size={20} />}
-                  style={{ color: palette.accent, background: palette.accentSoft }}
-                />
-                {!compact && <Text style={{ color: palette.text }}>{user?.name ?? "loco"}</Text>}
-                <ChevronDown size={14} color="rgba(234,216,195,0.45)" />
-              </Space>
-            </Button>
-          </Dropdown>
-        </Space>
-      </Flex>
-    </Header>
+      </Header>
+    </>
   );
 };
 
@@ -1987,54 +1989,42 @@ const AntActivityList = ({ activities, loading, onOpenProject }) => (
   </Card>
 );
 
-const AntMobileBottomNav = ({ activeTab, setActiveTab, onCreateNew }) => (
-  <>
-    <Flex
-      justify="space-around"
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 40,
-        padding: "8px 8px calc(env(safe-area-inset-bottom, 0px) + 8px)",
-        background: "rgba(9,8,7,0.9)",
-        backdropFilter: "blur(24px)",
-      }}
-      className="lg:hidden"
-    >
-      {navItems.map(({ id, label, icon: Icon }) => (
-        <Button
-          key={id}
-          type="text"
-          aria-label={label}
-          onClick={() => setActiveTab(id)}
-          icon={<Icon size={18} />}
-          style={{
-            width: 52,
-            height: 52,
-            borderRadius: 18,
-            color: activeTab === id ? palette.accent : "rgba(234,216,195,0.42)",
-            background: activeTab === id ? palette.accentSoft : "transparent",
-          }}
-        />
-      ))}
-    </Flex>
-    <Button
-      onClick={onCreateNew}
-      icon={<Plus size={17} />}
-      style={{
-        ...primaryButtonStyle,
-        position: "fixed",
-        right: 16,
-        bottom: "calc(env(safe-area-inset-bottom, 0px) + 76px)",
-        zIndex: 41,
-      }}
-      className="lg:hidden"
-    >
-      New
-    </Button>
-  </>
+const AntMobileBottomNav = ({ activeTab, setActiveTab }) => (
+  <Flex
+    justify="space-around"
+    style={{
+      position: "fixed",
+      left: 12,
+      right: 12,
+      bottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
+      zIndex: 40,
+      padding: "10px 10px calc(env(safe-area-inset-bottom, 0px) + 10px)",
+      background: "linear-gradient(180deg, rgba(15,12,11,0.94), rgba(8,7,6,0.96))",
+      border: "1px solid rgba(255,255,255,0.06)",
+      borderRadius: 28,
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 24px 44px rgba(0,0,0,0.32)",
+      backdropFilter: "blur(24px)",
+    }}
+    className="lg:hidden"
+  >
+    {navItems.map(({ id, label, icon: Icon }) => (
+      <Button
+        key={id}
+        type="text"
+        aria-label={label}
+        onClick={() => setActiveTab(id)}
+        icon={<Icon size={18} />}
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 16,
+          color: activeTab === id ? palette.accent : "rgba(234,216,195,0.42)",
+          background: activeTab === id ? palette.accentSoft : "transparent",
+          boxShadow: activeTab === id ? "inset 0 1px 0 rgba(255,255,255,0.04)" : "none",
+        }}
+      />
+    ))}
+  </Flex>
 );
 
 const Dashboard = ({ user, onLogout }) => {
@@ -2127,8 +2117,11 @@ const Dashboard = ({ user, onLogout }) => {
     const createdProject = await createProject(payload);
     const projectId = getProjectId(createdProject);
 
-    if (onboardingTour.isActive && onboardingTour.state.step === "project-details" && projectId) {
-      onboardingTour.markProjectCreated(projectId);
+    if (projectId) {
+      if (onboardingTour.isActive && onboardingTour.state.step === "project-details") {
+        onboardingTour.markProjectCreated(projectId);
+      }
+
       navigate(`/user/room-2d?projectId=${projectId}`);
     }
 

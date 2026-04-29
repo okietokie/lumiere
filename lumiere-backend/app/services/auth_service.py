@@ -2,9 +2,10 @@ from datetime import timedelta
 
 from fastapi import HTTPException, status
 from pymongo.errors import DuplicateKeyError
+from pymongo.errors import PyMongoError
 
 from app.core.database import users_collection
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import create_access_token, hash_password, verify_password, verify_password_legacy
 from app.schemas.auth_schema import UserCreateRequest
 from app.utils.helpers import serialize_document, utcnow
 
@@ -19,7 +20,13 @@ def serialize_user(user: dict) -> dict:
 
 
 async def get_user_by_email(email: str) -> dict | None:
-    return await users_collection.find_one({"email": email.lower().strip()})
+    try:
+        return await users_collection.find_one({"email": email.lower().strip()})
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is temporarily unavailable. Please try again shortly.",
+        ) from exc
 
 
 async def create_user(payload: UserCreateRequest) -> dict:
@@ -38,6 +45,11 @@ async def create_user(payload: UserCreateRequest) -> dict:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists",
         ) from exc
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Registration is temporarily unavailable. Please try again shortly.",
+        ) from exc
     doc["_id"] = result.inserted_id
     return serialize_user(doc)
 
@@ -48,9 +60,29 @@ async def authenticate_user(email: str, password: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     stored_hash = user.get("password_hash") or user.get("hashed_password")
-    if not stored_hash or not verify_password(password, stored_hash):
+    if not stored_hash:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    return user
+
+    if verify_password(password, stored_hash):
+        return user
+
+    if verify_password_legacy(password, stored_hash):
+        upgraded_hash = hash_password(password)
+        try:
+            await users_collection.update_one(
+                {"_id": user["_id"]},
+                {
+                    "$set": {"password_hash": upgraded_hash, "updated_at": utcnow()},
+                    "$unset": {"hashed_password": ""},
+                },
+            )
+        except PyMongoError:
+            pass
+        user["password_hash"] = upgraded_hash
+        user.pop("hashed_password", None)
+        return user
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
 
 def build_auth_response(user: dict) -> dict:
@@ -70,27 +102,45 @@ def build_auth_response(user: dict) -> dict:
 
 async def store_reset_token(user_id, token: str, expires_in_minutes: int) -> None:
     expiry = utcnow() + timedelta(minutes=expires_in_minutes)
-    await users_collection.update_one(
-        {"_id": user_id},
-        {"$set": {"reset_token": token, "reset_expiry": expiry, "updated_at": utcnow()}},
-    )
+    try:
+        await users_collection.update_one(
+            {"_id": user_id},
+            {"$set": {"reset_token": token, "reset_expiry": expiry, "updated_at": utcnow()}},
+        )
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password reset is temporarily unavailable. Please try again shortly.",
+        ) from exc
 
 
 async def update_password_with_reset_token(token: str, new_password: str) -> bool:
-    user = await users_collection.find_one(
-        {
-            "reset_token": token,
-            "reset_expiry": {"$gt": utcnow()},
-        }
-    )
+    try:
+        user = await users_collection.find_one(
+            {
+                "reset_token": token,
+                "reset_expiry": {"$gt": utcnow()},
+            }
+        )
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password reset is temporarily unavailable. Please try again shortly.",
+        ) from exc
     if not user:
         return False
 
-    await users_collection.update_one(
-        {"_id": user["_id"]},
-        {
-            "$set": {"password_hash": hash_password(new_password), "updated_at": utcnow()},
-            "$unset": {"reset_token": "", "reset_expiry": "", "hashed_password": ""},
-        },
-    )
+    try:
+        await users_collection.update_one(
+            {"_id": user["_id"]},
+            {
+                "$set": {"password_hash": hash_password(new_password), "updated_at": utcnow()},
+                "$unset": {"reset_token": "", "reset_expiry": "", "hashed_password": ""},
+            },
+        )
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password reset is temporarily unavailable. Please try again shortly.",
+        ) from exc
     return True
