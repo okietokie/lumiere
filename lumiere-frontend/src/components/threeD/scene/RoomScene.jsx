@@ -148,6 +148,8 @@ const OPENING_STEP = 0.05;
 const WALL_EDGE_CONNECT_MIN_LENGTH = 0.25;
 const WALL_EDGE_CONNECT_EPSILON = 0.0001;
 const WALL_EDGE_TOUCH_CONFIRM_MS = 420;
+const PHONE_EDITOR_BREAKPOINT = 768;
+const COMPACT_EDITOR_BREAKPOINT = 1180;
 const SURFACE_SNAP_VERTICAL_THRESHOLD = 0.6;
 const SURFACE_SNAP_WALL_THRESHOLD = 1.15;
 const SURFACE_SNAP_WALL_GAP = 0.02;
@@ -690,6 +692,7 @@ export default function RoomScene({ initialScene = null }) {
   const loadingProjectIdRef = useRef(null);
   const loadProjectRef = useRef(null);
   const desktopFloatingRef = useRef(null);
+  const mobileTopbarRef = useRef(null);
   const sceneHistoryPastRef = useRef([]);
   const sceneHistoryFutureRef = useRef([]);
   const wallEdgeTouchConfirmRef = useRef(null);
@@ -704,13 +707,19 @@ export default function RoomScene({ initialScene = null }) {
   const anythingSelected = !!(selectedWallId || selectedFurnitureId || selectedLightId || selectedOpening);
 
   // Mobile detection 
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < COMPACT_EDITOR_BREAKPOINT);
   const [isTouchDevice, setIsTouchDevice] = useState(() => (
     window.matchMedia?.('(pointer: coarse)')?.matches
     || (navigator.maxTouchPoints ?? 0) > 0
   ));
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [mobileDoorEditorSection, setMobileDoorEditorSection] = useState(null);
+  const [mobileTopbarHeight, setMobileTopbarHeight] = useState(132);
+  const isPhoneViewport = viewportWidth < PHONE_EDITOR_BREAKPOINT;
+  const isTabletViewport = viewportWidth >= PHONE_EDITOR_BREAKPOINT && viewportWidth < COMPACT_EDITOR_BREAKPOINT;
+  const mobileFeatureStripTop = mobileTopbarHeight + 14;
+  const mobileFloatingPanelTop = mobileTopbarHeight + (isPhoneViewport ? 92 : 54);
   const supportsFirstPersonWalk = !isTouchDevice;
   const gizmoHelperPlacement = useMemo(() => {
     if (isMobile) {
@@ -734,7 +743,8 @@ export default function RoomScene({ initialScene = null }) {
   useEffect(() => {
     const coarseQuery = window.matchMedia?.('(pointer: coarse)');
     const handler = () => {
-      setIsMobile(window.innerWidth < 768);
+      setViewportWidth(window.innerWidth);
+      setIsMobile(window.innerWidth < COMPACT_EDITOR_BREAKPOINT);
       setIsTouchDevice(
         coarseQuery?.matches
         || (navigator.maxTouchPoints ?? 0) > 0
@@ -910,6 +920,23 @@ export default function RoomScene({ initialScene = null }) {
       ['Lights', byCategory.lights ?? 0],
     ];
   }, [budgetSummary?.byCategory]);
+  useEffect(() => {
+    if (!isMobile) return undefined;
+
+    const updateTopbarHeight = () => {
+      const nextHeight = mobileTopbarRef.current?.getBoundingClientRect?.().height;
+      if (nextHeight) {
+        setMobileTopbarHeight(Math.ceil(nextHeight));
+      }
+    };
+
+    updateTopbarHeight();
+    window.addEventListener('resize', updateTopbarHeight);
+
+    return () => {
+      window.removeEventListener('resize', updateTopbarHeight);
+    };
+  }, [isMobile, viewportWidth, budgetEnabled, isSaving, projectSave.saveStatus, projectSave.projectName]);
   const budgetRoomRows = useMemo(() => {
     const byRoom = budgetSummary?.byRoom ?? {};
     return Object.entries(byRoom)
@@ -4909,34 +4936,141 @@ export default function RoomScene({ initialScene = null }) {
 
   const mobileDisplayProjectName = projectSave.projectName?.trim() || 'Untitled Room';
   const mobileSceneChipLabel = selectedRoom?.name?.trim() || mobileDisplayProjectName;
-  const mobileBottomTabs = [
+  const compactQuickActions = [
     {
-      key: 'lights',
-      label: 'Lights',
-      icon: LightbulbRoundedIcon,
-      active: activeTab === 'lighting',
-      onClick: () => { if (!isSaving) openMobilePanel('lighting'); },
+      key: 'save',
+      label: isSaving ? 'Saving' : projectSave.saveStatus === 'saved' ? 'Saved' : 'Save',
+      copy: 'Keep work safe',
+      icon: isSaving ? <LoadingOutlined spin /> : projectSave.saveStatus === 'saved' ? <CheckOutlined /> : <SaveOutlined />,
+      accent: projectSave.saveStatus === 'saved' && !isSaving,
+      disabled: isSaving,
+      onClick: () => setSaveModalOpen(true),
+      dataTour: 'scene-save',
     },
     {
-      key: 'objects',
-      label: 'Objects',
-      icon: ChairRoundedIcon,
-      active: activeTab === 'furniture',
-      onClick: () => { if (!isSaving) openMobilePanel('furniture'); },
+      key: 'plan',
+      label: '2D Plan',
+      copy: 'Switch editor view',
+      icon: <SpaceDashboardRoundedIcon style={{ fontSize: 22 }} />,
+      accent: true,
+      disabled: isSaving,
+      onClick: switchTo2D,
+      dataTour: 'scene-switch-2d',
+    },
+    {
+      key: 'budget',
+      label: budgetEnabled ? formatMoney(budgetGrandTotal, budgetSummary.currency) : 'Budget',
+      copy: budgetEnabled ? `${budgetUnpricedCount} unpriced items` : 'Estimate your room',
+      icon: <WalletOutlined />,
+      accent: budgetEnabled,
+      disabled: isSaving,
+      onClick: () => {
+        openMobilePanel('more');
+        if (budgetEnabled) {
+          setBudgetSummaryOpen(true);
+        }
+      },
+      dataTour: 'scene-budget-activate',
+    },
+    {
+      key: 'projects',
+      label: 'Projects',
+      copy: 'Open saved work',
+      icon: <FolderCopyRoundedIcon style={{ fontSize: 20 }} />,
+      disabled: isSaving,
+      onClick: () => openMobilePanel('projects'),
+    },
+  ];
+  const compactPrimaryTabs = [
+    {
+      key: 'room',
+      label: 'Room',
+      icon: ApartmentOutlined,
+      active: activeTab === 'room',
+      onClick: () => { if (!isSaving) openMobilePanel('room'); },
+    },
+    {
+      key: 'walls',
+      label: 'Build',
+      icon: HomeWorkRoundedIcon,
+      active: activeTab === 'walls',
+      onClick: () => { if (!isSaving) openMobilePanel('walls'); },
     },
     {
       key: 'materials',
-      label: 'Materials',
+      label: 'Style',
       icon: TextureRoundedIcon,
       active: activeTab === 'materials',
       onClick: () => { if (!isSaving) openMobilePanel('materials'); },
     },
     {
-      key: 'settings',
-      label: 'Settings',
+      key: 'furniture',
+      label: 'Furnish',
+      icon: ChairRoundedIcon,
+      active: activeTab === 'furniture',
+      onClick: () => { if (!isSaving) openMobilePanel('furniture'); },
+    },
+    {
+      key: 'lighting',
+      label: 'Light',
+      icon: LightbulbRoundedIcon,
+      active: activeTab === 'lighting',
+      onClick: () => { if (!isSaving) openMobilePanel('lighting'); },
+    },
+    {
+      key: 'view',
+      label: 'View',
+      icon: VisibilityRoundedIcon,
+      active: activeTab === 'view',
+      onClick: () => { if (!isSaving) openMobilePanel('view'); },
+    },
+    {
+      key: 'projects',
+      label: 'Projects',
+      icon: ViewInArOutlinedIcon,
+      active: activeTab === 'projects',
+      onClick: () => { if (!isSaving) openMobilePanel('projects'); },
+    },
+    {
+      key: 'more',
+      label: 'Manage',
       icon: AppstoreOutlined,
-      active: activeTab === 'more' || activeTab === 'projects' || activeTab === 'view' || activeTab === 'lighting',
+      active: activeTab === 'more',
       onClick: () => { if (!isSaving) openMobilePanel('more'); },
+    },
+  ];
+  const compactFooterActions = [
+    {
+      key: 'undo',
+      label: 'Undo',
+      icon: UndoOutlined,
+      disabled: !canUndo || isSaving,
+      onClick: undo,
+    },
+    {
+      key: 'redo',
+      label: 'Redo',
+      icon: RedoOutlined,
+      disabled: !canRedo || isSaving,
+      onClick: redo,
+    },
+    {
+      key: 'dashboard',
+      label: 'Dashboard',
+      icon: AppstoreOutlined,
+      disabled: isSaving,
+      onClick: handleDashboard,
+      dataTour: 'scene-dashboard',
+    },
+    {
+      key: 'guide',
+      label: 'Guide',
+      icon: QuestionCircleOutlined,
+      disabled: isSaving,
+      onClick: () => {
+        setManualSceneGuideActive(true);
+        setManualSceneGuideStep("scene-guide-launch");
+      },
     },
   ];
 
@@ -5950,8 +6084,8 @@ export default function RoomScene({ initialScene = null }) {
 
       {isMobile ? (
         <>
-          <div className="room-mobile-reference-topbar">
-            <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+          <div ref={mobileTopbarRef} className="room-mobile-reference-topbar">
+            <div className="room-mobile-reference-title-block">
               <div className="room-mobile-reference-brand-text">Lumiere</div>
               <button
                 type="button"
@@ -5962,14 +6096,50 @@ export default function RoomScene({ initialScene = null }) {
                 <DownOutlined style={{ fontSize: 14, opacity: 0.86 }} />
               </button>
             </div>
-            <button
-              type="button"
-              className="room-mobile-top-pill"
-              onClick={() => { if (!isSaving) openMobilePanel('projects'); }}
-            >
-              <FolderCopyRoundedIcon style={{ fontSize: 18 }} />
-              <span>Projects</span>
-            </button>
+            <div className="room-mobile-top-pill-group">
+              <button
+                type="button"
+                className="room-mobile-top-pill"
+                onClick={() => { if (!isSaving) setSaveModalOpen(true); }}
+                disabled={isSaving}
+              >
+                {isSaving ? <LoadingOutlined spin /> : projectSave.saveStatus === 'saved' ? <CheckOutlined /> : <SaveOutlined />}
+                <span>{isSaving ? 'Saving' : projectSave.saveStatus === 'saved' ? 'Saved' : 'Save'}</span>
+              </button>
+              <button
+                type="button"
+                className={budgetEnabled ? 'room-mobile-top-pill room-mobile-top-pill-active' : 'room-mobile-top-pill'}
+                onClick={() => {
+                  if (isSaving) return;
+                  openMobilePanel('more');
+                  if (budgetEnabled) {
+                    setBudgetSummaryOpen(true);
+                  }
+                }}
+              >
+                <WalletOutlined />
+                <span>{budgetEnabled ? 'Budget on' : 'Budget'}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="room-mobile-feature-strip" style={{ top: `calc(${mobileFeatureStripTop}px + env(safe-area-inset-top, 0px))` }}>
+            <div className="room-mobile-feature-strip-inner" data-tour="scene-navbar">
+              {compactPrimaryTabs.map(({ key, label, icon: Icon, active, onClick }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={active ? 'room-mobile-feature-pill is-active' : 'room-mobile-feature-pill'}
+                  onClick={onClick}
+                  data-tour={key === "furniture" ? "scene-nav-furniture-mobile" : undefined}
+                >
+                  <span className="room-mobile-feature-pill-icon">
+                    <Icon style={{ fontSize: 18 }} />
+                  </span>
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div style={{ position: 'fixed', inset: 0 }}>
@@ -5994,8 +6164,8 @@ export default function RoomScene({ initialScene = null }) {
           <div
             style={{
               position: 'fixed',
-              top: 'calc(140px + env(safe-area-inset-top, 0px))',
-              bottom: 'calc(310px + env(safe-area-inset-bottom, 0px))',
+              top: `calc(${mobileFloatingPanelTop}px + env(safe-area-inset-top, 0px))`,
+              bottom: isTabletViewport ? 'calc(220px + env(safe-area-inset-bottom, 0px))' : 'calc(236px + env(safe-area-inset-bottom, 0px))',
               left: 12,
               right: 12,
               zIndex: 1100,
@@ -6007,7 +6177,7 @@ export default function RoomScene({ initialScene = null }) {
           >
             <div
               className={mobilePanelOpen ? 'room-floating-panel is-open' : 'room-floating-panel'}
-              style={{ width: mobilePanelOpen ? 'min(420px, calc(100vw - 16px))' : undefined }}
+              style={{ width: mobilePanelOpen ? (isTabletViewport ? 'min(620px, calc(100vw - 24px))' : 'min(440px, calc(100vw - 16px))') : undefined }}
             >
               <div
                 className={mobilePanelOpen ? 'room-floating-panel-inner is-open' : 'room-floating-panel-inner'}
@@ -6038,72 +6208,44 @@ export default function RoomScene({ initialScene = null }) {
 
           <div className="room-mobile-reference-sheet">
             <div className="room-mobile-reference-handle" />
-            <div className="room-mobile-reference-sheet-title">Quick Actions</div>
-            <div className="room-mobile-reference-card-grid">
-              <button
-                type="button"
-                className="room-mobile-reference-card"
-                onClick={() => { if (!isSaving) setSaveModalOpen(true); }}
-                disabled={isSaving}
-                data-tour="scene-save"
-              >
-                <span className="room-mobile-reference-card-icon">
-                  {isSaving ? <LoadingOutlined spin /> : projectSave.saveStatus === 'saved' ? <CheckOutlined /> : <SaveOutlined />}
-                </span>
-                <span className="room-mobile-reference-card-label">{isSaving ? 'Saving' : projectSave.saveStatus === 'saved' ? 'Saved' : 'Save'}</span>
-                <span className="room-mobile-reference-card-copy">Save your project</span>
-              </button>
-              <button
-                type="button"
-                className="room-mobile-reference-card is-accent"
-                onClick={switchTo2D}
-                disabled={isSaving}
-                data-tour="scene-switch-2d"
-              >
-                <span className="room-mobile-reference-card-icon">
-                  <SpaceDashboardRoundedIcon style={{ fontSize: 22 }} />
-                </span>
-                <span className="room-mobile-reference-card-label">2D Plan</span>
-                <span className="room-mobile-reference-card-copy">Switch to 2D view</span>
-              </button>
-              <button
-                type="button"
-                className="room-mobile-reference-card"
-                onClick={handleDashboard}
-                disabled={isSaving}
-                data-tour="scene-dashboard"
-              >
-                <span className="room-mobile-reference-card-icon">
-                  <AppstoreOutlined />
-                </span>
-                <span className="room-mobile-reference-card-label">Dashboard</span>
-                <span className="room-mobile-reference-card-copy">Project overview</span>
-              </button>
+            <div className="room-mobile-reference-sheet-title">Workspace</div>
+            <div className="room-mobile-reference-card-row">
+              <div className="room-mobile-reference-card-track">
+                {compactQuickActions.map(({ key, label, copy, icon, accent, disabled, onClick, dataTour }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={accent ? 'room-mobile-reference-card is-accent' : 'room-mobile-reference-card'}
+                    onClick={() => { if (!disabled) onClick(); }}
+                    disabled={disabled}
+                    data-tour={dataTour}
+                  >
+                    <span className="room-mobile-reference-card-icon">{icon}</span>
+                    <span className="room-mobile-reference-card-text">
+                      <span className="room-mobile-reference-card-label">{label}</span>
+                      <span className="room-mobile-reference-card-copy">{copy}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="room-mobile-reference-nav">
-              {mobileBottomTabs.map(({ key, label, icon: Icon, active, onClick }) => (
+            <div className="room-mobile-reference-footer">
+              {compactFooterActions.map(({ key, label, icon: Icon, disabled, onClick, dataTour }) => (
                 <button
                   key={key}
                   type="button"
-                  className={active ? 'room-mobile-reference-nav-btn is-active' : 'room-mobile-reference-nav-btn'}
-                  onClick={onClick}
+                  className="room-mobile-reference-footer-btn"
+                  disabled={disabled}
+                  onClick={() => { if (!disabled) onClick(); }}
+                  data-tour={dataTour}
                 >
-                  <span className="room-mobile-reference-nav-icon">
+                  <span className="room-mobile-reference-footer-icon">
                     <Icon style={{ fontSize: 24 }} />
                   </span>
                   <span>{label}</span>
                 </button>
               ))}
-              <button
-                type="button"
-                className="room-mobile-reference-nav-plus"
-                onClick={() => { if (!isSaving) openMobilePanel('view'); }}
-              >
-                <span>
-                  <VisibilityRoundedIcon style={{ fontSize: 18 }} />
-                </span>
-              </button>
             </div>
           </div>
         </>
@@ -8154,6 +8296,10 @@ export default function RoomScene({ initialScene = null }) {
           box-shadow: 0 28px 60px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.05);
           backdrop-filter: blur(24px);
         }
+        .room-mobile-reference-title-block {
+          min-width: 0;
+          flex: 1 1 auto;
+        }
         .room-mobile-reference-brand-text {
           color: ${COLORS.action};
           font-size: 10px;
@@ -8199,11 +8345,68 @@ export default function RoomScene({ initialScene = null }) {
           box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
           white-space: nowrap;
         }
+        .room-mobile-top-pill-group {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-shrink: 0;
+        }
         .room-mobile-top-pill-active {
           color: ${COLORS.action};
           border-color: rgba(201,171,146,0.38);
           background: linear-gradient(180deg, rgba(58,48,43,0.9) 0%, rgba(37,30,27,0.95) 100%);
           box-shadow: 0 16px 30px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .room-mobile-feature-strip {
+          position: fixed;
+          left: 12px;
+          right: 12px;
+          z-index: 1140;
+          pointer-events: none;
+        }
+        .room-mobile-feature-strip-inner {
+          display: flex;
+          gap: 10px;
+          overflow-x: auto;
+          padding: 6px 2px 8px;
+          scrollbar-width: none;
+          pointer-events: auto;
+        }
+        .room-mobile-feature-strip-inner::-webkit-scrollbar {
+          display: none;
+        }
+        .room-mobile-feature-pill {
+          flex: 0 0 auto;
+          min-height: 48px;
+          padding: 0 16px;
+          border-radius: 18px;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: linear-gradient(180deg, rgba(28,28,28,0.88) 0%, rgba(18,18,18,0.82) 100%);
+          color: rgba(255,255,255,0.78);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          backdrop-filter: blur(22px);
+          box-shadow: 0 16px 32px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .room-mobile-feature-pill.is-active {
+          color: ${COLORS.action};
+          border-color: rgba(201,171,146,0.32);
+          background: linear-gradient(180deg, rgba(58,48,43,0.86) 0%, rgba(30,25,23,0.92) 100%);
+        }
+        .room-mobile-feature-pill-icon {
+          width: 28px;
+          height: 28px;
+          border-radius: 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.06);
         }
         .room-mobile-reference-scene-chip {
           position: fixed;
@@ -8320,7 +8523,7 @@ export default function RoomScene({ initialScene = null }) {
           right: 12px;
           bottom: calc(12px + env(safe-area-inset-bottom, 0px));
           z-index: 1110;
-          padding: 12px 12px 10px;
+          padding: 10px 10px 8px;
           border-radius: 28px;
           background: linear-gradient(180deg, rgba(22,22,22,0.96) 0%, rgba(17,17,17,0.94) 100%);
           border: 1px solid rgba(201,171,146,0.12);
@@ -8329,9 +8532,9 @@ export default function RoomScene({ initialScene = null }) {
         }
         .room-mobile-reference-handle {
           width: 44px;
-          height: 5px;
+          height: 4px;
           border-radius: 999px;
-          margin: 0 auto 10px;
+          margin: 0 auto 8px;
           background: rgba(255,255,255,0.34);
         }
         .room-mobile-reference-sheet-title {
@@ -8340,18 +8543,27 @@ export default function RoomScene({ initialScene = null }) {
           font-weight: 700;
           letter-spacing: 0.22em;
           text-transform: uppercase;
-          margin-bottom: 10px;
+          margin-bottom: 8px;
         }
-        .room-mobile-reference-card-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+        .room-mobile-reference-card-row {
+          margin-bottom: 8px;
+        }
+        .room-mobile-reference-card-track {
+          display: flex;
           gap: 8px;
-          margin-bottom: 10px;
+          overflow-x: auto;
+          padding: 2px 2px 4px;
+          scrollbar-width: none;
+          scroll-snap-type: x proximity;
+        }
+        .room-mobile-reference-card-track::-webkit-scrollbar {
+          display: none;
         }
         .room-mobile-reference-card {
+          flex: 0 0 min(168px, 42vw);
           min-height: 58px;
-          padding: 9px 10px;
-          border-radius: 16px;
+          padding: 9px 12px;
+          border-radius: 18px;
           border: 1px solid rgba(255,255,255,0.08);
           background: linear-gradient(180deg, rgba(30,30,30,0.9) 0%, rgba(20,20,20,0.92) 100%);
           color: ${COLORS.text};
@@ -8359,9 +8571,11 @@ export default function RoomScene({ initialScene = null }) {
           flex-direction: row;
           align-items: center;
           justify-content: flex-start;
-          gap: 8px;
+          gap: 10px;
           text-align: left;
           cursor: pointer;
+          backdrop-filter: blur(22px);
+          scroll-snap-align: start;
         }
         .room-mobile-reference-card.is-accent {
           border-color: rgba(201,171,146,0.18);
@@ -8372,70 +8586,51 @@ export default function RoomScene({ initialScene = null }) {
           font-size: 18px;
           line-height: 1;
         }
+        .room-mobile-reference-card-text {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          min-width: 0;
+        }
         .room-mobile-reference-card-label {
           font-size: 11px;
           font-weight: 700;
         }
         .room-mobile-reference-card-copy {
           color: rgba(255,255,255,0.54);
-          font-size: 10px;
+          font-size: 9px;
           line-height: 1.25;
         }
-        .room-mobile-reference-nav {
+        .room-mobile-reference-footer {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr)) 92px;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 8px;
           align-items: stretch;
         }
-        .room-mobile-reference-nav-btn {
-          border: 0;
+        .room-mobile-reference-footer-btn {
+          border: 1px solid rgba(255,255,255,0.08);
           border-radius: 18px;
-          background: transparent;
+          background: linear-gradient(180deg, rgba(30,30,30,0.82) 0%, rgba(20,20,20,0.88) 100%);
           color: rgba(255,255,255,0.72);
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          min-height: 72px;
-          padding: 8px 6px;
-          font-size: 10px;
+          gap: 4px;
+          min-height: 58px;
+          padding: 6px 4px;
+          font-size: 9px;
           font-weight: 600;
           cursor: pointer;
+          backdrop-filter: blur(18px);
         }
-        .room-mobile-reference-nav-btn.is-active {
-          color: ${COLORS.action};
-          background: linear-gradient(180deg, rgba(58,48,43,0.72) 0%, rgba(30,26,24,0.78) 100%);
-          border: 1px solid rgba(201,171,146,0.12);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        .room-mobile-reference-footer-btn:disabled {
+          opacity: 0.42;
+          cursor: not-allowed;
         }
-        .room-mobile-reference-nav-icon {
+        .room-mobile-reference-footer-icon {
           font-size: 18px;
           line-height: 1;
-        }
-        .room-mobile-reference-nav-plus {
-          border: 1px solid rgba(201,171,146,0.3);
-          border-radius: 20px;
-          background: linear-gradient(180deg, rgba(65,53,42,0.9) 0%, rgba(45,38,30,0.92) 100%);
-          color: ${COLORS.action};
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 72px;
-          cursor: pointer;
-          box-shadow: 0 18px 32px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.04);
-        }
-        .room-mobile-reference-nav-plus span {
-          width: 36px;
-          height: 36px;
-          border-radius: 999px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          background: radial-gradient(circle at 50% 35%, rgba(255,213,155,0.96), rgba(201,171,146,0.92));
-          color: #1b1714;
-          font-size: 24px;
-          font-weight: 500;
         }
         .room-floating-context-card {
           display: flex;
@@ -8913,15 +9108,23 @@ export default function RoomScene({ initialScene = null }) {
           button { min-height: 44px; }
           .ant-btn { min-height: 44px !important; font-size: 15px !important; }
           .room-mobile-reference-topbar {
-            gap: 8px;
+            gap: 10px;
+            align-items: stretch;
+            flex-wrap: wrap;
             padding: 14px 14px;
+          }
+          .room-mobile-reference-title-block {
+            flex: 1 1 100%;
           }
           .room-mobile-reference-brand-text {
             font-size: 9px;
             letter-spacing: 0.22em;
+            margin-bottom: 6px;
           }
           .room-mobile-reference-title-trigger {
             font-size: 15px;
+            width: 100%;
+            justify-content: space-between;
           }
           .room-mobile-top-pill {
             min-height: 48px;
@@ -8929,6 +9132,23 @@ export default function RoomScene({ initialScene = null }) {
             border-radius: 18px;
             font-size: 12px;
             gap: 8px;
+            flex: 1 1 0;
+            min-width: 0;
+          }
+          .room-mobile-top-pill-group {
+            gap: 8px;
+            width: 100%;
+          }
+          .room-mobile-feature-pill {
+            min-height: 44px;
+            padding: 0 14px;
+            border-radius: 16px;
+            font-size: 11px;
+          }
+          .room-mobile-feature-pill-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 9px;
           }
           .room-mobile-reference-scene-chip {
             top: calc(176px + env(safe-area-inset-top, 0px));
@@ -8959,45 +9179,37 @@ export default function RoomScene({ initialScene = null }) {
             border-radius: 16px;
           }
           .room-mobile-reference-sheet {
-            padding: 10px 10px 10px;
+            padding: 8px 8px 8px;
           }
-          .room-mobile-reference-card-grid {
-            gap: 8px;
+          .room-mobile-reference-card-row {
+            margin-bottom: 8px;
           }
           .room-mobile-reference-card {
+            flex-basis: min(152px, 46vw);
             min-height: 52px;
-            padding: 8px 8px;
+            padding: 8px 10px;
           }
           .room-mobile-reference-card-label {
             font-size: 10px;
           }
-          .room-mobile-reference-card-copy {
-            display: none;
-          }
-          .room-mobile-reference-nav {
-            grid-template-columns: repeat(4, minmax(0, 1fr)) 82px;
+          .room-mobile-reference-footer {
             gap: 8px;
           }
-          .room-mobile-reference-nav-btn {
-            min-height: 56px;
+          .room-mobile-reference-footer-btn {
+            min-height: 52px;
             font-size: 9px;
             gap: 4px;
             padding: 6px 4px;
           }
-          .room-mobile-reference-nav-plus {
-            min-height: 56px;
-          }
-          .room-mobile-reference-nav-plus span {
-            width: 34px;
-            height: 34px;
-            font-size: 22px;
+          .room-mobile-reference-card-copy {
+            display: none;
           }
           .room-floating-panel.is-open {
             width: min(392px, calc(100vw - 16px));
           }
           .room-floating-panel-inner {
             height: auto;
-            max-height: calc(100dvh - 188px);
+            max-height: calc(100dvh - 212px);
             border-radius: 24px;
           }
           .room-floating-panel-header {

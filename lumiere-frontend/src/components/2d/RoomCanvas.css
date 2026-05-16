@@ -2354,9 +2354,13 @@
     min-width: 0;
     padding: 0 10px;
     font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .mobile-editor-menu-actions .canvas-nav-segment {
+    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: 1fr 1fr;
     padding: 4px;
@@ -2366,6 +2370,11 @@
     height: 48px;
     font-size: 9px;
     padding: 0 8px;
+  }
+
+  .canvas-viewport-controls {
+    right: 12px;
+    bottom: calc(138px + env(safe-area-inset-bottom));
   }
 
   .canvas-area {
