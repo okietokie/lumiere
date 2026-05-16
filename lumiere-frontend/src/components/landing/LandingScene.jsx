@@ -8,6 +8,7 @@ import {
   PerspectiveCamera,
   RoundedBox,
 } from "@react-three/drei";
+import { PerformanceFrameMonitor, usePerformanceMode } from "../../providers/PerformanceModeProvider.jsx";
 
 function LoadingFallback() {
   return (
@@ -17,7 +18,7 @@ function LoadingFallback() {
   );
 }
 
-function HeroRoom({ progress, pointer }) {
+function HeroRoom({ progress, pointer, animate = true }) {
   const group = useRef(null);
   const house = useRef(null);
   const plant = useRef(null);
@@ -26,22 +27,22 @@ function HeroRoom({ progress, pointer }) {
     if (!group.current) return;
 
     const t = state.clock.elapsedTime;
-    group.current.rotation.y = pointer.x * 0.2;
-    group.current.rotation.x = pointer.y * 0.08;
-    group.current.position.y = 0.24 + Math.sin(t * 0.7) * 0.04 + progress * 0.08;
+    group.current.rotation.y = pointer.x * (animate ? 0.2 : 0.1);
+    group.current.rotation.x = pointer.y * (animate ? 0.08 : 0.04);
+    group.current.position.y = 0.24 + (animate ? Math.sin(t * 0.7) * 0.04 : 0) + progress * 0.08;
 
     if (house.current) {
-      house.current.rotation.y = Math.sin(t * 0.45) * 0.04 + pointer.x * 0.12;
-      house.current.position.x = pointer.x * 0.24;
+      house.current.rotation.y = (animate ? Math.sin(t * 0.45) * 0.04 : 0) + pointer.x * 0.12;
+      house.current.position.x = pointer.x * (animate ? 0.24 : 0.12);
     }
 
-    if (plant.current) {
+    if (plant.current && animate) {
       plant.current.rotation.z = Math.sin(t * 1.1) * 0.05;
     }
   });
 
   return (
-    <Float speed={1.1} rotationIntensity={0.18} floatIntensity={0.2}>
+    <Float speed={animate ? 1.1 : 0.6} rotationIntensity={animate ? 0.18 : 0.05} floatIntensity={animate ? 0.2 : 0.04}>
       <group ref={group} position={[0, 0.24, 0]} scale={1.08 - progress * 0.06}>
         <group ref={house} position={[0, 0.95, -0.1]}>
           <RoundedBox args={[3.4, 2.1, 2.7]} radius={0.18} smoothness={6} castShadow receiveShadow>
@@ -213,24 +214,24 @@ function RoomShell({ progress }) {
   );
 }
 
-function AccentObjects({ pointer }) {
+function AccentObjects({ pointer, animate = true }) {
   const left = useRef(null);
   const right = useRef(null);
 
   useFrame((state) => {
     if (left.current) {
-      left.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.6) * 0.06 + pointer.y * 0.12;
-      left.current.position.x = -2.5 + pointer.x * 0.14;
+      left.current.rotation.x = (animate ? Math.sin(state.clock.elapsedTime * 0.6) * 0.06 : 0) + pointer.y * 0.12;
+      left.current.position.x = -2.5 + pointer.x * (animate ? 0.14 : 0.08);
     }
-    if (right.current) {
+    if (right.current && animate) {
       right.current.rotation.y -= 0.003;
-      right.current.position.x = 2.35 + pointer.x * 0.12;
     }
+    if (right.current) right.current.position.x = 2.35 + pointer.x * (animate ? 0.12 : 0.06);
   });
 
   return (
     <>
-      <Float speed={1.3} rotationIntensity={0.4} floatIntensity={0.4}>
+      <Float speed={animate ? 1.3 : 0.7} rotationIntensity={animate ? 0.4 : 0.08} floatIntensity={animate ? 0.4 : 0.08}>
         <group ref={left} position={[-2.9, 1.04, -1.26]} scale={0.44}>
           <RoundedBox args={[1.9, 0.16, 1.9]} radius={0.18} smoothness={6}>
             <meshStandardMaterial color="#6f4d3c" roughness={0.54} metalness={0.28} />
@@ -242,7 +243,7 @@ function AccentObjects({ pointer }) {
         </group>
       </Float>
 
-      <Float speed={1} rotationIntensity={0.35} floatIntensity={0.42}>
+      <Float speed={animate ? 1 : 0.55} rotationIntensity={animate ? 0.35 : 0.06} floatIntensity={animate ? 0.42 : 0.06}>
         <group ref={right} position={[2.7, 1.86, -1.74]} scale={0.34}>
           <mesh castShadow>
             <octahedronGeometry args={[0.82, 0]} />
@@ -286,13 +287,20 @@ export function SceneFallback() {
 }
 
 export default function LandingScene({ pointer, progress = 0, mobile = false }) {
-  if (mobile) {
+  const { quality, isLite } = usePerformanceMode();
+
+  if (mobile && quality.reduceMotion) {
     return <SceneFallback />;
   }
 
   return (
     <div className="lm-scene-shell">
-      <Canvas dpr={[1, 1.6]} shadows>
+      <Canvas
+        dpr={quality.landingDpr}
+        shadows={quality.shadows}
+        gl={{ antialias: quality.antialias, alpha: false, powerPreference: isLite ? "default" : "high-performance" }}
+      >
+        <PerformanceFrameMonitor label="landing scene" />
         <PerspectiveCamera makeDefault position={[0, 2.38, 8.4]} fov={32} />
         <CameraRig pointer={pointer} progress={progress} />
 
@@ -302,25 +310,27 @@ export default function LandingScene({ pointer, progress = 0, mobile = false }) 
           intensity={65}
           angle={0.34}
           penumbra={1}
-          castShadow
+          castShadow={quality.shadows}
           color="#f0c89d"
         />
         <spotLight
           position={[-4, 6, 5]}
-          intensity={30 + progress * 10}
+          intensity={quality.lightAnimation ? 30 + progress * 10 : 24}
           angle={0.38}
           penumbra={1}
           color="#8d5b3f"
         />
 
         <Suspense fallback={<LoadingFallback />}>
-          <Environment preset="apartment" />
+          {quality.environment ? <Environment preset="apartment" /> : null}
           <RoomShell progress={progress} />
-          <AccentObjects pointer={pointer} />
-          <HeroRoom progress={progress} pointer={pointer} />
+          <AccentObjects pointer={pointer} animate={quality.floatEffects} />
+          <HeroRoom progress={progress} pointer={pointer} animate={quality.floatEffects} />
         </Suspense>
 
-        <ContactShadows position={[0, -0.28, 0]} opacity={0.42} scale={10} blur={2.6} far={7} />
+        {quality.contactShadows ? (
+          <ContactShadows position={[0, -0.28, 0]} opacity={0.42} scale={10} blur={2.6} far={7} />
+        ) : null}
       </Canvas>
 
       <div className="lm-scene-glow lm-scene-glow-a" />

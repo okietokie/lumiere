@@ -9,6 +9,7 @@ import landingBg from "../assets/landing-page-bg.jpg";
 import { GooeyText } from "./ui/gooey-text-morphing";
 import { Waves } from "./ui/wave-background";
 import { COLORS } from "../utils/colors";
+import { usePerformanceMode } from "../providers/PerformanceModeProvider.jsx";
 import "./landing/landing-page.css";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -833,7 +834,9 @@ function Footer() {
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const reducedMotion = usePrefersReducedMotion();
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const { quality } = usePerformanceMode();
+  const reducedMotion = prefersReducedMotion || quality.reduceMotion;
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect, useImperativeHandle } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Html, Text } from '@react-three/drei';
 import * as THREE from 'three';
@@ -24,6 +24,7 @@ const InteractiveWall = React.forwardRef(({
   edgeLinkStart, onEdgeLinkPoint,
 }, ref) => {
   const { camera, gl } = useThree();
+  const groupRef = useRef(null);
   const [hovered, setHovered] = useState(false);
   const [hoveredEdge, setHoveredEdge] = useState(null);
   const dragState = useRef(null);   // { type, origin, initStart, initEnd }
@@ -35,6 +36,7 @@ const InteractiveWall = React.forwardRef(({
   const suppressOpeningToggleRef = useRef(null);
   const suppressWallClickRef = useRef(false);
   const suppressOpeningClickRef = useRef(null);
+  const lastWallTapRef = useRef(null);
   const meshRef   = useRef();
 
   const {
@@ -50,6 +52,16 @@ const InteractiveWall = React.forwardRef(({
   const centerZ = (start[1] + end[1]) / 2;
   const length  = Math.hypot(end[0] - start[0], end[1] - start[1]);
   const angle   = Math.atan2(end[1] - start[1], end[0] - start[0]);
+
+  useImperativeHandle(ref, () => groupRef.current, []);
+
+  useEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    group.position.set(centerX, height / 2, centerZ);
+    group.rotation.set(0, -angle, 0);
+    group.scale.set(1, 1, 1);
+  }, [angle, centerX, centerZ, height]);
 
   const wallGeom = useMemo(() => {
     const centre  = new THREE.Vector3(centerX, 0, centerZ);
@@ -230,6 +242,18 @@ const InteractiveWall = React.forwardRef(({
       if (wallLongPressTimer.current) window.clearTimeout(wallLongPressTimer.current);
       const clientX = sourceEvent?.clientX ?? e.clientX ?? 0;
       const clientY = sourceEvent?.clientY ?? e.clientY ?? 0;
+      const now = Date.now();
+      const lastTap = lastWallTapRef.current;
+      const isDoubleTap = lastTap
+        && (now - lastTap.time) <= 320
+        && Math.hypot(lastTap.x - clientX, lastTap.y - clientY) <= 26;
+      if (isDoubleTap) {
+        lastWallTapRef.current = null;
+        suppressWallClickRef.current = true;
+        onDoubleClick?.(wall);
+        return;
+      }
+      lastWallTapRef.current = { time: now, x: clientX, y: clientY };
       wallLongPressTimer.current = window.setTimeout(() => {
         wallLongPressTimer.current = null;
         suppressWallClickRef.current = true;
@@ -811,11 +835,7 @@ const InteractiveWall = React.forwardRef(({
   };
 
   return (
-    <group
-      ref={ref}
-      position={[centerX, height / 2, centerZ]}
-      rotation={[0, -angle, 0]}
-    >
+    <group ref={groupRef}>
       <group>
         <mesh
           ref={meshRef}

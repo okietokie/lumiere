@@ -8,6 +8,7 @@ import {
   RoundedBox,
   useCursor,
 } from "@react-three/drei";
+import { PerformanceFrameMonitor, usePerformanceMode } from "../../providers/PerformanceModeProvider.jsx";
 
 const INTRO_EASE = [0.22, 1, 0.36, 1];
 const INTRO_DURATION = 4.8;
@@ -384,7 +385,7 @@ function RoomShell({ elapsed, hovered, setHovered }) {
   );
 }
 
-function CameraRig({ elapsed, mobile }) {
+function CameraRig({ elapsed, mobile, reduceMotion = false }) {
   const controls = useRef(null);
   const zoomTarget = useRef(8.8);
   const { camera, gl } = useThree();
@@ -402,7 +403,7 @@ function CameraRig({ elapsed, mobile }) {
 
   useFrame((state) => {
     const roomShift = easeHero(clamp((elapsed - 2.15) / 1.4));
-    const autoOrbit = state.clock.elapsedTime * 0.12;
+    const autoOrbit = reduceMotion ? 0 : state.clock.elapsedTime * 0.12;
     const targetX = THREE.MathUtils.lerp(0.6, 2.8, roomShift) + Math.sin(autoOrbit) * 0.35;
     const targetY = 1.45 + Math.sin(autoOrbit * 0.7) * 0.08;
     const baseZ = mobile ? 10.8 : zoomTarget.current + Math.cos(autoOrbit) * 0.18;
@@ -416,7 +417,7 @@ function CameraRig({ elapsed, mobile }) {
         new THREE.Vector3(THREE.MathUtils.lerp(0.5, 3, roomShift), -0.18, 0),
         0.08
       );
-      controls.current.enabled = elapsed > 2.8 && !mobile;
+      controls.current.enabled = elapsed > 2.8 && !mobile && !reduceMotion;
       controls.current.update();
     } else {
       camera.lookAt(THREE.MathUtils.lerp(0.5, 3, roomShift), -0.18, 0);
@@ -444,7 +445,7 @@ function CameraRig({ elapsed, mobile }) {
   );
 }
 
-function SceneContent({ elapsed, mobile }) {
+function SceneContent({ elapsed, mobile, quality }) {
   const [hovered, setHovered] = useState(null);
 
   return (
@@ -457,7 +458,7 @@ function SceneContent({ elapsed, mobile }) {
         position={[6, 7, 4]}
         intensity={1.1}
         color="#ffffff"
-        castShadow
+        castShadow={quality.shadows}
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
       />
@@ -467,12 +468,12 @@ function SceneContent({ elapsed, mobile }) {
         angle={0.42}
         penumbra={1}
         color="#c6a87d"
-        castShadow
+        castShadow={quality.shadows}
       />
       <directionalLight position={[-4, 3, -2]} intensity={0.22} color="#ffffff" />
       <LogoMark elapsed={elapsed} />
       <RoomShell elapsed={elapsed} hovered={hovered} setHovered={setHovered} />
-      <CameraRig elapsed={elapsed} mobile={mobile} />
+      <CameraRig elapsed={elapsed} mobile={mobile} reduceMotion={quality.reduceMotion} />
     </>
   );
 }
@@ -493,16 +494,22 @@ function MobileFallback() {
 export default function LMLogoScene() {
   const elapsed = useHeroTimeline();
   const mobile = useIsMobile();
+  const { quality } = usePerformanceMode();
 
-  if (mobile) {
+  if (mobile || quality.reduceMotion) {
     return <MobileFallback />;
   }
 
   return (
     <div className="lm-scene-shell">
-      <Canvas dpr={[1, 1.5]} shadows gl={{ antialias: true, alpha: false }}>
+      <Canvas
+        dpr={quality.logoDpr}
+        shadows={quality.shadows}
+        gl={{ antialias: quality.antialias, alpha: false, powerPreference: quality.reduceMotion ? "default" : "high-performance" }}
+      >
+        <PerformanceFrameMonitor label="logo scene" />
         <Suspense fallback={<LoadingFallback />}>
-          <SceneContent elapsed={elapsed} mobile={mobile} />
+          <SceneContent elapsed={elapsed} mobile={mobile} quality={quality} />
         </Suspense>
       </Canvas>
       <div className="lm-scene-vignette" />

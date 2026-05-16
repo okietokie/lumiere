@@ -1322,7 +1322,28 @@ function ThicknessSlider({ value, onChange }) {
   );
 }
 
-function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick, className = "", ...props }) {
+const UI_ICONS = {
+  draw: "M4 20h4l10-10a2.5 2.5 0 0 0-4-4L4 16v4zM13.5 6.5l4 4",
+  select: "M5 4l11 7-5 1.6L9.5 18 5 4z",
+  door: "M7 3h10a2 2 0 0 1 2 2v16H7V3zM11.5 12h.01",
+  window: "M4 5h16v14H4V5zM12 5v14M4 12h16",
+  furniture: "M8 12V9a4 4 0 0 1 8 0v3M7 12h10M8 12v5M16 12v5M6 17h12",
+  snap: "M8 7v5a4 4 0 0 0 8 0V7M6 7h2M16 7h2M6 12a6 6 0 0 0 12 0",
+  walls: "M4 6h16v3H4zM4 11h12v3H4zM8 16h12v3H8z",
+  project: "M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z",
+  rooms: "M4 5h7v6H4zM13 5h7v4h-7zM4 13h9v6H4zM15 11h5v8h-5z",
+  save: "M5 4h11l3 3v12H5zM8 4v5h6V4M8 18h8",
+  switch3d: "M12 3l7 4v10l-7 4-7-4V7l7-4zM12 3v14M5 7l7 4 7-4",
+  export: "M12 16V6M8 10l4-4 4 4M5 18h14",
+  cancel: "M6 6l12 12M18 6L6 18",
+  clear: "M5 7h14M9 7V5h6v2M8 10v6M12 10v6M16 10v6M6 7l1 12h10l1-12",
+  logout: "M15 16l4-4-4-4M19 12H9M13 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6",
+  dashboard: "M4 4h7v7H4zM13 4h7v5h-7zM4 13h7v7H4zM13 11h7v9h-7z",
+  undo: "M9 14L4 9l5-5M4 9h10.5a4.5 4.5 0 0 1 0 9H11",
+  redo: "M15 14l5-5-5-5M19 9H8.5a4.5 4.5 0 0 0 0 9H13",
+};
+
+function ToolBtn({ label, compactLabel, shortcut, icon, active, disabled, danger, onClick, className = "", ...props }) {
   return (
     <button
       className={`tool-btn${active?" active":""}${danger?" danger":""}${className ? ` ${className}` : ""}`}
@@ -1334,8 +1355,17 @@ function ToolBtn({ label, shortcut, icon, active, disabled, danger, onClick, cla
         <path d={icon}/>
       </svg>
       <span className="tool-label">{label}</span>
+      <span className="tool-compact-label">{compactLabel || label}</span>
       {shortcut && <span className="tool-shortcut">{shortcut}</span>}
     </button>
+  );
+}
+
+function ToolGlyph({ icon, className = "" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d={icon} />
+    </svg>
   );
 }
 
@@ -1350,6 +1380,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const selectedProjectId = searchParams.get("projectId");
   const shouldPreferLiveSnapshot = searchParams.get("live") === "1";
   const tutorialMode = searchParams.get("tour");
+  const isPlannerTutorial = tutorialMode === "first-project";
   const containerRef = useRef(null);
   const stageRef     = useRef(null);
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
@@ -1381,6 +1412,9 @@ export default function RoomCanvas({ initialPlan = null }) {
   const [mobilePanel, setMobilePanel] = useState("tools");
   const [showSelectIntro, setShowSelectIntro] = useState(false);
   const [hasShownSelectIntro, setHasShownSelectIntro] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth : 1200
+  ));
   const [isMobileViewport, setIsMobileViewport] = useState(() => (
     typeof window !== "undefined" ? window.innerWidth <= 900 : false
   ));
@@ -1407,7 +1441,10 @@ export default function RoomCanvas({ initialPlan = null }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const handleResize = () => setIsMobileViewport(window.innerWidth <= 900);
+    const handleResize = () => {
+      setViewportWidth(window.innerWidth);
+      setIsMobileViewport(window.innerWidth <= 900);
+    };
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -2034,19 +2071,38 @@ export default function RoomCanvas({ initialPlan = null }) {
   }, [initialPlan, loadProject, selectedProjectId, shouldPreferLiveSnapshot]);
 
   useEffect(() => {
-    if (tutorialMode !== "first-project") return;
+    if (!isPlannerTutorial) return;
     if (onboardingTour.isActive) return;
     if (onboardingTour.state.completed || onboardingTour.state.dismissed) return;
     onboardingTour.start();
     onboardingTour.setStep("create-room");
-  }, [onboardingTour, tutorialMode]);
+  }, [isPlannerTutorial, onboardingTour]);
 
   useEffect(() => {
-    if (!onboardingTour.isActive || !rooms.length) return;
+    if (isPlannerTutorial) return;
+    if (!onboardingTour.isActive) return;
+    if (![
+      "create-room",
+      "draw-room",
+      "edit-room",
+      "door-tool",
+      "place-door",
+      "window-tool",
+      "place-window",
+      "furniture-tool",
+      "select-furniture",
+      "place-furniture",
+      "switch-3d",
+    ].includes(onboardingTour.state.step)) return;
+    onboardingTour.dismiss();
+  }, [isPlannerTutorial, onboardingTour]);
+
+  useEffect(() => {
+    if (!isPlannerTutorial || !onboardingTour.isActive || !rooms.length) return;
     if (onboardingTour.state.step === "create-room" || onboardingTour.state.step === "draw-room") {
       onboardingTour.markRoomCreated();
     }
-  }, [onboardingTour, rooms.length]);
+  }, [isPlannerTutorial, onboardingTour, rooms.length]);
 
   const doorCount = rooms.reduce(
     (sum, room) => sum + room.walls.reduce(
@@ -2079,7 +2135,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const hasWindowOnDifferentWallFromDoor = [...windowWallIds].some((wallId) => !doorWallIds.has(wallId));
 
   const plannerTourStep =
-    onboardingTour.isActive && (
+    isPlannerTutorial && onboardingTour.isActive && (
       onboardingTour.state.step === "create-room"
       || onboardingTour.state.step === "draw-room"
       || onboardingTour.state.step === "edit-room"
@@ -2280,32 +2336,32 @@ export default function RoomCanvas({ initialPlan = null }) {
   const visibleWallRanges = useMemo(() => getWallVisibleRanges(rooms), [rooms]);
 
   useEffect(() => {
-    if (!onboardingTour.isActive) return;
+    if (!isPlannerTutorial || !onboardingTour.isActive) return;
     if (onboardingTour.state.step === "place-door" && doorCount > 0) {
       onboardingTour.setStep("window-tool");
     }
-  }, [doorCount, onboardingTour]);
+  }, [doorCount, isPlannerTutorial, onboardingTour]);
 
   useEffect(() => {
-    if (!onboardingTour.isActive) return;
+    if (!isPlannerTutorial || !onboardingTour.isActive) return;
     if (onboardingTour.state.step === "place-window" && hasWindowOnDifferentWallFromDoor) {
       onboardingTour.setStep("furniture-tool");
     }
-  }, [hasWindowOnDifferentWallFromDoor, onboardingTour]);
+  }, [hasWindowOnDifferentWallFromDoor, isPlannerTutorial, onboardingTour]);
 
   useEffect(() => {
-    if (!onboardingTour.isActive) return;
+    if (!isPlannerTutorial || !onboardingTour.isActive) return;
     if (onboardingTour.state.step === "select-furniture" && pendingFurniture) {
       onboardingTour.setStep("place-furniture");
     }
-  }, [onboardingTour, pendingFurniture]);
+  }, [isPlannerTutorial, onboardingTour, pendingFurniture]);
 
   useEffect(() => {
-    if (!onboardingTour.isActive) return;
+    if (!isPlannerTutorial || !onboardingTour.isActive) return;
     if (onboardingTour.state.step === "place-furniture" && furniture.length > 0) {
       onboardingTour.setStep("switch-3d");
     }
-  }, [furniture.length, onboardingTour]);
+  }, [furniture.length, isPlannerTutorial, onboardingTour]);
 
   const openOpeningContextMenu = useCallback((roomId, wallId, opening, event) => {
     const sourceEvent = event?.evt;
@@ -2462,6 +2518,8 @@ export default function RoomCanvas({ initialPlan = null }) {
     window: "Place Window",
     furniture: "Furniture",
   }[mode];
+  const isTabletViewport = viewportWidth >= 700 && viewportWidth <= 1100;
+  const mobileSaveLabel = saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save ready";
   const clearDesktopPanelTimer = useCallback(() => {
     if (desktopSidebarTimeoutRef.current) {
       clearTimeout(desktopSidebarTimeoutRef.current);
@@ -2556,76 +2614,128 @@ export default function RoomCanvas({ initialPlan = null }) {
     }
   }, [cancelDraft, isMobileViewport, onboardingTour, setMode, toggleDesktopPanel, toggleMobilePanel]);
 
+  const mobileToolActions = [
+    { key: "draw", label: "Draw", icon: UI_ICONS.draw, active: mode === "draw", disabled: false, onClick: handleDrawToolSelect, dataTour: "planner-draw-room" },
+    { key: "select", label: "Edit", icon: UI_ICONS.select, active: mode === "select", disabled: false, onClick: handleSelectToolSelect, dataTour: "planner-select-edit" },
+    { key: "door", label: "Door", icon: UI_ICONS.door, active: mode === "door", disabled: !hasRooms, onClick: handleDoorToolSelect, dataTour: "planner-place-door" },
+    { key: "window", label: "Window", icon: UI_ICONS.window, active: mode === "window", disabled: !hasRooms, onClick: handleWindowToolSelect, dataTour: "planner-place-window" },
+    { key: "furniture", label: "Furniture", icon: UI_ICONS.furniture, active: mode === "furniture", disabled: !hasEnclosedRooms, onClick: handleFurnitureToolSelect, dataTour: "planner-furniture-tool" },
+  ];
+  const mobileUtilityPills = [
+    {
+      key: "snap",
+      label: snapEnabled ? `Snap ${GRID_SIZES.find((g) => g.px === gridPx)?.label ?? ""}` : "Snap off",
+      icon: UI_ICONS.snap,
+      active: snapEnabled,
+      onClick: () => setSnapEnabled((value) => !value),
+    },
+    {
+      key: "wall",
+      label: `${Math.round((wallThickness / PX_PER_M) * 100)} cm walls`,
+      icon: UI_ICONS.walls,
+      active: mobileControlsOpen && mobilePanel === "wall",
+      onClick: () => toggleMobilePanel("wall"),
+    },
+    {
+      key: "rooms",
+      label: `${rooms.length} room${rooms.length === 1 ? "" : "s"}`,
+      icon: UI_ICONS.rooms,
+      active: mobileControlsOpen && mobilePanel === "rooms",
+      onClick: () => toggleMobilePanel("rooms"),
+    },
+  ];
+  const mobileWorkspaceActions = [
+    {
+      key: "save",
+      label: "Save project",
+      copy: mobileSaveLabel,
+      icon: UI_ICONS.save,
+      disabled: isSaving,
+      onClick: () => setSaveModalOpen(true),
+    },
+    {
+      key: "switch",
+      label: "Switch to 3D",
+      copy: "Open the scene editor",
+      icon: UI_ICONS.switch3d,
+      disabled: isSaving,
+      onClick: switchTo3D,
+      dataTour: "planner-switch-3d",
+    },
+  ];
+
   return (
     <div className="lumiere-wrapper">
-      <OnboardingJoyride
-        step={plannerTourStep}
-        onSkip={onboardingTour.dismiss}
-        primaryLabel={
-          onboardingTour.state.step === "create-room"
-            ? "Start drawing"
-            : onboardingTour.state.step === "edit-room"
-              ? "Open edit mode"
-              : onboardingTour.state.step === "door-tool"
-                ? "Show door tool"
-                : onboardingTour.state.step === "window-tool"
-                  ? "Show window tool"
-                  : onboardingTour.state.step === "furniture-tool"
-                    ? "Show furniture tool"
-                    : onboardingTour.state.step === "switch-3d"
-                      ? "Open 3D editor"
-                      : "Continue"
-        }
-        onPrimaryAction={() => {
-          if (onboardingTour.state.step === "create-room") {
-            setMode("draw");
-            cancelDraft();
-            onboardingTour.setStep("draw-room");
-            return;
+      {isPlannerTutorial && (
+        <OnboardingJoyride
+          step={plannerTourStep}
+          onSkip={onboardingTour.dismiss}
+          primaryLabel={
+            onboardingTour.state.step === "create-room"
+              ? "Start drawing"
+              : onboardingTour.state.step === "edit-room"
+                ? "Open edit mode"
+                : onboardingTour.state.step === "door-tool"
+                  ? "Show door tool"
+                  : onboardingTour.state.step === "window-tool"
+                    ? "Show window tool"
+                    : onboardingTour.state.step === "furniture-tool"
+                      ? "Show furniture tool"
+                      : onboardingTour.state.step === "switch-3d"
+                        ? "Open 3D editor"
+                        : "Continue"
           }
+          onPrimaryAction={() => {
+            if (onboardingTour.state.step === "create-room") {
+              setMode("draw");
+              cancelDraft();
+              onboardingTour.setStep("draw-room");
+              return;
+            }
 
-          if (onboardingTour.state.step === "edit-room") {
-            setMode("select");
-            cancelDraft();
-            onboardingTour.setStep("door-tool");
-            return;
-          }
+            if (onboardingTour.state.step === "edit-room") {
+              setMode("select");
+              cancelDraft();
+              onboardingTour.setStep("door-tool");
+              return;
+            }
 
-          if (onboardingTour.state.step === "door-tool") {
-            setMode("door");
-            cancelDraft();
-            onboardingTour.setStep("place-door");
-            return;
-          }
+            if (onboardingTour.state.step === "door-tool") {
+              setMode("door");
+              cancelDraft();
+              onboardingTour.setStep("place-door");
+              return;
+            }
 
-          if (onboardingTour.state.step === "window-tool") {
-            setMode("window");
-            cancelDraft();
-            onboardingTour.setStep("place-window");
-            return;
-          }
+            if (onboardingTour.state.step === "window-tool") {
+              setMode("window");
+              cancelDraft();
+              onboardingTour.setStep("place-window");
+              return;
+            }
 
-          if (onboardingTour.state.step === "furniture-tool") {
-            setMode("furniture");
-            cancelDraft();
-            onboardingTour.setStep("select-furniture");
-            return;
-          }
+            if (onboardingTour.state.step === "furniture-tool") {
+              setMode("furniture");
+              cancelDraft();
+              onboardingTour.setStep("select-furniture");
+              return;
+            }
 
-          if (onboardingTour.state.step === "switch-3d") {
-            switchTo3D();
+            if (onboardingTour.state.step === "switch-3d") {
+              switchTo3D();
+            }
+          }}
+          showPrimary={
+            ![
+              "draw-room",
+              "place-door",
+              "place-window",
+              "select-furniture",
+              "place-furniture",
+            ].includes(onboardingTour.state.step)
           }
-        }}
-        showPrimary={
-          ![
-            "draw-room",
-            "place-door",
-            "place-window",
-            "select-furniture",
-            "place-furniture",
-          ].includes(onboardingTour.state.step)
-        }
-      />
+        />
+      )}
       {/* ══════════════════════════════ SIDEBAR */}
       <aside
         className={`lumiere-sidebar${mobileControlsOpen ? " mobile-open" : ""}${effectiveDesktopSidebarPanel ? " desktop-panel-open" : ""}`}
@@ -2634,52 +2744,52 @@ export default function RoomCanvas({ initialPlan = null }) {
       >
         <div className="sidebar-rail">
           <div className="sidebar-rail-group">
-            <ToolBtn label="Draw Room" shortcut="D" active={mode==="draw"} data-tour="planner-draw-room"
+            <ToolBtn label="Draw Room" compactLabel="Draw" shortcut="D" active={mode==="draw"} data-tour="planner-draw-room"
               data-tooltip="Draw Room"
               data-description="Sketch walls point by point and close a shape into a room."
               data-keycap="D"
               title="Draw Room"
               onMouseEnter={() => previewDesktopPanel("draw")}
               onFocus={() => previewDesktopPanel("draw")}
-              icon="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+              icon={UI_ICONS.draw}
               onClick={handleDrawToolSelect}/>
-            <ToolBtn label="Select & Edit" shortcut="S" active={mode==="select"} data-tour="planner-select-edit"
+            <ToolBtn label="Select & Edit" compactLabel="Edit" shortcut="S" active={mode==="select"} data-tour="planner-select-edit"
               data-tooltip="Select & Edit"
               data-description="Select walls and objects to move, resize, and refine."
               data-keycap="S"
               title="Select & Edit"
               onMouseEnter={() => previewDesktopPanel("select")}
               onFocus={() => previewDesktopPanel("select")}
-              icon="M5 3l14 9-7 1-3 7z"
+              icon={UI_ICONS.select}
               onClick={handleSelectToolSelect}/>
-            <ToolBtn label="Place Door" shortcut="O" active={mode==="door"} disabled={!hasRooms} data-tour="planner-place-door"
+            <ToolBtn label="Place Door" compactLabel="Door" shortcut="O" active={mode==="door"} disabled={!hasRooms} data-tour="planner-place-door"
               data-tooltip="Place Door"
               data-description="Add a door to any wall, then fine-tune its width."
               data-keycap="O"
               title="Place Door"
               onMouseEnter={() => previewDesktopPanel("door")}
               onFocus={() => previewDesktopPanel("door")}
-              icon="M3 21V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v16M9 21V10h6v11"
+              icon={UI_ICONS.door}
               onClick={handleDoorToolSelect}/>
-            <ToolBtn label="Place Window" shortcut="W" active={mode==="window"} disabled={!hasRooms} data-tour="planner-place-window"
+            <ToolBtn label="Place Window" compactLabel="Window" shortcut="W" active={mode==="window"} disabled={!hasRooms} data-tour="planner-place-window"
               data-tooltip="Place Window"
               data-description="Insert windows on walls and adjust their placement."
               data-keycap="W"
               title="Place Window"
               onMouseEnter={() => previewDesktopPanel("window")}
               onFocus={() => previewDesktopPanel("window")}
-              icon="M3 9h18M3 15h18M9 3v18M15 3v18"
+              icon={UI_ICONS.window}
               onClick={handleWindowToolSelect}/>
-            <ToolBtn label="Furniture" shortcut="F" active={mode==="furniture"} disabled={!hasEnclosedRooms} data-tour="planner-furniture-tool"
+            <ToolBtn label="Furniture" compactLabel="Furniture" shortcut="F" active={mode==="furniture"} disabled={!hasEnclosedRooms} data-tour="planner-furniture-tool"
               data-tooltip="Furniture"
               data-description="Choose furniture models and place them inside enclosed rooms."
               data-keycap="F"
               title="Furniture"
               onMouseEnter={() => previewDesktopPanel("furniture")}
               onFocus={() => previewDesktopPanel("furniture")}
-              icon="M4 12h16M6 12V9a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v3M6 12v5M18 12v5M4 17h16"
+              icon={UI_ICONS.furniture}
               onClick={handleFurnitureToolSelect}/>
-            <ToolBtn label="Grid & Snap" shortcut="G"
+            <ToolBtn label="Grid & Snap" compactLabel="Snap" shortcut="G"
               data-tooltip="Grid & Snap"
               data-description="Control snapping and grid precision."
               data-keycap="G"
@@ -2688,8 +2798,8 @@ export default function RoomCanvas({ initialPlan = null }) {
               onMouseEnter={() => previewDesktopPanel("snap")}
               onFocus={() => previewDesktopPanel("snap")}
               onClick={() => isMobileViewport ? toggleMobilePanel("snap") : toggleDesktopPanel("snap")}
-              icon="M4 7h16M4 12h16M4 17h16M7 4v16M12 4v16M17 4v16"/>
-            <ToolBtn label="Wall Settings" shortcut="WT"
+              icon={UI_ICONS.snap}/>
+            <ToolBtn label="Wall Settings" compactLabel="Walls" shortcut="WT"
               data-tooltip="Wall Settings"
               data-description="Set the global wall thickness."
               data-keycap="WT"
@@ -2698,27 +2808,27 @@ export default function RoomCanvas({ initialPlan = null }) {
               onMouseEnter={() => previewDesktopPanel("wall")}
               onFocus={() => previewDesktopPanel("wall")}
               onClick={() => isMobileViewport ? toggleMobilePanel("wall") : toggleDesktopPanel("wall")}
-              icon="M4 6h16M4 12h16M4 18h16"/>
-            <ToolBtn label="Actions" shortcut="AX"
-              data-tooltip="Actions"
-              data-description="Export, cancel drawing, or clear the plan."
+              icon={UI_ICONS.walls}/>
+            <ToolBtn label="Project" compactLabel="Project" shortcut="AX"
+              data-tooltip="Project"
+              data-description="Save, switch views, export, or clear the plan."
               data-keycap="AX"
-              title="Actions"
+              title="Project"
               active={isMobileViewport ? (mobileControlsOpen && mobilePanel === "actions") : effectiveDesktopSidebarPanel === "actions"}
               onMouseEnter={() => previewDesktopPanel("actions")}
               onFocus={() => previewDesktopPanel("actions")}
               onClick={() => isMobileViewport ? toggleMobilePanel("actions") : toggleDesktopPanel("actions")}
-              icon="M6 7h12M9 7V5h6v2M8 11h8M8 15h8M8 19h8"/>
-            <ToolBtn label="Plan Elements" shortcut="RM"
-              data-tooltip="Plan Elements"
-              data-description="Review and jump between rooms in the plan."
+              icon={UI_ICONS.project}/>
+            <ToolBtn label="Rooms & Items" compactLabel="Rooms" shortcut="RM"
+              data-tooltip="Rooms & Items"
+              data-description="Review rooms and jump between what is already in the plan."
               data-keycap="RM"
-              title="Plan Elements"
+              title="Rooms & Items"
               active={isMobileViewport ? (mobileControlsOpen && mobilePanel === "rooms") : effectiveDesktopSidebarPanel === "rooms"}
               onMouseEnter={() => previewDesktopPanel("rooms")}
               onFocus={() => previewDesktopPanel("rooms")}
               onClick={() => isMobileViewport ? toggleMobilePanel("rooms") : toggleDesktopPanel("rooms")}
-              icon="M5 6h14M5 12h14M5 18h14"/>
+              icon={UI_ICONS.rooms}/>
           </div>
           {showSelectIntro && mode === "select" && (
             <div className="sidebar-select-intro" role="status" aria-live="polite">
@@ -2925,15 +3035,6 @@ export default function RoomCanvas({ initialPlan = null }) {
               cancelDraft();
               if (onboardingTour.isActive && onboardingTour.state.step === "window-tool") {
                 onboardingTour.setStep("place-window");
-              }
-            }}/>
-          <ToolBtn label="Furniture"     shortcut="F" active={mode==="furniture"} disabled={!hasEnclosedRooms} data-tour="planner-furniture-tool"
-            icon="M3 9h18v12H3zM9 9V5a3 3 0 0 1 6 0v4"
-            onClick={()=>{
-              setMode("furniture");
-              cancelDraft();
-              if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
-                onboardingTour.setStep("select-furniture");
               }
             }}/>
           <div style={{height:4}}/>
@@ -3156,7 +3257,7 @@ export default function RoomCanvas({ initialPlan = null }) {
       {isMobileViewport && mobileControlsOpen && (
         <>
           <div className="mobile-dialog-backdrop" onPointerDown={collapseMobileControls} />
-          <div className="sidebar-mobile-full-content" onPointerDown={(event) => event.stopPropagation()}>
+          <div className={`sidebar-mobile-full-content plan-mobile-floating-panel${isTabletViewport ? " is-tablet" : ""}`} onPointerDown={(event) => event.stopPropagation()}>
             <div className="sidebar-header mobile-panel-header">
               <div className="mobile-panel-brand">
                 <div className="sidebar-logo">LUMIERE<span>Maison Studio</span></div>
@@ -3168,7 +3269,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                 onClick={collapseMobileControls}
                 aria-label="Close mobile panel"
               >
-                x
+                ×
               </button>
             </div>
 
@@ -3192,8 +3293,8 @@ export default function RoomCanvas({ initialPlan = null }) {
                 <div className="sidebar-section mobile-history-section">
                   <div className="sidebar-section-title">History</div>
                   <div className="history-actions">
-                    <ToolBtn label="Undo" shortcut="Z" icon="M9 14L4 9l5-5M4 9h10.5a4.5 4.5 0 0 1 0 9H11" onClick={undo} disabled={!canUndo}/>
-                    <ToolBtn label="Redo" shortcut="Y" icon="M15 14l5-5-5-5M19 9H8.5a4.5 4.5 0 0 0 0 9H13" onClick={redo} disabled={!canRedo}/>
+                    <ToolBtn label="Undo" shortcut="Z" icon={UI_ICONS.undo} onClick={undo} disabled={!canUndo}/>
+                    <ToolBtn label="Redo" shortcut="Y" icon={UI_ICONS.redo} onClick={redo} disabled={!canRedo}/>
                   </div>
                 </div>
                 {mode==="furniture" && (
@@ -3308,12 +3409,13 @@ export default function RoomCanvas({ initialPlan = null }) {
             {mobilePanel === "actions" && (
               <div className="sidebar-section mobile-project-actions">
                 <div className="sidebar-section-title">Project</div>
-                <ToolBtn label="Save Project" icon="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zM7 3v5h8V3M8 17h8" onClick={()=>setSaveModalOpen(true)}/>
-                <ToolBtn label="Switch to 3D" icon="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" onClick={switchTo3D} disabled={isSaving}/>
-                <ToolBtn label="Export PNG" icon="M4 16l4-4 4 4 4-8 4 8M3 20h18" onClick={exportImage} disabled={!hasRooms}/>
-                {mode==="draw" && <ToolBtn label="Cancel Drawing" icon="M18 6L6 18M6 6l12 12" onClick={cancelDraft} disabled={!hasDraft}/>}
-                <ToolBtn label="Clear Plan" danger icon="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" onClick={handleClearAll} disabled={!hasDraft&&!hasRooms}/>
-                <ToolBtn label="Log Out" danger icon="M10 17l5-5-5-5M15 12H3M13 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" onClick={handleLogout} disabled={isSaving}/>
+                <ToolBtn label="Save Project" icon={UI_ICONS.save} onClick={()=>setSaveModalOpen(true)}/>
+                <ToolBtn label="Switch to 3D" icon={UI_ICONS.switch3d} onClick={switchTo3D} disabled={isSaving}/>
+                <ToolBtn label="Export PNG" icon={UI_ICONS.export} onClick={exportImage} disabled={!hasRooms}/>
+                <ToolBtn label="Dashboard" icon={UI_ICONS.dashboard} onClick={handleDashboard} disabled={isSaving}/>
+                {mode==="draw" && <ToolBtn label="Cancel Drawing" icon={UI_ICONS.cancel} onClick={cancelDraft} disabled={!hasDraft}/>}
+                <ToolBtn label="Clear Plan" danger icon={UI_ICONS.clear} onClick={handleClearAll} disabled={!hasDraft&&!hasRooms}/>
+                <ToolBtn label="Log Out" danger icon={UI_ICONS.logout} onClick={handleLogout} disabled={isSaving}/>
               </div>
             )}
 
@@ -3356,7 +3458,59 @@ export default function RoomCanvas({ initialPlan = null }) {
       )}
 
       {/* ══════════════════════════════ CANVAS */}
-      <div className="canvas-area" onPointerDown={collapseMobileControls}>
+      {isMobileViewport && (
+        <>
+          <div className="plan-mobile-reference-topbar">
+            <div className="plan-mobile-reference-title-block">
+              <div className="plan-mobile-reference-brand-text">Lumiere</div>
+              <button
+                type="button"
+                className="plan-mobile-reference-title-trigger"
+                onClick={() => toggleMobilePanel("actions")}
+              >
+                <span className="plan-mobile-reference-title-text">{mobileProjectTitle}</span>
+                <span className="plan-mobile-reference-title-meta">{mobileSaveLabel}</span>
+              </button>
+            </div>
+            <div className="plan-mobile-top-pill-group">
+              {mobileUtilityPills.map(({ key, label, icon, active, onClick }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={active ? "plan-mobile-top-pill is-active" : "plan-mobile-top-pill"}
+                  onClick={onClick}
+                >
+                  <ToolGlyph icon={icon} className="plan-mobile-pill-icon" />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="plan-mobile-feature-strip">
+            <div className="plan-mobile-feature-strip-inner" data-tour="planner-mobile-toolbar">
+              {mobileToolActions.map(({ key, label, icon, active, disabled, onClick, dataTour }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={active ? "plan-mobile-feature-pill is-active" : "plan-mobile-feature-pill"}
+                  onClick={onClick}
+                  disabled={disabled}
+                  data-tour={dataTour}
+                >
+                  <span className="plan-mobile-feature-pill-icon">
+                    <ToolGlyph icon={icon} />
+                  </span>
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className={`canvas-area${isMobileViewport ? " canvas-area-mobile-shell" : ""}`} onPointerDown={collapseMobileControls}>
+        {!isMobileViewport && (
         <div className="canvas-topbar">
           <div className="topbar-breadcrumb">
             <strong className="topbar-title-desktop">Floor Plan</strong>
@@ -3430,6 +3584,7 @@ export default function RoomCanvas({ initialPlan = null }) {
             </button>
           </div>
         </div>
+        )}
 
         <div
           ref={containerRef}
@@ -3567,7 +3722,7 @@ export default function RoomCanvas({ initialPlan = null }) {
           </div>
         </div>
 
-        <div className="canvas-statusbar">
+        <div className={`canvas-statusbar${isMobileViewport ? " canvas-statusbar-mobile" : ""}`}>
           <div className={`status-chip${hasDraft||mode!=="draw"?" active":""}`}>
             <span className="dot"/>
             {{draw:hasDraft?"Drawing":"Ready",select:"Edit",door:"Door",window:"Window",furniture:"Furniture"}[mode]}
@@ -3594,6 +3749,70 @@ export default function RoomCanvas({ initialPlan = null }) {
           <div className="shortcut-row"><span className="shortcut-key">Esc</span><span>Cancel</span></div>
         </div>
       </div>
+
+      {isMobileViewport && (
+        <div className={`plan-mobile-reference-sheet${isTabletViewport ? " is-tablet" : ""}`}>
+          <div className="plan-mobile-reference-handle" />
+          <div className="plan-mobile-reference-sheet-title">Workspace</div>
+          <div className="plan-mobile-reference-card-row">
+            <div className="plan-mobile-reference-card-track">
+              {mobileWorkspaceActions.map(({ key, label, copy, icon, accent, disabled, onClick, dataTour }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={accent ? "plan-mobile-reference-card is-accent" : "plan-mobile-reference-card"}
+                  onClick={() => { if (!disabled) onClick(); }}
+                  disabled={disabled}
+                  data-tour={dataTour}
+                >
+                  <span className="plan-mobile-reference-card-icon">
+                    <ToolGlyph icon={icon} />
+                  </span>
+                  <span className="plan-mobile-reference-card-text">
+                    <span className="plan-mobile-reference-card-label">{label}</span>
+                    <span className="plan-mobile-reference-card-copy">{copy}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="plan-mobile-reference-footer">
+            <button
+              type="button"
+              className="plan-mobile-reference-footer-btn"
+              onClick={handleClearAll}
+              disabled={!hasDraft && !hasRooms}
+            >
+              <span className="plan-mobile-reference-footer-icon">
+                <ToolGlyph icon={UI_ICONS.clear} />
+              </span>
+              Clear plan
+            </button>
+            <button
+              type="button"
+              className="plan-mobile-reference-footer-btn"
+              onClick={handleDashboard}
+              disabled={isSaving}
+            >
+              <span className="plan-mobile-reference-footer-icon">
+                <ToolGlyph icon={UI_ICONS.dashboard} />
+              </span>
+              Dashboard
+            </button>
+            <button
+              type="button"
+              className="plan-mobile-reference-footer-btn"
+              onClick={handleLogout}
+              disabled={isSaving}
+            >
+              <span className="plan-mobile-reference-footer-icon">
+                <ToolGlyph icon={UI_ICONS.logout} />
+              </span>
+              Log out
+            </button>
+          </div>
+        </div>
+      )}
 
       {openingContextMenu && (
         <div

@@ -2,10 +2,21 @@ import { useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-export default function SceneLighting({ lighting, globalBrightness, placedLights, attachedFurnitureLights = [], moodAmbient }) {
+export default function SceneLighting({
+  lighting,
+  globalBrightness,
+  placedLights,
+  attachedFurnitureLights = [],
+  moodAmbient,
+  quality = null,
+}) {
   const ambientRef = useRef();
   const sunRef     = useRef();
   const fillRef    = useRef();
+  const animateLights = quality?.lightAnimation ?? true;
+  const shadowsEnabled = quality?.shadows ?? true;
+  const maxDynamicLights = quality?.maxDynamicLights ?? Number.POSITIVE_INFINITY;
+  const visibleLights = [...placedLights, ...attachedFurnitureLights].slice(0, maxDynamicLights);
 
   const colors = useRef({
     ambient:       new THREE.Color(lighting.ambientColor),
@@ -20,6 +31,21 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
   });
 
   useFrame((_, delta) => {
+    if (!animateLights) {
+      if (ambientRef.current) {
+        ambientRef.current.intensity = lighting.ambientIntensity * globalBrightness;
+        ambientRef.current.color.set(moodAmbient || lighting.ambientColor);
+      }
+      if (sunRef.current) {
+        sunRef.current.intensity = lighting.sunIntensity * globalBrightness;
+        sunRef.current.color.set(lighting.sunColor);
+      }
+      if (fillRef.current) {
+        fillRef.current.intensity = lighting.sunIntensity * globalBrightness * 0.2;
+      }
+      return;
+    }
+
     const speed = Math.min(delta * 2.0, 1);
     const col   = colors.current;
     const ints  = intensities.current;
@@ -62,8 +88,8 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
         position={[2, 10, 6]}
         intensity={lighting.sunIntensity * globalBrightness * 0.75}
         color={lighting.sunColor}
-        castShadow
-        shadow-mapSize={[1024, 1024]}
+        castShadow={shadowsEnabled}
+        shadow-mapSize={shadowsEnabled ? [1024, 1024] : [256, 256]}
         shadow-bias={-0.0001}
         shadow-camera-near={0.1}
         shadow-camera-far={50}
@@ -82,7 +108,7 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
         castShadow={false}
       />
 
-      {[...placedLights, ...attachedFurnitureLights].map((light) => (
+      {visibleLights.map((light) => (
         <PlacedLightSource key={light.id} light={light} />
       ))}
     </>

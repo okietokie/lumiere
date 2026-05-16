@@ -263,7 +263,7 @@ export default function useRoomCreation({
       sceneStep: "name",
     });
     setSelectedRoomId(room.id);
-    setActiveTab("room");
+    setActiveTab("walls");
     toast.info(`A room will be added to the ${direction}.`);
   }, [selectedRoom, setActiveTab, setSelectedRoomId, toast]);
 

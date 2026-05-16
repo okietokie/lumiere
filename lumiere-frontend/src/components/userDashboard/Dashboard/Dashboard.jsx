@@ -19,7 +19,6 @@ import {
   Pencil,
   Plus,
   Search,
-  Settings,
   Trash2,
   Upload,
   UserCircle,
@@ -50,7 +49,6 @@ import ConfirmDeleteModal from "../modals/ConfirmDeleteModal";
 import RenameProjectModal from "../modals/RenameProjectModal";
 import OnboardingJoyride from "../../onboarding/OnboardingJoyride.jsx";
 import { useOnboardingTour } from "../../onboarding/OnboardingTourProvider.jsx";
-import WorkspaceSettingsShell from "../../settings/WorkspaceSettingsShell.jsx";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
@@ -60,7 +58,6 @@ const navItems = [
   { id: "projects", label: "Projects", icon: FolderOpen },
   { id: "renders", label: "Renders", icon: ImageIcon },
   { id: "tutorials", label: "Tutorials", icon: Wand2 },
-  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 const dashboardStyle = {
@@ -770,17 +767,6 @@ const Topbar = ({
 
             {open && (
               <div className="absolute right-0 mt-2 w-44 rounded-3xl bg-[var(--dash-shell)] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_24px_70px_rgba(0,0,0,0.44)]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab("settings");
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-full px-4 py-2.5 text-left text-sm text-[var(--dash-text)]/62 hover:bg-white/[0.05] hover:text-[var(--dash-text)]"
-                >
-                  <Settings size={14} />
-                  Settings
-                </button>
                 <button
                   type="button"
                   onClick={onLogout}
@@ -1507,8 +1493,6 @@ const AntTopbar = ({
   onMarkAllNotificationsRead,
 }) => {
   const accountItems = [
-    { key: "settings", label: "Workspace settings", icon: <Settings size={15} /> },
-    { type: "divider" },
     { key: "logout", label: "Log out", icon: <LogOut size={15} />, danger: true },
   ];
 
@@ -1518,8 +1502,24 @@ const AntTopbar = ({
   return (
     <>
       <Header style={{ ...antdStyles.header, padding: compact ? "0 16px" : "0 32px" }}>
-        <Flex align="center" justify="space-between" gap={16} style={{ height: "100%" }}>
-          <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
+        <Flex
+          align={compact ? "stretch" : "center"}
+          justify="space-between"
+          gap={compact ? 12 : 16}
+          style={{
+            height: "100%",
+            flexWrap: compact ? "wrap" : "nowrap",
+            paddingBlock: compact ? 10 : 0,
+          }}
+        >
+          <Flex
+            align="center"
+            gap={12}
+            style={{
+              minWidth: 0,
+              flex: compact ? "1 1 100%" : 1,
+            }}
+          >
             {compact && (
               <Dropdown
                 menu={{
@@ -1548,6 +1548,7 @@ const AntTopbar = ({
               placeholder="Search projects"
               onChange={(event) => onSearch?.(event.target.value)}
               style={{
+                width: compact ? "100%" : undefined,
                 maxWidth: compact ? "100%" : 700,
                 height: 48,
                 border: 0,
@@ -1558,7 +1559,14 @@ const AntTopbar = ({
               }}
             />
           </Flex>
-          <Space size={12}>
+          <Space
+            size={12}
+            wrap={compact}
+            style={{
+              width: compact ? "100%" : "auto",
+              justifyContent: compact ? "space-between" : "flex-end",
+            }}
+          >
             {!compact && (
               <AntDashboardButton variant="primary" onClick={onCreateNew}>
                 New Project
@@ -1723,7 +1731,6 @@ const AntTopbar = ({
                 items: accountItems,
                 onClick: ({ key }) => {
                   if (key === "logout") onLogout?.();
-                  if (key === "settings") setActiveTab("settings");
                 },
               }}
             >
@@ -2566,9 +2573,6 @@ const Dashboard = ({ user, onLogout }) => {
         )}
       </div>
     ),
-    settings: (
-      <WorkspaceSettingsShell onClose={() => setActiveTab("overview")} />
-    ),
   };
 
   const antdOverviewContent = (
@@ -2767,9 +2771,6 @@ const Dashboard = ({ user, onLogout }) => {
         </Row>
       </Space>
     ),
-    settings: (
-      <WorkspaceSettingsShell onClose={() => setActiveTab("overview")} />
-    ),
   };
 
   return (
@@ -2817,7 +2818,7 @@ const Dashboard = ({ user, onLogout }) => {
             ...antdStyles.content,
             paddingTop: isMobile ? 16 : 32,
             paddingRight: isMobile ? 16 : 32,
-            paddingBottom: 128,
+            paddingBottom: isMobile ? 156 : 128,
             paddingLeft: isMobile ? 16 : 32,
           }}
         >

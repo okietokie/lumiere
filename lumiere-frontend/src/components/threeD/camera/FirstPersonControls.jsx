@@ -19,6 +19,7 @@ export default function FirstPersonControls({
   isLocked,
   setIsLocked,
   onTeleport,
+  enableHeadBob = true,
 }) {
   const { camera, gl } = useThree();
   const controlsRef = useRef();
@@ -167,7 +168,7 @@ export default function FirstPersonControls({
     }
 
     // Head bob
-    if (moving && ny <= EYE_LEVEL + 0.02) {
+    if (enableHeadBob && moving && ny <= EYE_LEVEL + 0.02) {
       bobTime.current += dt * BOB_FREQ * (k.sprint ? 1.4 : 1.0);
       ny = EYE_LEVEL + Math.sin(bobTime.current * Math.PI * 2) * BOB_AMP;
     } else {

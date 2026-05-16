@@ -1,16 +1,19 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { LIGHT_TYPES } from '../../../hooks/useLighting';
 
 export default function PlacedLight({
-  light, isSelected, onSelect, onDoubleClick, onContextMenu, updateLight, setOrbitEnabled,
+  light, isSelected, onSelect, onDoubleClick, onContextMenu, updateLight, setOrbitEnabled, animateGlow = true,
 }) {
   const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
   const glowRef  = useRef();
   const dragging = useRef(false);
   const bobOffset = useRef(Math.random() * Math.PI * 2); // random phase per light
+  const lastTouchTapRef = useRef(null);
+  const suppressClickRef = useRef(false);
+  const longPressTimerRef = useRef(null);
   useFrame((state, delta) => {
     if (!glowRef.current || !light.enabled) return;
 
@@ -18,7 +21,7 @@ export default function PlacedLight({
     glowRef.current.scale.setScalar(
       THREE.MathUtils.lerp(glowRef.current.scale.x, targetScale, delta * 6)
     );
-    const pulse = 1 + Math.sin(state.clock.elapsedTime * 2 + bobOffset.current) * 0.06;
+    const pulse = animateGlow ? 1 + Math.sin(state.clock.elapsedTime * 2 + bobOffset.current) * 0.06 : 1;
     const targetOpacity = (isSelected ? 0.85 : 0.45) * pulse;
     glowRef.current.material.opacity = THREE.MathUtils.lerp(
       glowRef.current.material.opacity,
@@ -38,6 +41,24 @@ export default function PlacedLight({
     const hit   = new THREE.Vector3();
     ray.ray.intersectPlane(plane, hit);
     return hit;
+  };
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const openContextMenu = (e) => {
+    e.stopPropagation();
+    const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+    sourceEvent?.preventDefault?.();
+    onContextMenu?.({
+      light,
+      clientX: sourceEvent?.clientX ?? 0,
+      clientY: sourceEvent?.clientY ?? 0,
+    });
   };
 
   const startDrag = (e) => {
@@ -66,6 +87,10 @@ export default function PlacedLight({
     window.addEventListener('pointerup',   onUp);
   };
 
+  useEffect(() => () => {
+    clearLongPress();
+  }, []);
+
   const [x, y, z] = light.position;
 
   const shapes = {
@@ -82,24 +107,56 @@ export default function PlacedLight({
     <group position={[x, y, z]}>
       {/* Body */}
       <mesh
-        onPointerDown={startDrag}
+        onPointerDown={(e) => {
+          const sourceEvent = e.nativeEvent ?? e.sourceEvent;
+          const pointerType = sourceEvent?.pointerType ?? e.pointerType;
+
+          if (pointerType && pointerType !== 'mouse') {
+            clearLongPress();
+            const clientX = sourceEvent?.clientX ?? e.clientX ?? 0;
+            const clientY = sourceEvent?.clientY ?? e.clientY ?? 0;
+            const now = Date.now();
+            const lastTap = lastTouchTapRef.current;
+            const isDoubleTap = lastTap
+              && (now - lastTap.time) <= 320
+              && Math.hypot(lastTap.x - clientX, lastTap.y - clientY) <= 26;
+
+            if (isDoubleTap) {
+              lastTouchTapRef.current = null;
+              suppressClickRef.current = true;
+              onDoubleClick?.(light);
+              return;
+            }
+
+            lastTouchTapRef.current = { time: now, x: clientX, y: clientY };
+            longPressTimerRef.current = window.setTimeout(() => {
+              longPressTimerRef.current = null;
+              suppressClickRef.current = true;
+              openContextMenu(e);
+            }, 520);
+          }
+
+          startDrag(e);
+        }}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'grab'; }}
-        onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
-        onClick={(e)       => { e.stopPropagation(); onSelect(); }}
+        onPointerOut={()   => { clearLongPress();    setHovered(false); document.body.style.cursor = 'auto'; }}
+        onPointerMove={clearLongPress}
+        onPointerUp={clearLongPress}
+        onPointerCancel={clearLongPress}
+        onClick={(e)       => {
+          e.stopPropagation();
+          clearLongPress();
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false;
+            return;
+          }
+          onSelect();
+        }}
         onDoubleClick={(e) => {
           e.stopPropagation();
           onDoubleClick?.(light);
         }}
-        onContextMenu={(e) => {
-          e.stopPropagation();
-          const sourceEvent = e.nativeEvent ?? e.sourceEvent;
-          sourceEvent?.preventDefault?.();
-          onContextMenu?.({
-            light,
-            clientX: sourceEvent?.clientX ?? 0,
-            clientY: sourceEvent?.clientY ?? 0,
-          });
-        }}
+        onContextMenu={openContextMenu}
         castShadow
       >
         {shape.geo}

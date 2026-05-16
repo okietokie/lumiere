@@ -28,7 +28,6 @@ import {
   PoweroffOutlined,
   WalletOutlined,
   QuestionCircleOutlined,
-  SettingOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
@@ -129,12 +128,12 @@ import OnboardingJoyride from "../../onboarding/OnboardingJoyride.jsx";
 import { useOnboardingTour } from "../../onboarding/OnboardingTourProvider.jsx";
 import useThemedDialogs from "../../../hooks/useThemedDialogs.jsx";
 import lmIcon from "../../../assets/lm no-bg.png";
-import WorkspaceSettingsShell from "../../settings/WorkspaceSettingsShell.jsx";
 import {
   inferFurnitureEmitsLight,
   normalizeFurnitureLightSettings,
   normalizeFurnitureLightState,
 } from "../../../utils/furnitureLight";
+import { PerformanceFrameMonitor, usePerformanceMode } from "../../../providers/PerformanceModeProvider.jsx";
 
 
 const CAMERA_PRESETS = {
@@ -482,8 +481,49 @@ function PolygonSurface({
   interactive = true,
 }) {
   const shape = useMemo(() => createHorizontalShape(points, flip), [flip, points]);
+  const longPressTimerRef = useRef(null);
 
   const bounds = useMemo(() => getFootprintBounds(points), [points]);
+
+  useEffect(() => () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleLongPressPointerDown = useCallback((event) => {
+    if (!interactive || !onContextMenu) return;
+    const sourceEvent = event.nativeEvent ?? event.sourceEvent;
+    const pointerType = sourceEvent?.pointerType ?? event.pointerType;
+    if (!pointerType || pointerType === 'mouse') return;
+
+    clearLongPress();
+    const clientX = sourceEvent?.clientX ?? event.clientX ?? 0;
+    const clientY = sourceEvent?.clientY ?? event.clientY ?? 0;
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      const syntheticSourceEvent = {
+        clientX,
+        clientY,
+        preventDefault() {},
+      };
+      onContextMenu({
+        stopPropagation() {},
+        clientX,
+        clientY,
+        nativeEvent: syntheticSourceEvent,
+        sourceEvent: syntheticSourceEvent,
+      });
+    }, 520);
+  }, [clearLongPress, interactive, onContextMenu]);
 
   return (
     <mesh
@@ -493,6 +533,11 @@ function PolygonSurface({
       receiveShadow
       onClick={interactive ? onClick : undefined}
       onContextMenu={interactive ? onContextMenu : undefined}
+      onPointerDown={interactive ? handleLongPressPointerDown : undefined}
+      onPointerMove={interactive ? clearLongPress : undefined}
+      onPointerUp={interactive ? clearLongPress : undefined}
+      onPointerCancel={interactive ? clearLongPress : undefined}
+      onPointerLeave={interactive ? clearLongPress : undefined}
       raycast={interactive ? undefined : () => null}
     >
       <shapeGeometry args={[shape]} />
@@ -572,6 +617,7 @@ function SnapshotBridge({ snapshotApiRef }) {
 export default function RoomScene({ initialScene = null }) {
   const navigate = useNavigate();
   const onboardingTour = useOnboardingTour();
+  const { quality, isLite } = usePerformanceMode();
   const [searchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
   const shouldPreferLiveSnapshot = searchParams.get("live") === "1";
@@ -659,7 +705,7 @@ export default function RoomScene({ initialScene = null }) {
   const [isPointerLocked,     setIsPointerLocked]     = useState(false);
   const [orbitEnabled,        setOrbitEnabled]        = useState(true);
   const [teleportTarget,      setTeleportTarget]      = useState(null);
-  const [activeTab,           setActiveTab]           = useState('walls');
+  const [activeTab,           setActiveTab]           = useState('materials');
   const [desktopPanelOpen,    setDesktopPanelOpen]    = useState(true);
   const [currentViewPreset,   setCurrentViewPreset]   = useState('perspective');
   const [walkPreviewSrc,      setWalkPreviewSrc]      = useState(null);
@@ -681,8 +727,6 @@ export default function RoomScene({ initialScene = null }) {
   const [lightToolbarPos,     setLightToolbarPos]     = useState(null);
   const [manualSceneGuideActive, setManualSceneGuideActive] = useState(false);
   const [manualSceneGuideStep, setManualSceneGuideStep] = useState(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
   const orbitControlsRef = useRef(null);
   const sceneRef         = useRef(null);
   const canvasWrapperRef = useRef(null);
@@ -804,11 +848,9 @@ export default function RoomScene({ initialScene = null }) {
   }, [elementContextMenu]);
 
   const openMobilePanel = useCallback((tab) => {
-    const hasSelectedRoom = Boolean(selectedRoomId || rooms[0]?.id);
-    const nextTab = tab === 'room' && !hasSelectedRoom ? 'walls' : tab;
-    setActiveTab(nextTab);
+    setActiveTab(tab);
     setMobilePanelOpen(true);
-  }, [rooms, selectedRoomId]);
+  }, []);
   const sidebarRef = useRef(null);
   const desktopPanelInitRef = useRef(false);
 
@@ -1859,8 +1901,12 @@ export default function RoomScene({ initialScene = null }) {
   }, [rooms, selectedRoomId]);
 
   useEffect(() => {
+    if (activeTab === 'walls') {
+      setActiveTab('materials');
+      return;
+    }
     if (!selectedRoom && activeTab === 'room') {
-      setActiveTab('walls');
+      setActiveTab('materials');
     }
   }, [activeTab, selectedRoom]);
 
@@ -3092,7 +3138,7 @@ export default function RoomScene({ initialScene = null }) {
                       borderRadius: '50%',
                       border: `1px solid ${COLORS.secondary}66`,
                       background: 'rgba(255,255,255,0.08)',
-                      color: activeTab === 'room' ? COLORS.background : COLORS.text,
+                      color: COLORS.text,
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -3135,7 +3181,7 @@ export default function RoomScene({ initialScene = null }) {
                 type="button"
                 onClick={() => {
                   setSelectedRoomId(room.id);
-                  setActiveTab('room');
+                  setActiveTab('walls');
                 }}
                 style={{
                   border: 'none',
@@ -4581,12 +4627,6 @@ export default function RoomScene({ initialScene = null }) {
 
   const desktopUtilityItems = useMemo(() => ([
     {
-      key: 'settings',
-      label: 'Settings',
-      icon: SettingOutlined,
-      onClick: () => setSettingsOpen(true),
-    },
-    {
       key: 'help',
       label: 'Help',
       icon: QuestionCircleOutlined,
@@ -4606,7 +4646,6 @@ export default function RoomScene({ initialScene = null }) {
   ]), [handleDashboard, handleLogout]);
 
   const desktopPanelTitle =
-    activeTab === 'room' ? 'Room' :
     activeTab === 'walls' ? 'Build' :
     activeTab === 'materials' ? 'Style' :
     activeTab === 'lighting' ? 'Light' :
@@ -4614,9 +4653,7 @@ export default function RoomScene({ initialScene = null }) {
     activeTab === 'projects' ? 'Projects' :
     'View';
 
-  const desktopPanelContent = activeTab === 'room' ? (
-    renderRoomActionPanel('panel')
-  ) : activeTab === 'walls' ? (
+  const desktopPanelContent = activeTab === 'walls' ? (
     <>
       {selectedWall && (
         <div className="room-floating-context-card">
@@ -4636,8 +4673,7 @@ export default function RoomScene({ initialScene = null }) {
             <button type="button" className={activeTool === 'window' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('window')}>Add Window</button>
             <button type="button" className="room-secondary-chip" onClick={splitWall}>Split</button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-            <button type="button" className={activeTool === 'build' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('build')}>Build</button>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(1, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
             {!isMobile && (
               <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
             )}
@@ -4753,7 +4789,6 @@ export default function RoomScene({ initialScene = null }) {
   );
 
   const mobilePanelTitle =
-    activeTab === 'room' ? 'Room' :
     activeTab === 'walls' ? 'Build' :
     activeTab === 'materials' ? 'Materials & Style' :
     activeTab === 'lighting' ? 'Lighting' :
@@ -4762,11 +4797,7 @@ export default function RoomScene({ initialScene = null }) {
     activeTab === 'view' ? 'View' :
     'Project';
 
-  const mobilePanelContent = activeTab === 'room' ? (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {renderRoomActionPanel('mobile')}
-    </div>
-  ) : activeTab === 'walls' ? (
+  const mobilePanelContent = activeTab === 'walls' ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <WallEditorPanel
         selectedWall={selectedWall} addWall={addWall} splitWall={splitWall}
@@ -4819,11 +4850,7 @@ export default function RoomScene({ initialScene = null }) {
     renderViewSidebarPanel()
   ) : (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-        <button type="button" className="room-mobile-action-tile" onClick={() => setSaveModalOpen(true)} data-tour="scene-save">
-          <SaveOutlined />
-          <span>Save</span>
-        </button>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(1, minmax(0, 1fr))', gap: 10 }}>
         <button type="button" className="room-mobile-action-tile" onClick={switchTo2D} data-tour="scene-switch-2d">
           <SpaceDashboardRoundedIcon style={{ fontSize: 18 }} />
           <span>2D Plan</span>
@@ -4844,72 +4871,11 @@ export default function RoomScene({ initialScene = null }) {
         </button>
       </div>
 
-      {selectedRoom && renderRoomActionPanel('mobile')}
       {renderViewSidebarPanel()}
-
-      <div className="room-mobile-section">
-        <div className="room-mobile-section-title">Scene</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-          <button type="button" className={wallsHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleWallsHidden} data-tour="scene-hide-walls">
-            <ColumnWidthOutlined />
-            <span>{wallsHidden ? 'Show walls' : 'Hide walls'}</span>
-          </button>
-          <button type="button" className={ceilingHidden ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'} onClick={toggleCeilingHidden} data-tour="scene-hide-ceiling">
-            <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
-            <span>{ceilingHidden ? 'Show ceiling' : 'Hide ceiling'}</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="room-mobile-section">
-        <div className="room-mobile-section-title">Budget</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-          <button
-            type="button"
-            className={budgetEnabled ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
-            disabled={isSaving}
-            onClick={() => handleBudgetActivationChange(!budgetEnabled)}
-            data-tour="scene-budget-activate"
-          >
-            <PoweroffOutlined />
-            <span>{budgetEnabled ? 'Budget active' : 'Activate budget'}</span>
-          </button>
-          <button
-            type="button"
-            className={budgetEnabled && budgetSummaryOpen ? 'room-mobile-action-tile is-active' : 'room-mobile-action-tile'}
-            disabled={!budgetEnabled}
-            onClick={() => setBudgetSummaryOpen((open) => !open)}
-          >
-            <WalletOutlined />
-            <span>{formatMoney(budgetGrandTotal, budgetSummary.currency)}</span>
-          </button>
-        </div>
-      </div>
-
-      {budgetEnabled && budgetSummaryOpen && (
-        <div className="room-mobile-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-            <span style={{ color: `${COLORS.text}B8` }}>Unpriced items</span>
-            <strong style={{ color: budgetUnpricedCount > 0 ? '#ffd09a' : COLORS.text }}>{budgetUnpricedCount}</strong>
-          </div>
-          <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
-            {budgetCategoryRows.map(([label, total]) => (
-              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                <span style={{ color: `${COLORS.text}B8` }}>{label}</span>
-                <strong style={{ color: COLORS.text }}>{formatMoney(total, budgetSummary.currency)}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="room-mobile-section">
         <div className="room-mobile-section-title">Project</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-          <button type="button" className="room-mobile-action-tile" onClick={() => setSettingsOpen(true)}>
-            <SettingOutlined />
-            <span>Settings</span>
-          </button>
           <button type="button" className="room-mobile-action-tile" onClick={() => setActiveTab('projects')}>
             <FolderOpenOutlined />
             <span>Projects</span>
@@ -4936,7 +4902,21 @@ export default function RoomScene({ initialScene = null }) {
 
   const mobileDisplayProjectName = projectSave.projectName?.trim() || 'Untitled Room';
   const mobileSceneChipLabel = selectedRoom?.name?.trim() || mobileDisplayProjectName;
+  const mobileBudgetSummaryCopy = `${budgetUnpricedCount} unpriced item${budgetUnpricedCount === 1 ? '' : 's'}`;
   const compactQuickActions = [
+    ...(budgetEnabled ? [{
+      key: 'budget-summary',
+      label: formatMoney(budgetGrandTotal, budgetSummary.currency),
+      copy: mobileBudgetSummaryCopy,
+      icon: <WalletOutlined />,
+      accent: true,
+      disabled: isSaving,
+      onClick: () => {
+        setBudgetSummaryOpen((open) => !open);
+        setBudgetSummaryExpanded(false);
+      },
+      dataTour: 'scene-budget-activate',
+    }] : []),
     {
       key: 'save',
       label: isSaving ? 'Saving' : projectSave.saveStatus === 'saved' ? 'Saved' : 'Save',
@@ -4958,21 +4938,6 @@ export default function RoomScene({ initialScene = null }) {
       dataTour: 'scene-switch-2d',
     },
     {
-      key: 'budget',
-      label: budgetEnabled ? formatMoney(budgetGrandTotal, budgetSummary.currency) : 'Budget',
-      copy: budgetEnabled ? `${budgetUnpricedCount} unpriced items` : 'Estimate your room',
-      icon: <WalletOutlined />,
-      accent: budgetEnabled,
-      disabled: isSaving,
-      onClick: () => {
-        openMobilePanel('more');
-        if (budgetEnabled) {
-          setBudgetSummaryOpen(true);
-        }
-      },
-      dataTour: 'scene-budget-activate',
-    },
-    {
       key: 'projects',
       label: 'Projects',
       copy: 'Open saved work',
@@ -4982,20 +4947,6 @@ export default function RoomScene({ initialScene = null }) {
     },
   ];
   const compactPrimaryTabs = [
-    {
-      key: 'room',
-      label: 'Room',
-      icon: ApartmentOutlined,
-      active: activeTab === 'room',
-      onClick: () => { if (!isSaving) openMobilePanel('room'); },
-    },
-    {
-      key: 'walls',
-      label: 'Build',
-      icon: HomeWorkRoundedIcon,
-      active: activeTab === 'walls',
-      onClick: () => { if (!isSaving) openMobilePanel('walls'); },
-    },
     {
       key: 'materials',
       label: 'Style',
@@ -5030,13 +4981,6 @@ export default function RoomScene({ initialScene = null }) {
       icon: ViewInArOutlinedIcon,
       active: activeTab === 'projects',
       onClick: () => { if (!isSaving) openMobilePanel('projects'); },
-    },
-    {
-      key: 'more',
-      label: 'Manage',
-      icon: AppstoreOutlined,
-      active: activeTab === 'more',
-      onClick: () => { if (!isSaving) openMobilePanel('more'); },
     },
   ];
   const compactFooterActions = [
@@ -5075,16 +5019,6 @@ export default function RoomScene({ initialScene = null }) {
   ];
 
   const tabItems = [
-    ...(selectedRoom ? [{
-      key: 'room',
-      label: <span className="room-tab-label"><ApartmentOutlined /> Room</span>,
-      children: renderRoomActionPanel('sidebar'),
-    }] : []),
-    {
-      key: 'walls',
-      label: <span className="room-tab-label"><ColumnWidthOutlined /> Build</span>,
-      children: desktopPanelContent,
-    },
     {
       key: 'materials',
       label: <span className="room-tab-label"><FormatPainterOutlined /> Style</span>,
@@ -5213,17 +5147,26 @@ export default function RoomScene({ initialScene = null }) {
         }}
       >
         <Canvas
+          dpr={quality.editorDpr}
           camera={cameraMode === 'firstPerson'
             ? { position: [0, 1.28, 0], fov: 75, near: 0.05, far: 1000 }
             : { position: orbitCameraConfig.position, fov: 50, near: 0.1, far: 1000 }
           }
           style={{ background: lighting.skyColor }}
-          shadows={{ type: THREE.PCFShadowMap }}
+          shadows={quality.shadows ? { type: THREE.PCFShadowMap } : false}
           frameloop={cameraMode === 'firstPerson' ? 'always' : 'demand'}
-          performance={{ min: 0.5 }}
-          gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.85, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
+          performance={{ min: quality.reduceMotion ? 0.3 : 0.5 }}
+          gl={{
+            antialias: quality.antialias,
+            alpha: false,
+            toneMapping: THREE.ACESFilmicToneMapping,
+            toneMappingExposure: 0.85,
+            powerPreference: isLite ? 'default' : 'high-performance',
+            preserveDrawingBuffer: quality.preserveDrawingBuffer,
+          }}
           onPointerMissed={handlePointerMissed}
         >
+          <PerformanceFrameMonitor label="3D editor" />
           <SnapshotBridge snapshotApiRef={snapshotApiRef} />
 
           {/* Lighting */}
@@ -5233,6 +5176,7 @@ export default function RoomScene({ initialScene = null }) {
             placedLights={placedLights}
             attachedFurnitureLights={attachedFurnitureLights}
             moodAmbient={lightingState.moodAmbientOverride}
+            quality={quality}
           />
 
           {/* Camera controls*/}
@@ -5260,6 +5204,7 @@ export default function RoomScene({ initialScene = null }) {
               isLocked={isPointerLocked}
               setIsLocked={setIsPointerLocked}
               onTeleport={teleportTarget}
+              enableHeadBob={quality.headBob}
             />
           )}
 
@@ -5770,6 +5715,7 @@ export default function RoomScene({ initialScene = null }) {
                 key={item.id}
                 ref={(r) => { if (r) furnitureRefs.current[item.id] = r; }}
                 item={item}
+                shadowsEnabled={quality.shadows}
                 isSelected={item.id === selectedFurnitureId}
                 onSelect={() => { setSelectedFurnitureId(item.id); setSelectedWallId(null); setSelectedLightId(null); }}
                 onDoubleClick={focusFurnitureInScene}
@@ -5825,6 +5771,7 @@ export default function RoomScene({ initialScene = null }) {
             <PlacedLight
               key={light.id}
               light={light}
+              animateGlow={quality.glowAnimation}
               isSelected={light.id === selectedLightId}
               onSelect={() => {
                 setSelectedLightId(light.id);
@@ -6089,7 +6036,7 @@ export default function RoomScene({ initialScene = null }) {
               <div className="room-mobile-reference-brand-text">Lumiere</div>
               <button
                 type="button"
-                onClick={() => { if (!isSaving) openMobilePanel(selectedRoom ? 'room' : 'walls'); }}
+                onClick={() => { if (!isSaving) openMobilePanel(activeTab && activeTab !== 'more' ? activeTab : 'projects'); }}
                 className="room-mobile-reference-title-trigger"
               >
                 <span className="room-mobile-reference-title-text">{mobileDisplayProjectName}</span>
@@ -6099,22 +6046,39 @@ export default function RoomScene({ initialScene = null }) {
             <div className="room-mobile-top-pill-group">
               <button
                 type="button"
-                className="room-mobile-top-pill"
-                onClick={() => { if (!isSaving) setSaveModalOpen(true); }}
+                className={wallsHidden ? 'room-mobile-top-pill room-mobile-top-pill-active' : 'room-mobile-top-pill'}
                 disabled={isSaving}
+                onClick={() => { if (!isSaving) toggleWallsHidden(); }}
+                data-tour="scene-hide-walls"
               >
-                {isSaving ? <LoadingOutlined spin /> : projectSave.saveStatus === 'saved' ? <CheckOutlined /> : <SaveOutlined />}
-                <span>{isSaving ? 'Saving' : projectSave.saveStatus === 'saved' ? 'Saved' : 'Save'}</span>
+                <ColumnWidthOutlined />
+                <span>{wallsHidden ? 'Walls off' : 'Walls on'}</span>
+              </button>
+              <button
+                type="button"
+                className={ceilingHidden ? 'room-mobile-top-pill room-mobile-top-pill-active' : 'room-mobile-top-pill'}
+                disabled={isSaving}
+                onClick={() => { if (!isSaving) toggleCeilingHidden(); }}
+                data-tour="scene-hide-ceiling"
+              >
+                <ArchitectureRoundedIcon style={{ fontSize: 16 }} />
+                <span>{ceilingHidden ? 'Ceiling off' : 'Ceiling on'}</span>
+              </button>
+              <button
+                type="button"
+                className={surfaceSnapEnabled ? 'room-mobile-top-pill room-mobile-top-pill-active' : 'room-mobile-top-pill'}
+                disabled={isSaving}
+                onClick={() => { if (!isSaving) setSurfaceSnapEnabled((enabled) => !enabled); }}
+              >
+                {surfaceSnapEnabled ? <CheckOutlined /> : <CloseOutlined />}
+                <span>{surfaceSnapEnabled ? 'Snap on' : 'Snap off'}</span>
               </button>
               <button
                 type="button"
                 className={budgetEnabled ? 'room-mobile-top-pill room-mobile-top-pill-active' : 'room-mobile-top-pill'}
-                onClick={() => {
+                onClick={async () => {
                   if (isSaving) return;
-                  openMobilePanel('more');
-                  if (budgetEnabled) {
-                    setBudgetSummaryOpen(true);
-                  }
+                  await handleBudgetActivationChange(!budgetEnabled);
                 }}
               >
                 <WalletOutlined />
@@ -6229,6 +6193,83 @@ export default function RoomScene({ initialScene = null }) {
                 ))}
               </div>
             </div>
+
+            {budgetEnabled && budgetSummaryOpen && (
+              <div
+                className="room-mobile-budget-dialog"
+                style={{
+                  maxHeight: isTabletViewport ? 'min(30vh, 280px)' : 'min(26vh, 220px)',
+                  overflowY: 'auto',
+                  overscrollBehavior: 'contain',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ color: COLORS.action, fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>
+                      Budget Summary
+                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.2 }}>
+                      {formatMoney(budgetGrandTotal, budgetSummary.currency)}
+                    </div>
+                  </div>
+                  {budgetUnsavedChanges && (
+                    <span style={{ color: COLORS.action, fontSize: 11, fontWeight: 700 }}>
+                      Unsaved
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: budgetUnpricedCount > 0 ? 'rgba(255, 156, 92, 0.14)' : 'rgba(255,255,255,0.05)',
+                    color: budgetUnpricedCount > 0 ? '#ffce9a' : COLORS.text,
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {mobileBudgetSummaryCopy}
+                </div>
+
+                <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
+                  {budgetCategoryRows.map(([label, total]) => (
+                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                      <span style={{ color: `${COLORS.text}B8` }}>{label}</span>
+                      <span style={{ color: COLORS.text, fontWeight: 800 }}>{formatMoney(total, budgetSummary.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ marginBottom: 6, color: COLORS.action, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>
+                    Rooms
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {budgetRoomRows.length ? budgetRoomRows.map(([label, total]) => (
+                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                        <span style={{ color: `${COLORS.text}B8`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                        <span style={{ color: COLORS.text, fontWeight: 800 }}>{formatMoney(total, budgetSummary.currency)}</span>
+                      </div>
+                    )) : (
+                      <div style={{ color: `${COLORS.text}88`, fontSize: 12 }}>No priced rooms yet.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}>
+                    <div style={{ color: `${COLORS.text}99`, fontSize: 11 }}>Rules</div>
+                    <div style={{ fontSize: 15, fontWeight: 800 }}>{budgetSummary.rules_count ?? 0}</div>
+                  </div>
+                  <div style={{ padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.06)' }}>
+                    <div style={{ color: `${COLORS.text}99`, fontSize: 11 }}>Items</div>
+                    <div style={{ fontSize: 15, fontWeight: 800 }}>{budgetSummary.snapshots_count ?? 0}</div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="room-mobile-reference-footer">
               {compactFooterActions.map(({ key, label, icon: Icon, disabled, onClick, dataTour }) => (
@@ -6692,8 +6733,7 @@ export default function RoomScene({ initialScene = null }) {
                           <button type="button" className={activeTool === 'window' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('window')}>Add Window</button>
                           <button type="button" className="room-secondary-chip" onClick={splitWall}>Split</button>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-                          <button type="button" className={activeTool === 'build' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('build')}>Build</button>
+                        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(1, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
                           {!isMobile && (
                             <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
                           )}
@@ -7558,12 +7598,6 @@ export default function RoomScene({ initialScene = null }) {
         </div>
       )}
 
-      <WorkspaceSettingsShell
-        open={settingsOpen}
-        variant="modal"
-        onClose={() => setSettingsOpen(false)}
-      />
-
       {isSaving && (
         <div
           style={{
@@ -8287,7 +8321,7 @@ export default function RoomScene({ initialScene = null }) {
           right: 12px;
           z-index: 1150;
           display: flex;
-          align-items: center;
+          align-items: stretch;
           gap: 12px;
           padding: 16px 18px;
           border-radius: 28px;
@@ -8330,7 +8364,7 @@ export default function RoomScene({ initialScene = null }) {
         }
         .room-mobile-top-pill {
           min-height: 54px;
-          padding: 0 20px;
+          padding: 0 16px;
           border-radius: 22px;
           border: 1px solid rgba(255,255,255,0.12);
           background: linear-gradient(180deg, rgba(34,34,34,0.92) 0%, rgba(24,24,24,0.94) 100%);
@@ -8344,12 +8378,21 @@ export default function RoomScene({ initialScene = null }) {
           cursor: pointer;
           box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
           white-space: nowrap;
+          flex: 0 0 auto;
+          min-width: 108px;
         }
         .room-mobile-top-pill-group {
           display: flex;
           align-items: center;
           gap: 10px;
           flex-shrink: 0;
+          width: 100%;
+          overflow-x: auto;
+          scrollbar-width: none;
+          padding-bottom: 2px;
+        }
+        .room-mobile-top-pill-group::-webkit-scrollbar {
+          display: none;
         }
         .room-mobile-top-pill-active {
           color: ${COLORS.action};
@@ -8600,6 +8643,17 @@ export default function RoomScene({ initialScene = null }) {
           color: rgba(255,255,255,0.54);
           font-size: 9px;
           line-height: 1.25;
+        }
+        .room-mobile-budget-dialog {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          margin-top: 12px;
+          padding: 14px 16px;
+          border-radius: 22px;
+          background: linear-gradient(180deg, rgba(36,30,27,0.96) 0%, rgba(26,21,18,0.98) 100%);
+          border: 1px solid rgba(196, 154, 108, 0.22);
+          box-shadow: 0 16px 36px rgba(0,0,0,0.24);
         }
         .room-mobile-reference-footer {
           display: grid;
@@ -9128,12 +9182,12 @@ export default function RoomScene({ initialScene = null }) {
           }
           .room-mobile-top-pill {
             min-height: 48px;
-            padding: 0 14px;
+            padding: 0 12px;
             border-radius: 18px;
-            font-size: 12px;
-            gap: 8px;
-            flex: 1 1 0;
-            min-width: 0;
+            font-size: 11px;
+            gap: 7px;
+            flex: 0 0 auto;
+            min-width: 96px;
           }
           .room-mobile-top-pill-group {
             gap: 8px;

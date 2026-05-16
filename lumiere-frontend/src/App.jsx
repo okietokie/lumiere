@@ -18,7 +18,6 @@ import RoomScene from "./components/threeD/scene/RoomScene";
 import RoomCanvas from "./components/2d/RoomCanvas.jsx";
 import ModelPreviewStudio from "./components/admin/ModelPreviewStudio";
 import ProjectViewerPage from "./components/viewer/ProjectViewerPage";
-import { COLORS } from "./utils/colors";
 import { clearAuthSession, getAccessToken, getStoredUser } from "./utils/authStorage.js";
 import {
   convert2DPlanTo3DScene,
@@ -29,6 +28,8 @@ import { ToastProvider } from "./ui/ToastNotification";
 import useModelPrefetch from "./hooks/useModelPrefetch";
 import { fetchModelManifest } from "./hooks/useModelPrefetch";
 import { OnboardingTourProvider } from "./components/onboarding/OnboardingTourProvider.jsx";
+import { PerformanceModeDock, PerformanceModeProvider, usePerformanceMode } from "./providers/PerformanceModeProvider.jsx";
+import { COLORS } from "./utils/colors";
 
 function RequireAuth({ children }) {
   return getAccessToken() ? children : <Navigate to="/login" replace />;
@@ -97,6 +98,7 @@ function LiveRoomSceneRoute() {
 
 function RouteShell() {
   const location = useLocation();
+  const { quality } = usePerformanceMode();
   const isFullscreenRoute = ["/user/room", "/user/room-2d", "/canvas"].includes(location.pathname);
   const routeNamespace =
     location.pathname === "/"
@@ -182,6 +184,16 @@ function RouteShell() {
     const run = async () => {
       await barba.hooks.do("before", data);
       await barba.hooks.do("beforeEnter", data);
+
+      if (quality.reduceMotion) {
+        gsap.set(shell, { autoAlpha: 1, y: 0, filter: "blur(0px)" });
+        gsap.set(veil, { autoAlpha: 0, scaleY: 0 });
+        await barba.hooks.do("enter", data);
+        await barba.hooks.do("afterEnter", data);
+        await barba.hooks.do("after", data);
+        previousPathRef.current = to;
+        return;
+      }
 
       const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
       tl.set(veil, { autoAlpha: 1, scaleY: 0, transformOrigin: "top center" })
@@ -316,6 +328,7 @@ function RouteShell() {
           <Route path="/admin/model-previews" element={<ModelPreviewStudio />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <PerformanceModeDock />
       </div>
     </>
   );
@@ -384,11 +397,13 @@ function App() {
     >
       <AntApp>
         <ToastProvider>
-          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <OnboardingTourProvider>
-              <RouteShell />
-            </OnboardingTourProvider>
-          </BrowserRouter>
+          <PerformanceModeProvider>
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <OnboardingTourProvider>
+                <RouteShell />
+              </OnboardingTourProvider>
+            </BrowserRouter>
+          </PerformanceModeProvider>
         </ToastProvider>
       </AntApp>
     </ConfigProvider>

@@ -268,7 +268,7 @@ class FurnitureErrorBoundary extends React.Component {
 }
 
 const FurnitureInner = forwardRef(({
-  item, resolvedUrl, isSelected, onSelect, onDoubleClick, onContextMenu, setOrbitEnabled,
+  item, resolvedUrl, isSelected, onSelect, onDoubleClick, onContextMenu, setOrbitEnabled, shadowsEnabled = true,
 }, ref) => {
   const { scene }             = useGLTF(resolvedUrl);
   const [hovered, setHovered] = useState(false);
@@ -276,11 +276,15 @@ const FurnitureInner = forwardRef(({
   const innerRef              = useRef();
   const lastTouchTapRef       = useRef(null);
   const suppressClickRef      = useRef(false);
+  const longPressTimerRef     = useRef(null);
 
   const { clonedScene, normScale, centroid, normalizedSize } = useMemo(() => {
     const clone = SkeletonUtils.clone(scene);
     clone.traverse((child) => {
-      if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+      if (child.isMesh) {
+        child.castShadow = shadowsEnabled;
+        child.receiveShadow = shadowsEnabled;
+      }
     });
     const { normScale: ns, centroid: c, size } = computeNormAndCentroid(scene, item.category);
     return {
@@ -289,7 +293,7 @@ const FurnitureInner = forwardRef(({
       centroid: c,
       normalizedSize: [size[0] * ns, size[1] * ns, size[2] * ns],
     };
-  }, [scene, item.category]);
+  }, [scene, item.category, shadowsEnabled]);
   useImperativeHandle(ref, () => {
     if (outerRef.current) outerRef.current.__normScale = normScale;
     return outerRef.current;
@@ -338,6 +342,12 @@ const FurnitureInner = forwardRef(({
   }, [item.id, item.tint]);
 
   const rawScale = Array.isArray(item.scale) ? item.scale : [1, 1, 1];
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
   const openContextMenu = (e) => {
     e.stopPropagation();
     const sourceEvent = e.nativeEvent ?? e.sourceEvent;
@@ -348,6 +358,10 @@ const FurnitureInner = forwardRef(({
       clientY: sourceEvent?.clientY ?? e.clientY ?? 0,
     });
   };
+
+  useEffect(() => () => {
+    clearLongPress();
+  }, []);
 
   return (
     <group
@@ -360,6 +374,7 @@ const FurnitureInner = forwardRef(({
         const pointerType = sourceEvent?.pointerType ?? e.pointerType;
         if (pointerType === 'mouse') return;
 
+        clearLongPress();
         const clientX = sourceEvent?.clientX ?? e.clientX ?? 0;
         const clientY = sourceEvent?.clientY ?? e.clientY ?? 0;
         const now = Date.now();
@@ -368,17 +383,23 @@ const FurnitureInner = forwardRef(({
           && (now - lastTap.time) <= 320
           && Math.hypot(lastTap.x - clientX, lastTap.y - clientY) <= 26;
 
-        if (!isDoubleTap) {
-          lastTouchTapRef.current = { time: now, x: clientX, y: clientY };
+        if (isDoubleTap) {
+          lastTouchTapRef.current = null;
+          suppressClickRef.current = true;
+          onDoubleClick?.(item);
           return;
         }
 
-        lastTouchTapRef.current = null;
-        suppressClickRef.current = true;
-        openContextMenu(e);
+        lastTouchTapRef.current = { time: now, x: clientX, y: clientY };
+        longPressTimerRef.current = window.setTimeout(() => {
+          longPressTimerRef.current = null;
+          suppressClickRef.current = true;
+          openContextMenu(e);
+        }, 520);
       }}
       onClick={(e)       => {
         e.stopPropagation();
+        clearLongPress();
         if (suppressClickRef.current) {
           suppressClickRef.current = false;
           return;
@@ -390,8 +411,11 @@ const FurnitureInner = forwardRef(({
         onDoubleClick?.(item);
       }}
       onContextMenu={openContextMenu}
+      onPointerMove={clearLongPress}
+      onPointerUp={clearLongPress}
+      onPointerCancel={clearLongPress}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'pointer'; }}
-      onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto';    }}
+      onPointerOut={()   => { clearLongPress();    setHovered(false); document.body.style.cursor = 'auto';    }}
     >
       <group ref={innerRef} scale={[normScale, normScale, normScale]}>
         <group position={[-centroid[0], -centroid[1], -centroid[2]]}>
