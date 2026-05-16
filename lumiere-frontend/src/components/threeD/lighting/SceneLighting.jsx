@@ -1,8 +1,8 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-export default function SceneLighting({ lighting, globalBrightness, placedLights, moodAmbient }) {
+export default function SceneLighting({ lighting, globalBrightness, placedLights, attachedFurnitureLights = [], moodAmbient }) {
   const ambientRef = useRef();
   const sunRef     = useRef();
   const fillRef    = useRef();
@@ -82,7 +82,7 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
         castShadow={false}
       />
 
-      {placedLights.map((light) => (
+      {[...placedLights, ...attachedFurnitureLights].map((light) => (
         <PlacedLightSource key={light.id} light={light} />
       ))}
     </>
@@ -92,16 +92,26 @@ export default function SceneLighting({ lighting, globalBrightness, placedLights
 function PlacedLightSource({ light }) {
   if (!light.enabled) return null;
   const [x, y, z] = light.position;
+  const spotRef = useRef();
+  const targetRef = useRef();
+  useEffect(() => {
+    if (light.type !== 'spot' || !spotRef.current || !targetRef.current) return;
+    spotRef.current.target = targetRef.current;
+  }, [light.type]);
   if (light.type === 'spot') {
     return (
-      <spotLight
-        position={[x, y, z]}
-        intensity={light.intensity}
-        color={light.color}
-        distance={light.distance}
-        angle={light.angle}
-        penumbra={0.4}
-      />
+      <>
+        <spotLight
+          ref={spotRef}
+          position={[x, y, z]}
+          intensity={light.intensity}
+          color={light.color}
+          distance={light.distance}
+          angle={light.angle}
+          penumbra={0.4}
+        />
+        <object3D ref={targetRef} position={[x, Math.max(y - 1, 0), z]} />
+      </>
     );
   }
   return (

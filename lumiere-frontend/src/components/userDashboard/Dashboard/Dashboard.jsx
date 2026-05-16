@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   Bell,
@@ -13,7 +13,6 @@ import {
   Grid2X2,
   Home,
   Image as ImageIcon,
-  Layers,
   Loader2,
   LogOut,
   MoreHorizontal,
@@ -24,7 +23,6 @@ import {
   Trash2,
   Upload,
   UserCircle,
-  Wallet,
   Wand2,
 } from "lucide-react";
 import {
@@ -49,8 +47,10 @@ import { COLORS } from "../../../utils/colors";
 import lmIcon from "../../../assets/lm no-bg.png";
 import CreateProjectModal from "../modals/CreateProjectModal";
 import ConfirmDeleteModal from "../modals/ConfirmDeleteModal";
+import RenameProjectModal from "../modals/RenameProjectModal";
 import OnboardingJoyride from "../../onboarding/OnboardingJoyride.jsx";
 import { useOnboardingTour } from "../../onboarding/OnboardingTourProvider.jsx";
+import WorkspaceSettingsShell from "../../settings/WorkspaceSettingsShell.jsx";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
@@ -58,8 +58,6 @@ const { Text, Title, Paragraph } = Typography;
 const navItems = [
   { id: "overview", label: "Dashboard", icon: Home },
   { id: "projects", label: "Projects", icon: FolderOpen },
-  { id: "assets", label: "Assets", icon: Boxes },
-  { id: "budget", label: "Budget", icon: Wallet },
   { id: "renders", label: "Renders", icon: ImageIcon },
   { id: "tutorials", label: "Tutorials", icon: Wand2 },
   { id: "settings", label: "Settings", icon: Settings },
@@ -86,6 +84,8 @@ const shellClass =
 const cardClass = `${shellClass} p-6`;
 const buttonClass =
   "inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-all duration-200";
+
+const NOTIFICATION_STORAGE_KEY = "lumiere_dashboard_notifications_read";
 
 const palette = {
   background: "#090807",
@@ -409,6 +409,12 @@ const formatRelative = (value) => {
   return formatDate(value);
 };
 
+const getNotificationDateValue = (value) => {
+  if (!value) return 0;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+};
+
 const formatMoney = (value) => {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) return null;
@@ -429,6 +435,76 @@ const formatStorage = (mb) => {
 
 const getProjectId = (project) => project?.id ?? project?._id;
 const getScene = (project) => project?.scene_data ?? project?.scene ?? {};
+
+const readStoredNotificationMap = () => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(NOTIFICATION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+const buildDashboardNotifications = ({ projects, activities, storage, lastProject }) => {
+  const items = [];
+  const storageLimit = Number(
+    storage?.total_mb ?? storage?.totalMb ?? storage?.limit_mb ?? storage?.limitMb ?? 0
+  );
+  const storageUsed = Number(storage?.used_mb ?? storage?.usedMb ?? 0);
+  const storagePercent = storageLimit > 0 ? Math.round((storageUsed / storageLimit) * 100) : 0;
+
+  if (lastProject) {
+    items.push({
+      id: `resume-${getProjectId(lastProject)}-${lastProject?.last_modified ?? "latest"}`,
+      title: `Continue ${lastProject?.name ?? "your latest project"}`,
+      body: "Jump back into the last workspace you edited.",
+      timestamp: lastProject?.last_modified,
+      ctaLabel: "Open project",
+      action: { type: "open-project", project: lastProject },
+    });
+  }
+
+  if (storagePercent >= 80) {
+    items.push({
+      id: `storage-${storagePercent}`,
+      title: `Storage is ${storagePercent}% used`,
+      body: `${formatStorage(storageUsed)} of ${formatStorage(storageLimit)} is currently in use.`,
+      timestamp: null,
+      ctaLabel: "View projects",
+      action: { type: "tab", tab: "projects" },
+    });
+  }
+
+  if (!projects.length) {
+    items.push({
+      id: "empty-dashboard",
+      title: "Create your first project",
+      body: "Start a new concept and your dashboard activity will begin appearing here.",
+      timestamp: null,
+      ctaLabel: "New project",
+      action: { type: "create-project" },
+    });
+  }
+
+  activities.slice(0, 4).forEach((activity) => {
+    const project = projects.find((item) => getProjectId(item) === activity.id);
+    items.push({
+      id: `activity-${activity.id}-${activity.timestamp ?? "unknown"}`,
+      title: activity.action ?? "Project updated",
+      body: activity.target ?? activity.project_name ?? "A recent project changed.",
+      timestamp: activity.timestamp,
+      ctaLabel: project ? "Open project" : "View projects",
+      action: project
+        ? { type: "open-project", project }
+        : { type: "tab", tab: "projects" },
+    });
+  });
+
+  return items
+    .sort((a, b) => getNotificationDateValue(b.timestamp) - getNotificationDateValue(a.timestamp))
+    .slice(0, 6);
+};
 
 const getRoomCount = (project) => {
   const scene = getScene(project);
@@ -1417,7 +1493,19 @@ const AntSidebar = ({ activeTab, setActiveTab, onCreateNew, collapsed }) => {
   );
 };
 
-const AntTopbar = ({ user, onLogout, activeTab, setActiveTab, onCreateNew, onSearch, compact }) => {
+const AntTopbar = ({
+  user,
+  onLogout,
+  activeTab,
+  setActiveTab,
+  onCreateNew,
+  onSearch,
+  compact,
+  notifications,
+  unreadCount,
+  onNotificationSelect,
+  onMarkAllNotificationsRead,
+}) => {
   const accountItems = [
     { key: "settings", label: "Workspace settings", icon: <Settings size={15} /> },
     { type: "divider" },
@@ -1425,6 +1513,7 @@ const AntTopbar = ({ user, onLogout, activeTab, setActiveTab, onCreateNew, onSea
   ];
 
   const mobileItems = navItems.map(({ id, label }) => ({ key: id, label }));
+  const hasNotifications = notifications.length > 0;
 
   return (
     <>
@@ -1475,18 +1564,159 @@ const AntTopbar = ({ user, onLogout, activeTab, setActiveTab, onCreateNew, onSea
                 New Project
               </AntDashboardButton>
             )}
-            <Button
-              type="text"
-              aria-label="Notifications"
-              icon={<Bell size={17} />}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                color: "rgba(234,216,195,0.5)",
-                background: "rgba(255,255,255,0.035)",
-              }}
-            />
+            <Dropdown
+              trigger={["click"]}
+              dropdownRender={() => (
+                <div
+                  style={{
+                    width: compact ? 320 : 360,
+                    maxWidth: "calc(100vw - 24px)",
+                    padding: 10,
+                    borderRadius: 24,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(14,11,10,0.96)",
+                    boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+                    backdropFilter: "blur(24px)",
+                  }}
+                >
+                  <Flex align="center" justify="space-between" style={{ padding: "6px 8px 10px" }}>
+                    <div>
+                      <Text style={{ color: palette.text, fontSize: 15, fontWeight: 600 }}>
+                        Notifications
+                      </Text>
+                      <br />
+                      <Text style={{ color: palette.muted, fontSize: 12 }}>
+                        {unreadCount > 0
+                          ? `${unreadCount} unread update${unreadCount === 1 ? "" : "s"}`
+                          : "All caught up"}
+                      </Text>
+                    </div>
+                    {unreadCount > 0 && (
+                      <Button
+                        type="text"
+                        size="small"
+                        onClick={onMarkAllNotificationsRead}
+                        style={{ color: palette.accent }}
+                      >
+                        Mark all read
+                      </Button>
+                    )}
+                  </Flex>
+
+                  {hasNotifications ? (
+                    <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                      {notifications.map((notification) => (
+                        <button
+                          key={notification.id}
+                          type="button"
+                          onClick={() => onNotificationSelect?.(notification)}
+                          style={{
+                            width: "100%",
+                            padding: "12px 14px",
+                            textAlign: "left",
+                            border: 0,
+                            borderRadius: 18,
+                            cursor: "pointer",
+                            background: notification.read
+                              ? "rgba(255,255,255,0.03)"
+                              : "rgba(201,154,98,0.12)",
+                            boxShadow: notification.read
+                              ? "inset 0 1px 0 rgba(255,255,255,0.03)"
+                              : "inset 0 1px 0 rgba(255,255,255,0.05)",
+                          }}
+                        >
+                          <Flex align="start" gap={12}>
+                            <div
+                              style={{
+                                width: 8,
+                                height: 8,
+                                marginTop: 6,
+                                borderRadius: 999,
+                                background: notification.read ? "rgba(255,255,255,0.18)" : palette.accent,
+                                flex: "0 0 auto",
+                              }}
+                            />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <Flex align="center" justify="space-between" gap={12}>
+                                <Text
+                                  style={{
+                                    color: palette.text,
+                                    fontSize: 14,
+                                    fontWeight: notification.read ? 500 : 600,
+                                  }}
+                                >
+                                  {notification.title}
+                                </Text>
+                                <Text style={{ color: palette.muted, fontSize: 11, whiteSpace: "nowrap" }}>
+                                  {notification.timestamp ? formatRelative(notification.timestamp) : "Now"}
+                                </Text>
+                              </Flex>
+                              <Text style={{ color: "rgba(234,216,195,0.62)", fontSize: 12, display: "block", marginTop: 4 }}>
+                                {notification.body}
+                              </Text>
+                              {notification.ctaLabel && (
+                                <Text style={{ color: palette.accent, fontSize: 12, display: "block", marginTop: 8 }}>
+                                  {notification.ctaLabel}
+                                </Text>
+                              )}
+                            </div>
+                          </Flex>
+                        </button>
+                      ))}
+                    </Space>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "18px 14px",
+                        borderRadius: 18,
+                        background: "rgba(255,255,255,0.03)",
+                      }}
+                    >
+                      <Text style={{ color: palette.muted }}>No notifications yet.</Text>
+                    </div>
+                  )}
+                </div>
+              )}
+            >
+              <Button
+                type="text"
+                aria-label="Notifications"
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  color: unreadCount > 0 ? palette.accent : "rgba(234,216,195,0.5)",
+                  background: unreadCount > 0 ? "rgba(201,154,98,0.08)" : "rgba(255,255,255,0.035)",
+                }}
+              >
+                <div style={{ position: "relative", width: 18, height: 18 }}>
+                  <Bell size={17} />
+                  {unreadCount > 0 && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: -6,
+                        right: -7,
+                        minWidth: 16,
+                        height: 16,
+                        paddingInline: unreadCount > 9 ? 3 : 0,
+                        borderRadius: 999,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: palette.accent,
+                        color: "#120f0d",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        lineHeight: 1,
+                      }}
+                    >
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </div>
+              </Button>
+            </Dropdown>
             <Dropdown
               trigger={["click"]}
               menu={{
@@ -2029,6 +2259,7 @@ const AntMobileBottomNav = ({ activeTab, setActiveTab }) => (
 
 const Dashboard = ({ user, onLogout }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const onboardingTour = useOnboardingTour();
   const {
     projects,
@@ -2048,23 +2279,39 @@ const Dashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState("overview");
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [readNotifications, setReadNotifications] = useState({});
   const screens = AntGrid.useBreakpoint();
   const isMobile = !screens.lg;
 
   const projectAssets = useMemo(() => projects.flatMap(getProjectAssets), [projects]);
   const projectRenders = useMemo(() => projects.flatMap(getProjectRenders), [projects]);
 
-  const budgetItems = useMemo(
-    () =>
-      projects
-        .map((project) => ({ project, amount: Number(getProjectCost(project)) }))
-        .filter((item) => Number.isFinite(item.amount) && item.amount > 0),
-    [projects]
-  );
-
-  const totalBudget = budgetItems.reduce((sum, item) => sum + item.amount, 0);
+  useEffect(() => {
+    const stored = readStoredNotificationMap();
+    setReadNotifications(stored[user?.email ?? user?.name ?? "guest"] ?? {});
+  }, [user?.email, user?.name]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = user?.email ?? user?.name ?? "guest";
+    const stored = readStoredNotificationMap();
+    stored[key] = readNotifications;
+    window.localStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(stored));
+  }, [readNotifications, user?.email, user?.name]);
+
+  const notifications = useMemo(() => {
+    const items = buildDashboardNotifications({ projects, activities, storage, lastProject });
+    return items.map((item) => ({
+      ...item,
+      read: Boolean(readNotifications[item.id]),
+    }));
+  }, [activities, lastProject, projects, readNotifications, storage]);
+
+  const unreadNotifications = notifications.filter((item) => !item.read).length;
+
+  useEffect(() => {
+    if (location.state?.skipDashboardAutoRedirect) return;
     if (loading || projects.length > 0 || onboardingTour.isActive) return;
     if (onboardingTour.state.completed || onboardingTour.state.dismissed) return;
     onboardingTour.start();
@@ -2073,6 +2320,7 @@ const Dashboard = ({ user, onLogout }) => {
     return undefined;
   }, [
     loading,
+    location.state,
     navigate,
     onboardingTour,
     projects.length,
@@ -2090,11 +2338,8 @@ const Dashboard = ({ user, onLogout }) => {
     }
   };
 
-  const renameProjectFromCard = async (project) => {
-    const nextName = window.prompt("New project name", project?.name ?? "");
-    if (nextName?.trim()) {
-      await renameProject(project, nextName.trim());
-    }
+  const renameProjectFromCard = (project) => {
+    setRenameTarget(project);
   };
 
   const runQuickAction = (id) => {
@@ -2112,6 +2357,39 @@ const Dashboard = ({ user, onLogout }) => {
   };
 
   const handleTourCreateOpen = () => openCreateModal();
+
+  const markNotificationRead = (id) => {
+    if (!id) return;
+    setReadNotifications((current) => (current[id] ? current : { ...current, [id]: true }));
+  };
+
+  const markAllNotificationsRead = () => {
+    setReadNotifications((current) =>
+      notifications.reduce((next, notification) => {
+        next[notification.id] = true;
+        return next;
+      }, { ...current })
+    );
+  };
+
+  const handleNotificationSelect = (notification) => {
+    markNotificationRead(notification?.id);
+    if (!notification?.action) return;
+
+    if (notification.action.type === "open-project") {
+      openProject(notification.action.project);
+      return;
+    }
+
+    if (notification.action.type === "tab") {
+      setActiveTab(notification.action.tab);
+      return;
+    }
+
+    if (notification.action.type === "create-project") {
+      openCreateModal();
+    }
+  };
 
   const handleCreateProject = async (payload) => {
     const createdProject = await createProject(payload);
@@ -2241,103 +2519,6 @@ const Dashboard = ({ user, onLogout }) => {
         <ProjectGrid projects={projects} loading={loading} {...projectGridProps} />
       </div>
     ),
-    assets: (
-      <div className="space-y-8">
-        <SectionHeading
-          eyebrow="Assets"
-          title="Asset Library"
-          copy="Uploaded GLB/USDZ files and scene assets discovered from your saved backend projects."
-        />
-        {projectAssets.length ? (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-            {projectAssets.map((asset) => (
-              <div key={asset.id} className={cardClass}>
-                <div className="mb-4 flex aspect-square items-center justify-center overflow-hidden rounded-2xl bg-white/[0.03]">
-                  {asset.url ? (
-                    <img
-                      src={asset.url}
-                      alt={asset.name}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <Layers size={30} className="text-[var(--dash-muted)]/55" />
-                  )}
-                </div>
-                <p className="truncate text-[15px] font-medium text-[var(--dash-text)]">
-                  {asset.name}
-                </p>
-                <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-[var(--dash-text)]/35">
-                  {asset.kind}
-                </p>
-                <p className="mt-4 truncate text-[13px] text-[var(--dash-text)]/45">
-                  {asset.projectName}
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon={Boxes}
-            title="No assets found"
-            copy="No uploaded models, saved furniture, or material assets were returned by the backend project data."
-          />
-        )}
-      </div>
-    ),
-    budget: (
-      <div className="space-y-8">
-        <SectionHeading
-          eyebrow="Budget"
-          title="Budget Overview"
-          copy="This view only uses cost fields that exist on backend projects. Missing estimates stay empty instead of using fake numbers."
-        />
-        {budgetItems.length ? (
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <div className={cardClass}>
-              <p className="text-[15px] font-medium text-[var(--dash-text)]/72">
-                Total Estimated Cost
-              </p>
-              <p className="mt-4 text-[30px] font-semibold text-[var(--dash-text)]">
-                {formatMoney(totalBudget)}
-              </p>
-              <div className="mt-6 space-y-4">
-                {budgetItems.map(({ project, amount }) => (
-                  <div
-                    key={getProjectId(project)}
-                    className="flex items-center justify-between gap-4 rounded-2xl bg-white/[0.03] p-4"
-                  >
-                    <span className="truncate text-[15px] text-[var(--dash-text)]/72">
-                      {project.name}
-                    </span>
-                    <span className="text-[22px] font-semibold text-[var(--dash-action)]">
-                      {formatMoney(amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className={cardClass}>
-              <p className="text-[15px] font-medium text-[var(--dash-text)]/72">
-                Coverage
-              </p>
-              <p className="mt-4 text-[30px] font-semibold text-[var(--dash-text)]">
-                {budgetItems.length}
-              </p>
-              <p className="mt-2 text-[13px] leading-6 text-[var(--dash-text)]/45">
-                Projects with backend cost or estimate fields.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <EmptyState
-            icon={Wallet}
-            title="No budget fields yet"
-            copy="Add estimate or cost values to project records and this page will populate from live backend data."
-          />
-        )}
-      </div>
-    ),
     renders: (
       <div className="space-y-8">
         <SectionHeading
@@ -2386,51 +2567,7 @@ const Dashboard = ({ user, onLogout }) => {
       </div>
     ),
     settings: (
-      <div className="space-y-8">
-        <SectionHeading
-          eyebrow="Settings"
-          title="Workspace Settings"
-          copy="Display-only profile and workspace preferences. Nothing here pretends to save unless a backend handler exists."
-        />
-        <div className="max-w-3xl space-y-5">
-          <div className={cardClass}>
-            <p className="text-[24px] font-medium text-[var(--dash-text)]">Profile</p>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="text-[12px] text-[var(--dash-text)]/45">Name</label>
-                <div className="mt-2 rounded-2xl bg-white/[0.03] p-4 text-[15px] text-[var(--dash-text)]/72">
-                  {user?.name ?? "Designer"}
-                </div>
-              </div>
-              <div>
-                <label className="text-[12px] text-[var(--dash-text)]/45">Email</label>
-                <div className="mt-2 rounded-2xl bg-white/[0.03] p-4 text-[15px] text-[var(--dash-text)]/72">
-                  {user?.email ?? "Not available"}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className={cardClass}>
-            <p className="text-[24px] font-medium text-[var(--dash-text)]">
-              Preferences
-            </p>
-            <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl bg-white/[0.03] p-4">
-              <div className="min-w-0">
-                <p className="text-[15px] font-medium text-[var(--dash-text)]">
-                  Metric measurements
-                </p>
-                <p className="mt-2 text-[13px] text-[var(--dash-text)]/45">
-                  Used by the editor interface.
-                </p>
-              </div>
-              <div className="h-6 w-11 shrink-0 rounded-full bg-[var(--dash-action)] p-1">
-                <div className="ml-auto h-4 w-4 rounded-full bg-[var(--dash-bg)]" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <WorkspaceSettingsShell onClose={() => setActiveTab("overview")} />
     ),
   };
 
@@ -2512,109 +2649,6 @@ const Dashboard = ({ user, onLogout }) => {
           }
         />
         <AntProjectGrid projects={projects} loading={loading} {...projectGridProps} />
-      </Space>
-    ),
-    assets: (
-      <Space direction="vertical" size={32} style={{ width: "100%" }}>
-        <AntSectionHeading
-          eyebrow="Assets"
-          title="Asset Library"
-          copy="Uploaded GLB/USDZ files and scene assets discovered from your saved backend projects."
-        />
-        {projectAssets.length ? (
-          <Row gutter={[16, 16]}>
-            {projectAssets.map((asset) => (
-              <Col xs={24} sm={12} xl={6} key={asset.id}>
-                <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
-                  <div
-                    style={{
-                      aspectRatio: "1 / 1",
-                      borderRadius: 18,
-                      overflow: "hidden",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: "rgba(255,255,255,0.035)",
-                    }}
-                  >
-                    {asset.url ? (
-                      <img className="lm-card-visual" src={asset.url} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <Layers className="lm-card-accent-icon" size={30} color="rgba(234,216,195,0.45)" />
-                    )}
-                  </div>
-                  <Title level={5} ellipsis style={{ margin: "18px 0 6px", color: palette.text }}>
-                    {asset.name}
-                  </Title>
-                  <Text style={antdStyles.metaText}>{asset.kind}</Text>
-                  <br />
-                  <Text style={antdStyles.metaText}>{asset.projectName}</Text>
-                </Card>
-              </Col>
-            ))}
-          </Row>
-        ) : (
-          <Card style={antdStyles.panel} styles={{ body: { padding: 48 } }}>
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={<Text style={{ color: palette.muted }}>No assets found in backend project data.</Text>}
-            />
-          </Card>
-        )}
-      </Space>
-    ),
-    budget: (
-      <Space direction="vertical" size={32} style={{ width: "100%" }}>
-        <AntSectionHeading
-          eyebrow="Budget"
-          title="Budget Overview"
-          copy="This view only uses cost fields that exist on backend projects."
-        />
-        {budgetItems.length ? (
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={16}>
-              <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
-                <Text style={{ color: palette.muted }}>Total Estimated Cost</Text>
-                <Title level={2} style={{ color: palette.text, marginTop: 10 }}>
-                  {formatMoney(totalBudget)}
-                </Title>
-                <Space direction="vertical" size={10} style={{ width: "100%" }}>
-                  {budgetItems.map(({ project, amount }) => (
-                    <Flex
-                      key={getProjectId(project)}
-                      justify="space-between"
-                      align="center"
-                      style={{ padding: 16, borderRadius: 18, background: "rgba(255,255,255,0.035)" }}
-                    >
-                      <Text ellipsis style={{ color: "rgba(234,216,195,0.72)" }}>
-                        {project.name}
-                      </Text>
-                      <Text style={{ color: palette.accent, fontSize: 20, fontWeight: 650 }}>
-                        {formatMoney(amount)}
-                      </Text>
-                    </Flex>
-                  ))}
-                </Space>
-              </Card>
-            </Col>
-            <Col xs={24} lg={8}>
-              <Card className="lm-hover-card" style={antdStyles.panel} styles={{ body: antdStyles.panelBody }}>
-                <Text style={{ color: palette.muted }}>Coverage</Text>
-                <Title level={2} style={{ color: palette.text, marginTop: 10 }}>
-                  {budgetItems.length}
-                </Title>
-                <Text style={antdStyles.metaText}>Projects with backend estimate fields.</Text>
-              </Card>
-            </Col>
-          </Row>
-        ) : (
-          <Card style={antdStyles.panel} styles={{ body: { padding: 48 } }}>
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={<Text style={{ color: palette.muted }}>No budget fields yet.</Text>}
-            />
-          </Card>
-        )}
       </Space>
     ),
     renders: (
@@ -2734,34 +2768,7 @@ const Dashboard = ({ user, onLogout }) => {
       </Space>
     ),
     settings: (
-      <Space direction="vertical" size={32} style={{ width: "100%" }}>
-        <AntSectionHeading
-          eyebrow="Settings"
-          title="Workspace Settings"
-          copy="Display-only profile and workspace preferences."
-        />
-        <Card className="lm-hover-card" style={{ ...antdStyles.panel, maxWidth: 760 }} styles={{ body: antdStyles.panelBody }}>
-          <Space direction="vertical" size={24} style={{ width: "100%" }}>
-            <Title level={3} style={{ margin: 0, color: palette.text }}>
-              Profile
-            </Title>
-            <Row gutter={[16, 16]}>
-              <Col xs={24} md={12}>
-                <Text style={antdStyles.metaText}>Name</Text>
-                <div style={{ marginTop: 8, padding: 16, borderRadius: 18, color: palette.text, background: "rgba(255,255,255,0.035)" }}>
-                  {user?.name ?? "Designer"}
-                </div>
-              </Col>
-              <Col xs={24} md={12}>
-                <Text style={antdStyles.metaText}>Email</Text>
-                <div style={{ marginTop: 8, padding: 16, borderRadius: 18, color: palette.text, background: "rgba(255,255,255,0.035)" }}>
-                  {user?.email ?? "Not available"}
-                </div>
-              </Col>
-            </Row>
-          </Space>
-        </Card>
-      </Space>
+      <WorkspaceSettingsShell onClose={() => setActiveTab("overview")} />
     ),
   };
 
@@ -2799,6 +2806,10 @@ const Dashboard = ({ user, onLogout }) => {
           onCreateNew={openCreateModal}
           onSearch={searchProjects}
           compact={isMobile}
+          notifications={notifications}
+          unreadCount={unreadNotifications}
+          onNotificationSelect={handleNotificationSelect}
+          onMarkAllNotificationsRead={markAllNotificationsRead}
         />
 
         <Content
@@ -2847,6 +2858,13 @@ const Dashboard = ({ user, onLogout }) => {
         onClose={() => setDeleteTarget(null)}
         onConfirm={deleteProject}
         project={deleteTarget}
+      />
+
+      <RenameProjectModal
+        open={!!renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={renameProject}
+        project={renameTarget}
       />
     </Layout>
   );

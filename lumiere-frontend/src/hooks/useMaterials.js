@@ -60,6 +60,12 @@ export const DESIGN_THEMES = [
     floor:   { color: '#1A1A1A', roughness: 0.10, metalness: 0.08, textureId: 'marble_black' },
     ceiling: { color: '#2A2A2A', roughness: 0.80, metalness: 0.0,  textureId: null },
   },
+  {
+    id: 'scandinavian', label: 'Scandinavian',
+    wall:    { color: '#F3EEE5', roughness: 0.88, metalness: 0.0, textureId: 'paint_white' },
+    floor:   { color: '#C8A060', roughness: 0.58, metalness: 0.0, textureId: 'wood_light' },
+    ceiling: { color: '#FFF9F2', roughness: 0.90, metalness: 0.0, textureId: null },
+  },
 ];
 
 export const DEFAULT_FLOOR_MATERIAL = Object.freeze({

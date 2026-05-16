@@ -88,13 +88,14 @@ export default function useThemedDialogs() {
 
     return new Promise((resolve) => {
       let settled = false;
+      let dialogInstance = null;
       const finish = (value) => {
         if (settled) return;
         settled = true;
         resolve(value);
       };
 
-      modal.confirm({
+      dialogInstance = modal.confirm({
         centered: true,
         closable: true,
         maskClosable: true,
@@ -147,6 +148,10 @@ export default function useThemedDialogs() {
         },
         cancelButtonProps: okCancel
           ? {
+              onClick: () => {
+                finish(false);
+                dialogInstance?.destroy();
+              },
               style: {
                 minWidth: 148,
                 height: 42,
@@ -159,10 +164,10 @@ export default function useThemedDialogs() {
             }
           : {
               style: { display: 'none' },
-            },
+        },
         onOk: () => finish(true),
-        onCancel: () => finish(false),
-        afterClose: () => finish(false),
+        onCancel: () => finish(null),
+        afterClose: () => finish(null),
       });
     });
   }, [modal]);

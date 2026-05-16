@@ -48,9 +48,9 @@ export default function RevealActionButton({
   const iconColor = active ? COLORS.background : textColor;
 
   if (isSidebar) {
-    const sidebarButtonSize = compactSidebar ? 48 : 62;
-    const sidebarOrbSize = compactSidebar ? 38 : 50;
-    const sidebarOrbRadius = compactSidebar ? 13 : 18;
+    const sidebarButtonSize = compactSidebar ? 56 : 62;
+    const sidebarOrbSize = compactSidebar ? 42 : 50;
+    const sidebarOrbRadius = compactSidebar ? 14 : 18;
     const sidebarTopOffset = compactSidebar ? 5 : 5;
     const sidebarIconSize = compactSidebar ? 18 : 24;
 
@@ -79,8 +79,7 @@ export default function RevealActionButton({
           justifyContent: "center",
           cursor: "pointer",
           outline: "none",
-          overflowX: "visible",
-          overflowY: "clip",
+          overflow: "visible",
           flexShrink: 0,
         }}
       >
@@ -103,9 +102,26 @@ export default function RevealActionButton({
             transform: expanded ? "scale(0.62)" : "scale(1)",
             transformOrigin: "top center",
             transition: "transform 0.3s ease, background 0.3s ease, box-shadow 0.3s ease",
+            overflow: "visible",
+            lineHeight: 0,
           }}
         >
-          {showIcon && <Icon style={{ fontSize: sidebarIconSize, color: iconColor }} />}
+          {showIcon && (
+            <span
+              style={{
+                width: compactSidebar ? 24 : 28,
+                height: compactSidebar ? 24 : 28,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                lineHeight: 0,
+                overflow: "visible",
+                flexShrink: 0,
+              }}
+            >
+              <Icon style={{ fontSize: sidebarIconSize, color: iconColor, display: "block", overflow: "visible" }} />
+            </span>
+          )}
         </span>
         <span
           style={{

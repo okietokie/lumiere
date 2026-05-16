@@ -5,8 +5,6 @@ import { Splitter, Button, Tooltip, Space, Grid, Tabs, InputNumber, Slider, Draw
 import {
   EyeOutlined,
   EyeInvisibleOutlined,
-  VerticalLeftOutlined,
-  VerticalRightOutlined,
   ApartmentOutlined,
   UndoOutlined,
   RedoOutlined,
@@ -30,6 +28,7 @@ import {
   PoweroffOutlined,
   WalletOutlined,
   QuestionCircleOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { gsap } from "gsap";
 import { v4 as uuidv4 } from "uuid";
@@ -53,6 +52,7 @@ import * as THREE from "three";
 import useHistory   from "../../../hooks/useHistory";
 import useMaterials, { DEFAULT_CEILING_MATERIAL, DEFAULT_FLOOR_MATERIAL } from "../../../hooks/useMaterials";
 import useLighting, { LIGHT_BUDGET_CATEGORIES, LIGHT_TYPES } from "../../../hooks/useLighting";
+import { updateCachedModelManifest } from "../../../hooks/useModelPrefetch";
 import FirstPersonControls from "../camera/FirstPersonControls";
 import WalkHUD             from "../camera/WalkHUD";
 import InteractiveWall from "../walls/InteractiveWall";
@@ -61,6 +61,7 @@ import WallEditorPanel from "../walls/WallEditor";
 import FurnitureItem   from "../furniture/FurnitureItem";
 import FurnitureGizmo  from "../furniture/FurnitureGizmo";
 import FurniturePicker from "../furniture/FurniturePicker";
+import FurnishPanel from "../furniture/FurnishPanel";
 import { PreviewPortal } from "../furniture/ModelPreview";
 import SceneLighting from "../lighting/SceneLighting";
 import LightingPanel from "../lighting/LightingPanel";
@@ -74,9 +75,11 @@ import CollisionHighlight  from "../furniture/CollisionHighlight";
 import useSpatialAnalysis  from "../../../hooks/useSpatialAnalysis";
 import SaveModal           from "../ui/SaveModal";
 import SavedProjectsPanel  from "../ui/SavedProjectsPanel";
+import ProjectsSidebarPanel from "../ui/ProjectsSidebarPanel";
+import ViewSidebarPanel from "../ui/ViewSidebarPanel";
 import { useToast }        from "../../../ui/ToastNotification";
 import RevealActionButton from "./RevealActionButton";
-import useProjectSave      from "../../../hooks/useProjectSave";
+import useProjectSave, { takeSnapshot } from "../../../hooks/useProjectSave";
 import axiosClient from "../../../api/axiosClient";
 import { useBudgetStore } from "../../../stores/useBudgetStore";
 import { calculateBudgetSummary } from "../../../utils/budgetEstimator";
@@ -110,6 +113,8 @@ import ChairRoundedIcon from "@mui/icons-material/ChairRounded";
 import LightbulbRoundedIcon from "@mui/icons-material/LightbulbRounded";
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
 import FolderCopyRoundedIcon from "@mui/icons-material/FolderCopyRounded";
+import PaletteOutlinedIcon from "@mui/icons-material/PaletteOutlined";
+import ViewInArOutlinedIcon from "@mui/icons-material/ViewInArOutlined";
 
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
@@ -123,6 +128,13 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import OnboardingJoyride from "../../onboarding/OnboardingJoyride.jsx";
 import { useOnboardingTour } from "../../onboarding/OnboardingTourProvider.jsx";
 import useThemedDialogs from "../../../hooks/useThemedDialogs.jsx";
+import lmIcon from "../../../assets/lm no-bg.png";
+import WorkspaceSettingsShell from "../../settings/WorkspaceSettingsShell.jsx";
+import {
+  inferFurnitureEmitsLight,
+  normalizeFurnitureLightSettings,
+  normalizeFurnitureLightState,
+} from "../../../utils/furnitureLight";
 
 
 const CAMERA_PRESETS = {
@@ -136,6 +148,12 @@ const OPENING_STEP = 0.05;
 const WALL_EDGE_CONNECT_MIN_LENGTH = 0.25;
 const WALL_EDGE_CONNECT_EPSILON = 0.0001;
 const WALL_EDGE_TOUCH_CONFIRM_MS = 420;
+const SURFACE_SNAP_VERTICAL_THRESHOLD = 0.6;
+const SURFACE_SNAP_WALL_THRESHOLD = 1.15;
+const SURFACE_SNAP_WALL_GAP = 0.02;
+const SURFACE_SNAP_FURNITURE_TOP_THRESHOLD = 0.55;
+const SURFACE_SNAP_FURNITURE_SIDE_THRESHOLD = 0.5;
+const SURFACE_SNAP_OVERLAP_PADDING = 0.08;
 const DOOR_STYLE_OPTIONS = [
   { key: 'hinged', label: 'Single Hinged Door' },
   { key: 'sliding', label: 'Single Sliding Door' },
@@ -154,12 +172,6 @@ const ROOM_ACTION_BUTTONS = [
   { key: 'direction', icon: KeyboardDoubleArrowRightRoundedIcon, label: 'Change Side' },
   { key: 'delete', icon: DeleteOutlined, label: 'Delete Room' },
 ];
-const CAMERA_PRESET_OPTIONS = [
-  { key: 'orbit', label: 'Orbit', shortLabel: 'Free', icon: EyeOutlined },
-  { key: 'front', label: 'Front', shortLabel: 'Front', icon: SpaceDashboardRoundedIcon },
-  { key: 'side', label: 'Side', shortLabel: 'Side', icon: VerticalRightOutlined },
-  { key: 'top', label: 'Top', shortLabel: 'Top', icon: VerticalLeftOutlined, iconStyle: { transform: 'rotate(-90deg)' } },
-];
 const ROOM_CREATION_ROOT_SELECTOR = '[data-room-creation-root="true"]';
 const BUDGET_SCOPE_LABELS = {
   [BUDGET_RULE_SCOPES.SINGLE_ITEM]: 'This item only',
@@ -171,6 +183,17 @@ const BUDGET_COST_SOURCE_OPTIONS = Object.entries(BUDGET_COST_SOURCE_LABELS).map
   label,
 }));
 const MAX_BUDGET_AMOUNT_DECIMALS = 2;
+
+function getFurnitureLightDefaults(source = {}) {
+  const emitsLight = source?.emitsLight ?? inferFurnitureEmitsLight(source);
+  return {
+    emitsLight,
+    lightActive: emitsLight ? (source?.defaultLightActive ?? source?.lightActive ?? true) : false,
+    lightSettings: emitsLight
+      ? normalizeFurnitureLightSettings(source?.lightSettings, source?.defaultLightSettings)
+      : null,
+  };
+}
 
 function formatMoney(value, currency = 'AED') {
   return new Intl.NumberFormat(currency === 'EUR' ? 'en-IE' : 'en-AE', {
@@ -257,6 +280,20 @@ function getFootprintBounds(points) {
     minZ: Math.min(...points.map(([, z]) => z)),
     maxZ: Math.max(...points.map(([, z]) => z)),
   };
+}
+
+function getFootprintCentroid(points = []) {
+  if (!Array.isArray(points) || !points.length) return [0, 0];
+  const sum = points.reduce((acc, [x, z]) => {
+    acc[0] += x;
+    acc[1] += z;
+    return acc;
+  }, [0, 0]);
+  return [sum[0] / points.length, sum[1] / points.length];
+}
+
+function rangesOverlap(minA, maxA, minB, maxB, padding = 0) {
+  return Math.min(maxA, maxB) - Math.max(minA, minB) >= -padding;
 }
 
 function getWallEdgePoint(wall, edge) {
@@ -597,8 +634,9 @@ export default function RoomScene({ initialScene = null }) {
   ]);
 
   // Furniture 
-  const [placedItems,         setPlacedItems]         = useState(() => initialScene?.placedItems ?? []);
+  const [placedItems,         setPlacedItems]         = useState(() => (initialScene?.placedItems ?? []).map((item) => normalizeFurnitureLightState(item)));
   const [selectedFurnitureId, setSelectedFurnitureId] = useState(null);
+  const [pendingFurniturePlacement, setPendingFurniturePlacement] = useState(null);
   const furnitureRefs = useRef({});
 
   // UI state 
@@ -608,8 +646,11 @@ export default function RoomScene({ initialScene = null }) {
   const [elementContextMenu,  setElementContextMenu]  = useState(null);
   const [roomWallPlacementSide, setRoomWallPlacementSide] = useState('right');
   const [sceneRoomActionsVisible, setSceneRoomActionsVisible] = useState(false);
+  const [editingSceneRoomId, setEditingSceneRoomId] = useState(null);
+  const [sceneRoomNameDraft, setSceneRoomNameDraft] = useState('');
   const [cameraMode,          setCameraMode]          = useState('orbit');
   const [gizmoMode,           setGizmoMode]           = useState('translate');
+  const [surfaceSnapEnabled,  setSurfaceSnapEnabled]  = useState(true);
   const [activeTool,          setActiveTool]          = useState('select');
   const [openingPreview,      setOpeningPreview]      = useState(null);
   const [wallEdgeLinkStart,   setWallEdgeLinkStart]   = useState(null);
@@ -617,8 +658,9 @@ export default function RoomScene({ initialScene = null }) {
   const [orbitEnabled,        setOrbitEnabled]        = useState(true);
   const [teleportTarget,      setTeleportTarget]      = useState(null);
   const [activeTab,           setActiveTab]           = useState('walls');
-  const [desktopPanelOpen,    setDesktopPanelOpen]    = useState(false);
+  const [desktopPanelOpen,    setDesktopPanelOpen]    = useState(true);
   const [currentViewPreset,   setCurrentViewPreset]   = useState('perspective');
+  const [walkPreviewSrc,      setWalkPreviewSrc]      = useState(null);
   const [saveModalOpen,       setSaveModalOpen]       = useState(false);
   const [currentProjectId,    setCurrentProjectId]    = useState(() => selectedProjectId ?? null);
   const [projectLoading,      setProjectLoading]      = useState(shouldLoadSelectedProject);
@@ -629,6 +671,7 @@ export default function RoomScene({ initialScene = null }) {
   const [budgetSummaryExpanded, setBudgetSummaryExpanded] = useState(false);
   const [wallsHidden,         setWallsHidden]         = useState(false);
   const [ceilingHidden,       setCeilingHidden]       = useState(false);
+  const [showSpatialWarnings, setShowSpatialWarnings] = useState(true);
   const [wallToolbarPinned,   setWallToolbarPinned]   = useState(false);
   const [furnitureToolbarPinned, setFurnitureToolbarPinned] = useState(false);
   const [wallToolbarPos,      setWallToolbarPos]      = useState(null);
@@ -636,6 +679,7 @@ export default function RoomScene({ initialScene = null }) {
   const [lightToolbarPos,     setLightToolbarPos]     = useState(null);
   const [manualSceneGuideActive, setManualSceneGuideActive] = useState(false);
   const [manualSceneGuideStep, setManualSceneGuideStep] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const orbitControlsRef = useRef(null);
   const sceneRef         = useRef(null);
@@ -786,6 +830,7 @@ export default function RoomScene({ initialScene = null }) {
       cancelText: 'Continue Without Saving',
       tone: 'warning',
     });
+    if (shouldSave === null) return;
     if (shouldSave) {
       try {
         await saveProject(projectName, true);
@@ -809,7 +854,9 @@ export default function RoomScene({ initialScene = null }) {
   }, [leaveEditorWithSavePrompt, navigate]);
 
   const handleDashboard = useCallback(() => {
-    leaveEditorWithSavePrompt(() => navigate("/user/dashboard"), "going to the dashboard");
+    leaveEditorWithSavePrompt(() => navigate("/user/dashboard", {
+      state: { skipDashboardAutoRedirect: true },
+    }), "going to the dashboard");
   }, [leaveEditorWithSavePrompt, navigate]);
 
   const budgetEnabled = useBudgetStore((state) => state.budgetEnabled);
@@ -1054,6 +1101,13 @@ export default function RoomScene({ initialScene = null }) {
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null,
     [rooms, selectedRoomId]
   );
+  useEffect(() => {
+    if (!editingSceneRoomId) return;
+    if (!rooms.some((room) => room.id === editingSceneRoomId)) {
+      setEditingSceneRoomId(null);
+      setSceneRoomNameDraft('');
+    }
+  }, [editingSceneRoomId, rooms]);
   const roomCreation = useRoomCreation({
     rooms,
     setRooms,
@@ -1656,6 +1710,31 @@ export default function RoomScene({ initialScene = null }) {
   const isTopDownView = cameraMode === 'orbit' && currentViewPreset === 'top';
   const selectedWall      = walls.find((w) => w.id === selectedWallId);
   const selectedFurniture = placedItems.find((i) => i.id === selectedFurnitureId);
+  const selectedFurnitureLight = selectedFurniture?.emitsLight ? selectedFurniture : null;
+  const attachedFurnitureLights = useMemo(() => placedItems
+    .filter((item) => item?.emitsLight && item?.lightActive && item?.lightSettings)
+    .map((item) => {
+      const settings = normalizeFurnitureLightSettings(item.lightSettings);
+      const offsetVector = new THREE.Vector3(...settings.offset);
+      const rotation = Array.isArray(item.rotation) ? item.rotation : [0, 0, 0];
+      offsetVector.applyEuler(new THREE.Euler(rotation[0] ?? 0, rotation[1] ?? 0, rotation[2] ?? 0));
+      const position = Array.isArray(item.position) ? item.position : [0, 0, 0];
+      return {
+        id: `furniture-light:${item.id}`,
+        parentItemId: item.id,
+        type: settings.type,
+        position: [
+          (position[0] ?? 0) + offsetVector.x,
+          (position[1] ?? 0) + offsetVector.y,
+          (position[2] ?? 0) + offsetVector.z,
+        ],
+        intensity: settings.intensity,
+        color: settings.color,
+        distance: settings.distance,
+        angle: settings.type === 'spot' ? Math.PI / 4 : Math.PI / 2,
+        enabled: true,
+      };
+    }), [placedItems]);
   const selectedWallDoorCount = selectedWall?.doors?.length ?? 0;
   const selectedWallWindowCount = selectedWall?.windows?.length ?? 0;
   const selectedOpeningEntity = useMemo(() => {
@@ -1685,7 +1764,6 @@ export default function RoomScene({ initialScene = null }) {
   const pageGradient = `radial-gradient(circle at top left, ${COLORS.surface} 0%, ${COLORS.background} 58%, #211a17 100%)`;
   const copperGlow = 'radial-gradient(circle at top left, rgba(196, 154, 108, 0.16), transparent 42%)';
   const accentGlow = 'radial-gradient(circle at bottom right, rgba(139, 107, 77, 0.18), transparent 38%)';
-  const cameraCardBg = `linear-gradient(180deg, ${COLORS.background}E8 0%, ${COLORS.surface}F2 100%)`;
   const desktopCanvasShell = `linear-gradient(180deg, ${COLORS.surface}D8 0%, ${COLORS.background}F4 100%)`;
   const openingChipStyle = {
     minHeight: 30,
@@ -1880,7 +1958,7 @@ export default function RoomScene({ initialScene = null }) {
     if (!snapshot) return;
     setRooms(snapshot.rooms ?? []);
     setWalls(snapshot.walls ?? [], true);
-    setPlacedItems(snapshot.placedItems ?? []);
+    setPlacedItems((snapshot.placedItems ?? []).map((item) => normalizeFurnitureLightState(item)));
     setFloorMaterial(snapshot.floorMaterial);
     setCeilingMaterial(snapshot.ceilingMaterial);
     lightingState.setPlacedLights(snapshot.placedLights ?? []);
@@ -2415,6 +2493,30 @@ export default function RoomScene({ initialScene = null }) {
     if (nextTab) setActiveTab(nextTab);
     if (activeTool === 'build') setActiveTool('select');
   }, [activeTool, roomCreation]);
+  const beginSceneRoomRename = useCallback((roomId) => {
+    const room = rooms.find((entry) => entry.id === roomId);
+    if (!room) return;
+    selectRoom(roomId);
+    setEditingSceneRoomId(roomId);
+    setSceneRoomNameDraft(room.name ?? '');
+  }, [rooms, selectRoom]);
+  const cancelSceneRoomRename = useCallback(() => {
+    setEditingSceneRoomId(null);
+    setSceneRoomNameDraft('');
+  }, []);
+  const commitSceneRoomRename = useCallback(() => {
+    if (!editingSceneRoomId) return;
+    const room = rooms.find((entry) => entry.id === editingSceneRoomId);
+    const nextName = sceneRoomNameDraft.trim();
+    if (room && nextName && nextName !== room.name) {
+      markSceneMutation();
+      setRooms((prev) => prev.map((entry) => (
+        entry.id === editingSceneRoomId ? { ...entry, name: nextName } : entry
+      )));
+    }
+    setEditingSceneRoomId(null);
+    setSceneRoomNameDraft('');
+  }, [editingSceneRoomId, markSceneMutation, rooms, sceneRoomNameDraft]);
 
   const rebuildResolvedWalls = useCallback((nextRooms, wallSource = walls) => {
     const manualWalls = wallSource.filter((wall) => wall?.source === 'manual');
@@ -2717,7 +2819,8 @@ export default function RoomScene({ initialScene = null }) {
 
   const renderRoomQuickActions = useCallback((room, variant = 'panel') => {
     const compact = variant !== 'scene';
-    const isPanelVariant = variant === 'panel' || variant === 'mobile';
+    const isPanelVariant = variant === 'panel' || variant === 'mobile' || variant === 'sidebar';
+    const isSidebarVariant = variant === 'sidebar';
     const isPendingRoomForDirection = (direction) => (
       roomCreation.pendingRoomCreation?.sourceRoomId === room.id
       && roomCreation.pendingRoomCreation.direction === direction
@@ -2732,6 +2835,9 @@ export default function RoomScene({ initialScene = null }) {
         padding: compact ? 0 : '4px 8px',
       }}>
         {ROOM_ACTION_BUTTONS.map(({ key, icon, label }) => {
+          if (isSidebarVariant && key === 'room') {
+            return null;
+          }
           if (!compact && key === 'room' && isPendingRoomForDirection(roomWallPlacementSide)) {
             return (
               <div
@@ -3060,12 +3166,12 @@ export default function RoomScene({ initialScene = null }) {
               {selectedRoom.name} • {Number(selectedRoom.width).toFixed(1)}m × {Number(selectedRoom.depth).toFixed(1)}m
             </div>
           </div>
-          <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
+        <div style={{ color: COLORS.action, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
             Room Actions
           </div>
         </div>
         <div className="room-action-grid" style={{ paddingTop: 10 }}>
-          {renderRoomQuickActions(selectedRoom, 'panel')}
+          {renderRoomQuickActions(selectedRoom, isSidebarVariant ? 'sidebar' : 'panel')}
         </div>
         <div data-room-creation-root="true">
           <RoomCreationPanel
@@ -3081,95 +3187,6 @@ export default function RoomScene({ initialScene = null }) {
       </div>
     );
   };
-
-  const renderViewPanel = useCallback((variant = 'desktop') => {
-    const isMobileVariant = variant === 'mobile';
-    const modeDescription = supportsFirstPersonWalk
-      ? (cameraMode === 'orbit'
-          ? 'Smooth camera orbit for framing and styling.'
-          : 'Step through the room at human eye level.')
-      : (currentViewPreset === 'top'
-          ? 'Plan view for layout checks and quick room edits.'
-          : 'Drag to look around and pinch to zoom.');
-
-    return (
-      <div className={isMobileVariant ? 'room-mobile-section room-view-card-shell' : 'room-view-card-shell'}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: isMobileVariant ? 0 : '14px 16px', background: isMobileVariant ? 'transparent' : cameraCardBg, borderRadius: isMobileVariant ? 0 : 22, border: isMobileVariant ? 'none' : `1px solid ${COLORS.secondary}50`, boxShadow: isMobileVariant ? 'none' : 'inset 0 1px 0 rgba(255,255,255,0.03), 0 10px 24px rgba(0,0,0,0.18)' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <div className="room-view-title">View</div>
-              <div className="room-view-subtitle">{modeDescription}</div>
-            </div>
-          </div>
-          <div className="room-view-mode-grid">
-            {supportsFirstPersonWalk ? (
-              <>
-                <button
-                  type="button"
-                  className={cameraMode === 'orbit' ? 'room-view-mode is-active' : 'room-view-mode'}
-                  onClick={() => { setCameraMode('orbit'); if (document.pointerLockElement) document.exitPointerLock(); }}
-                >
-                  <span className="room-view-mode-title">Orbit</span>
-                  <span className="room-view-mode-copy">Review the full space</span>
-                </button>
-                <button
-                  type="button"
-                  className={cameraMode === 'firstPerson' ? 'room-view-mode is-active' : 'room-view-mode'}
-                  onClick={() => { setCameraMode('firstPerson'); setTeleportTarget([0, 1.28, 0]); }}
-                >
-                  <span className="room-view-mode-title">Walk</span>
-                  <span className="room-view-mode-copy">Move through the room</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className={cameraMode === 'orbit' && currentViewPreset !== 'top' ? 'room-view-mode is-active' : 'room-view-mode'}
-                  onClick={() => {
-                    setCameraMode('orbit');
-                    if (document.pointerLockElement) document.exitPointerLock();
-                    applyCameraPreset('perspective');
-                  }}
-                >
-                  <span className="room-view-mode-title">Explore</span>
-                  <span className="room-view-mode-copy">Drag and pinch around the room</span>
-                </button>
-                <button
-                  type="button"
-                  className={cameraMode === 'orbit' && currentViewPreset === 'top' ? 'room-view-mode is-active' : 'room-view-mode'}
-                  onClick={() => {
-                    setCameraMode('orbit');
-                    if (document.pointerLockElement) document.exitPointerLock();
-                    applyCameraPreset('top');
-                  }}
-                >
-                  <span className="room-view-mode-title">Plan</span>
-                  <span className="room-view-mode-copy">Jump to a clear top-down layout view</span>
-                </button>
-              </>
-            )}
-          </div>
-          <div className="room-view-strip">
-            {CAMERA_PRESET_OPTIONS.map(({ key, label, shortLabel, icon: Icon, iconStyle }) => (
-              <Tooltip key={key} title={label}>
-                <button
-                  type="button"
-                  className={currentViewPreset === key ? 'room-view-option is-active' : 'room-view-option'}
-                  onClick={() => applyCameraPreset(key)}
-                >
-                  <span className="room-view-option-icon">
-                    <Icon style={{ fontSize: 16, ...iconStyle }} />
-                  </span>
-                  <span className="room-view-option-label">{shortLabel}</span>
-                </button>
-              </Tooltip>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }, [COLORS.secondary, applyCameraPreset, cameraCardBg, cameraMode, currentViewPreset, supportsFirstPersonWalk]);
 
   const renderWindowBehaviorControls = useCallback(() => {
     if (!selectedOpening || !selectedOpeningEntity || selectedOpening.type !== 'window') return null;
@@ -3532,14 +3549,28 @@ export default function RoomScene({ initialScene = null }) {
         if (e.ctrlKey || e.metaKey) e.preventDefault();
         return;
       }
+      if (isTypingTarget(e.target)) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        if (isTypingTarget(e.target)) return;
         if (currentProjectId) projectSave.saveProject(projectSave.projectName, true).catch(() => {});
         else setSaveModalOpen(true);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
       if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && (selectedWallId || selectedFurnitureId)) {
+        if (e.key === '1') {
+          e.preventDefault();
+          setGizmoMode('translate');
+        }
+        if (e.key === '2') {
+          e.preventDefault();
+          setGizmoMode('rotate');
+        }
+        if (e.key === '3') {
+          e.preventDefault();
+          setGizmoMode('scale');
+        }
+      }
       if (e.key === 'Escape') {
         setSelectedWallId(null);
         setSelectedFurnitureId(null);
@@ -3556,21 +3587,26 @@ export default function RoomScene({ initialScene = null }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, selectedFurnitureId, selectedOpening, removeWallOpening, currentProjectId, projectSave, isTypingTarget, isSaving]);
+  }, [undo, redo, selectedWallId, selectedFurnitureId, selectedOpening, removeWallOpening, currentProjectId, projectSave, isTypingTarget, isSaving]);
 
   // Furniture helpers
   const addItem = (modelMeta) => {
     markSceneMutation();
+    const lightDefaults = getFurnitureLightDefaults(modelMeta);
     const item = {
       id:       uuidv4(),
       filename: modelMeta.filename,
       name:     modelMeta.name,
       url:      modelMeta.url,
       category: modelMeta.category || null,   
+      roomId:   getRoomIdForPosition(rooms, [0, 0, 0]),
       position: [0, 0, 0],
       rotation: [0, 0, 0],
       scale:    [1, 1, 1],
       tint:     null,
+      emitsLight: lightDefaults.emitsLight,
+      lightActive: lightDefaults.lightActive,
+      lightSettings: lightDefaults.lightSettings,
     };
     setPlacedItems((p) => [...p, item]);
     setSelectedFurnitureId(item.id);
@@ -3580,10 +3616,469 @@ export default function RoomScene({ initialScene = null }) {
     }
   };
 
+  const focusRoomTopView = useCallback((roomId) => {
+    const room = rooms.find((entry) => entry.id === roomId);
+    if (!room) {
+      applyCameraPreset('top');
+      return;
+    }
+
+    setCurrentViewPreset('top');
+    const surfaceBounds = roomSurfaceBounds.find((entry) => entry.roomId === room.id);
+    const footprint = getRoomFootprint(room, surfaceBounds);
+    const bounds = getFootprintBounds(footprint);
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerZ = (bounds.minZ + bounds.maxZ) / 2;
+    const span = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ, 3.5);
+    const target = [centerX, 0, centerZ];
+    const position = [centerX, Math.max(span * 1.35, room.height + 4), centerZ + 0.001];
+
+    if (cameraMode === 'orbit' && orbitControlsRef.current) {
+      gsap.to(orbitControlsRef.current.target, {
+        x: target[0],
+        y: target[1],
+        z: target[2],
+        duration: 0.8,
+        ease: 'power2.inOut',
+      });
+      gsap.to(orbitControlsRef.current.object.position, {
+        x: position[0],
+        y: position[1],
+        z: position[2],
+        duration: 0.8,
+        ease: 'power2.inOut',
+        onUpdate: () => orbitControlsRef.current?.update(),
+      });
+      return;
+    }
+
+    applyCameraPreset('top');
+  }, [cameraMode, roomSurfaceBounds, rooms]);
+  const animateOrbitCamera = useCallback((target, position, duration = 0.7) => {
+    if (!orbitControlsRef.current) return;
+    gsap.killTweensOf(orbitControlsRef.current.target);
+    gsap.killTweensOf(orbitControlsRef.current.object.position);
+    gsap.to(orbitControlsRef.current.target, {
+      x: target[0],
+      y: target[1],
+      z: target[2],
+      duration,
+      ease: 'power2.inOut',
+    });
+    gsap.to(orbitControlsRef.current.object.position, {
+      x: position[0],
+      y: position[1],
+      z: position[2],
+      duration,
+      ease: 'power2.inOut',
+      onUpdate: () => orbitControlsRef.current?.update(),
+    });
+  }, []);
+  const focusOrbitOnBounds = useCallback((center, size, options = {}) => {
+    if (cameraMode !== 'orbit' || !orbitControlsRef.current) return;
+
+    const orbitObject = orbitControlsRef.current.object;
+    const orbitTarget = orbitControlsRef.current.target;
+    const currentDirection = new THREE.Vector3(
+      orbitObject.position.x - orbitTarget.x,
+      orbitObject.position.y - orbitTarget.y,
+      orbitObject.position.z - orbitTarget.z,
+    );
+    if (currentDirection.lengthSq() < 0.0001) {
+      currentDirection.set(1, 0.8, 1.1);
+    }
+    const direction = currentDirection.normalize();
+    const maxSize = Math.max(
+      Number(size?.[0] ?? 0),
+      Number(size?.[1] ?? 0),
+      Number(size?.[2] ?? 0),
+      options.minimumSpan ?? 0.9,
+    );
+    const focusDistance = THREE.MathUtils.clamp(
+      maxSize * (options.distanceMultiplier ?? 2.25),
+      options.minDistance ?? 1.05,
+      options.maxDistance ?? 12,
+    );
+    const target = [
+      Number(center?.[0] ?? 0),
+      Number(center?.[1] ?? 0),
+      Number(center?.[2] ?? 0),
+    ];
+    let position;
+    if (currentViewPreset === 'top') {
+      position = [
+        target[0],
+        target[1] + Math.max(maxSize * 2.35, options.topHeight ?? 2.8),
+        target[2] + 0.001,
+      ];
+    } else {
+      position = [
+        target[0] + (direction.x * focusDistance),
+        target[1] + (direction.y * focusDistance),
+        target[2] + (direction.z * focusDistance),
+      ];
+    }
+
+    animateOrbitCamera(target, position, options.duration ?? 0.72);
+  }, [animateOrbitCamera, cameraMode, currentViewPreset]);
+  const focusWallInScene = useCallback((wall, roomId = null) => {
+    if (!wall) return;
+    setSelectedRoomId(roomId ?? wall.roomId ?? null);
+    setSelectedWallId(wall.id);
+    setSelectedFurnitureId(null);
+    setSelectedLightId(null);
+    setSelectedOpening(null);
+    setActiveTab('walls');
+    if (activeTool === 'build') setActiveTool('select');
+    const center = [
+      ((wall.start?.[0] ?? 0) + (wall.end?.[0] ?? 0)) / 2,
+      Math.max((wall.height ?? 3) * 0.5, 0.6),
+      ((wall.start?.[1] ?? 0) + (wall.end?.[1] ?? 0)) / 2,
+    ];
+    const wallLength = Math.hypot(
+      (wall.end?.[0] ?? 0) - (wall.start?.[0] ?? 0),
+      (wall.end?.[1] ?? 0) - (wall.start?.[1] ?? 0),
+    );
+    focusOrbitOnBounds(center, [wallLength, wall.height ?? 3, wall.thickness ?? 0.2], {
+      minimumSpan: 1.25,
+      distanceMultiplier: 1.75,
+      minDistance: 1.3,
+      topHeight: 3.2,
+    });
+  }, [activeTool, focusOrbitOnBounds]);
+  const focusFurnitureInScene = useCallback((item) => {
+    if (!item) return;
+    setSelectedFurnitureId(item.id);
+    setSelectedWallId(null);
+    setSelectedLightId(null);
+    setSelectedOpening(null);
+    if (item.roomId) setSelectedRoomId(item.roomId);
+    setActiveTab('furniture');
+
+    const liveNode = furnitureRefs.current[item.id];
+    const box = liveNode ? new THREE.Box3().setFromObject(liveNode) : null;
+    const size = box && !box.isEmpty() ? box.getSize(new THREE.Vector3()) : null;
+    const center = box && !box.isEmpty()
+      ? box.getCenter(new THREE.Vector3())
+      : new THREE.Vector3(item.position?.[0] ?? 0, 0.8, item.position?.[2] ?? 0);
+    focusOrbitOnBounds([center.x, center.y, center.z], size ? [size.x, size.y, size.z] : [1.1, 1.1, 1.1], {
+      minimumSpan: 0.9,
+      distanceMultiplier: 2.05,
+      minDistance: 1.1,
+      topHeight: 2.4,
+    });
+  }, [focusOrbitOnBounds, furnitureRefs]);
+  const focusLightInScene = useCallback((light) => {
+    if (!light) return;
+    setSelectedLightId(light.id);
+    setSelectedWallId(null);
+    setSelectedFurnitureId(null);
+    setSelectedOpening(null);
+    if (light.roomId) setSelectedRoomId(light.roomId);
+    setActiveTab('lighting');
+    focusOrbitOnBounds(
+      [light.position?.[0] ?? 0, light.position?.[1] ?? 1.2, light.position?.[2] ?? 0],
+      [0.8, 0.8, 0.8],
+      {
+        minimumSpan: 0.8,
+        distanceMultiplier: 2.15,
+        minDistance: 1.05,
+        topHeight: 2.2,
+      },
+    );
+  }, [focusOrbitOnBounds]);
+
+  const snapFurnitureItemToSurfaces = useCallback((item, itemObject) => {
+    if (!surfaceSnapEnabled || !itemObject) return null;
+
+    itemObject.updateMatrixWorld?.(true);
+    const worldBox = new THREE.Box3().setFromObject(itemObject);
+    if (worldBox.isEmpty()) return null;
+
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    worldBox.getSize(size);
+    worldBox.getCenter(center);
+
+    const currentPosition = [
+      itemObject.position.x,
+      itemObject.position.y,
+      itemObject.position.z,
+    ];
+
+    const detectedRoomId = getRoomIdForPosition(rooms, currentPosition);
+    const activeRoom = rooms.find((room) => room.id === detectedRoomId)
+      ?? rooms.find((room) => room.id === item?.roomId)
+      ?? null;
+
+    let nextX = currentPosition[0];
+    let nextY = currentPosition[1];
+    let nextZ = currentPosition[2];
+    let didSnap = false;
+
+    const otherFurnitureRefs = placedItems
+      .filter((entry) => entry?.id && entry.id !== item?.id)
+      .map((entry) => {
+        const refObject = furnitureRefs.current?.[entry.id];
+        if (!refObject) return null;
+        refObject.updateMatrixWorld?.(true);
+        const box = new THREE.Box3().setFromObject(refObject);
+        if (box.isEmpty()) return null;
+        return { item: entry, box };
+      })
+      .filter(Boolean);
+
+    const bestTopSnap = otherFurnitureRefs.reduce((best, candidate) => {
+      const candidateBox = candidate.box;
+      const horizontalOverlap = rangesOverlap(
+        worldBox.min.x,
+        worldBox.max.x,
+        candidateBox.min.x,
+        candidateBox.max.x,
+        SURFACE_SNAP_OVERLAP_PADDING,
+      ) && rangesOverlap(
+        worldBox.min.z,
+        worldBox.max.z,
+        candidateBox.min.z,
+        candidateBox.max.z,
+        SURFACE_SNAP_OVERLAP_PADDING,
+      );
+      if (!horizontalOverlap) return best;
+
+      const deltaY = candidateBox.max.y - worldBox.min.y;
+      const distance = Math.abs(deltaY);
+      if (distance > SURFACE_SNAP_FURNITURE_TOP_THRESHOLD) return best;
+      if (!best || distance < best.distance) {
+        return {
+          distance,
+          deltaY,
+          roomId: candidate.item.roomId ?? null,
+        };
+      }
+      return best;
+    }, null);
+
+    if (bestTopSnap) {
+      nextY += bestTopSnap.deltaY;
+      didSnap = true;
+    }
+
+    const bestSideSnap = otherFurnitureRefs.reduce((best, candidate) => {
+      const candidateBox = candidate.box;
+      const verticalOverlap = rangesOverlap(
+        worldBox.min.y,
+        worldBox.max.y,
+        candidateBox.min.y,
+        candidateBox.max.y,
+        SURFACE_SNAP_OVERLAP_PADDING,
+      );
+      if (!verticalOverlap) return best;
+
+      const xCandidate = rangesOverlap(
+        worldBox.min.z,
+        worldBox.max.z,
+        candidateBox.min.z,
+        candidateBox.max.z,
+        SURFACE_SNAP_OVERLAP_PADDING,
+      )
+        ? [
+            { axis: 'x', delta: candidateBox.min.x - worldBox.max.x },
+            { axis: 'x', delta: candidateBox.max.x - worldBox.min.x },
+          ]
+        : [];
+      const zCandidate = rangesOverlap(
+        worldBox.min.x,
+        worldBox.max.x,
+        candidateBox.min.x,
+        candidateBox.max.x,
+        SURFACE_SNAP_OVERLAP_PADDING,
+      )
+        ? [
+            { axis: 'z', delta: candidateBox.min.z - worldBox.max.z },
+            { axis: 'z', delta: candidateBox.max.z - worldBox.min.z },
+          ]
+        : [];
+
+      return [...xCandidate, ...zCandidate].reduce((axisBest, option) => {
+        const distance = Math.abs(option.delta);
+        if (distance > SURFACE_SNAP_FURNITURE_SIDE_THRESHOLD) return axisBest;
+        if (!axisBest || distance < axisBest.distance) {
+          return {
+            axis: option.axis,
+            delta: option.delta,
+            distance,
+            roomId: candidate.item.roomId ?? null,
+          };
+        }
+        return axisBest;
+      }, best);
+    }, null);
+
+    if (bestSideSnap) {
+      if (bestSideSnap.axis === 'x') {
+        nextX += bestSideSnap.delta;
+      } else {
+        nextZ += bestSideSnap.delta;
+      }
+      didSnap = true;
+    }
+
+    if (activeRoom) {
+      const roomHeight = Number.isFinite(activeRoom.height) && activeRoom.height > 0 ? activeRoom.height : 3;
+      const floorDistance = Math.abs(worldBox.min.y);
+      const ceilingDistance = Math.abs(roomHeight - worldBox.max.y);
+
+      if (!bestTopSnap && Math.min(floorDistance, ceilingDistance) <= SURFACE_SNAP_VERTICAL_THRESHOLD) {
+        if (floorDistance <= ceilingDistance) {
+          nextY -= worldBox.min.y;
+        } else {
+          nextY += roomHeight - worldBox.max.y;
+        }
+        didSnap = true;
+      }
+
+      const roomWalls = walls.filter((wall) => wall?.roomId === activeRoom.id && Array.isArray(wall?.start) && Array.isArray(wall?.end));
+      if (roomWalls.length) {
+        const surfaceBounds = roomSurfaceBounds.find((entry) => entry.roomId === activeRoom.id) ?? null;
+        const footprint = getRenderableRoomFootprint(activeRoom, roomWalls, surfaceBounds);
+        const roomCentroid = getFootprintCentroid(footprint);
+        const wallOffset = Math.max(size.x, size.z) / 2 + SURFACE_SNAP_WALL_GAP;
+
+        const bestWallSnap = roomWalls.reduce((best, wall) => {
+          const { length, direction, normal } = getWallMetrics(wall);
+          if (!Number.isFinite(length) || length <= 0.001) return best;
+
+          const [sx, sz] = wall.start;
+          const rawOffset = ((center.x - sx) * direction[0]) + ((center.z - sz) * direction[1]);
+          const clampedOffset = Math.min(length, Math.max(0, rawOffset));
+          const projectedPoint = [
+            sx + direction[0] * clampedOffset,
+            sz + direction[1] * clampedOffset,
+          ];
+          const centroidVector = [
+            roomCentroid[0] - projectedPoint[0],
+            roomCentroid[1] - projectedPoint[1],
+          ];
+          const dot = normal[0] * centroidVector[0] + normal[1] * centroidVector[1];
+          const inwardNormal = dot >= 0 ? normal : [-normal[0], -normal[1]];
+          const target = [
+            projectedPoint[0] + inwardNormal[0] * ((wall.thickness ?? 0.2) / 2 + wallOffset),
+            projectedPoint[1] + inwardNormal[1] * ((wall.thickness ?? 0.2) / 2 + wallOffset),
+          ];
+          const distance = Math.hypot(center.x - target[0], center.z - target[1]);
+
+          if (!best || distance < best.distance) {
+            return { distance, target };
+          }
+          return best;
+        }, null);
+
+        if (bestWallSnap && bestWallSnap.distance <= SURFACE_SNAP_WALL_THRESHOLD) {
+          nextX += bestWallSnap.target[0] - center.x;
+          nextZ += bestWallSnap.target[1] - center.z;
+          didSnap = true;
+        }
+      }
+    }
+
+    const nextRoomId = getRoomIdForPosition(rooms, [nextX, nextY, nextZ])
+      ?? bestTopSnap?.roomId
+      ?? bestSideSnap?.roomId
+      ?? activeRoom?.id
+      ?? item?.roomId
+      ?? null;
+    if (!didSnap && nextRoomId === item?.roomId) return null;
+
+    return {
+      position: [
+        Number(nextX.toFixed(4)),
+        Number(nextY.toFixed(4)),
+        Number(nextZ.toFixed(4)),
+      ],
+      roomId: nextRoomId,
+    };
+  }, [placedItems, roomSurfaceBounds, rooms, surfaceSnapEnabled, walls]);
+
+  const beginFurniturePlacement = useCallback((modelMeta, roomId) => {
+    if (!modelMeta || !roomId) return;
+    const room = rooms.find((entry) => entry.id === roomId);
+    setPendingFurniturePlacement({ modelMeta, roomId });
+    setSelectedRoomId(roomId);
+    setSelectedWallId(null);
+    setSelectedLightId(null);
+    setSelectedFurnitureId(null);
+    setSelectedOpening(null);
+    setActiveTab('furniture');
+    setDesktopPanelOpen(true);
+    focusRoomTopView(roomId);
+    toast.info(room?.name ? `Top view opened for ${room.name}. Click where you want it to be placed.` : 'Top view opened. Click where you want it to be placed.');
+  }, [focusRoomTopView, rooms, toast]);
+
+  const placeFurnitureInRoom = useCallback((roomId, point) => {
+    if (!pendingFurniturePlacement?.modelMeta || !point) return false;
+    markSceneMutation();
+    const lightDefaults = getFurnitureLightDefaults(pendingFurniturePlacement.modelMeta);
+    const item = {
+      id: uuidv4(),
+      filename: pendingFurniturePlacement.modelMeta.filename,
+      name: pendingFurniturePlacement.modelMeta.name,
+      url: pendingFurniturePlacement.modelMeta.url,
+      category: pendingFurniturePlacement.modelMeta.category || null,
+      roomId,
+      position: [point.x, 0, point.z],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      tint: null,
+      emitsLight: lightDefaults.emitsLight,
+      lightActive: lightDefaults.lightActive,
+      lightSettings: lightDefaults.lightSettings,
+    };
+    setPlacedItems((prev) => [...prev, item]);
+    setSelectedFurnitureId(item.id);
+    setSelectedWallId(null);
+    setSelectedLightId(null);
+    setPendingFurniturePlacement(null);
+    setActiveTab('furniture');
+    const room = rooms.find((entry) => entry.id === roomId);
+    toast.success(room?.name ? `${item.name ?? 'Furniture'} placed in ${room.name}.` : `${item.name ?? 'Furniture'} placed.`);
+    return true;
+  }, [markSceneMutation, pendingFurniturePlacement, rooms, toast]);
+
   const updateItem = (id, updates) => {
     markSceneMutation();
-    setPlacedItems((p) => p.map((i) => i.id === id ? { ...i, ...updates } : i));
+    setPlacedItems((p) => p.map((i) => i.id === id ? normalizeFurnitureLightState({ ...i, ...updates }) : i));
   };
+  const updateSelectedFurnitureLight = useCallback((updates, options = {}) => {
+    if (!selectedFurnitureLight) return;
+    const { applyToStyle = false } = options;
+    markSceneMutation();
+    setPlacedItems((prev) => prev.map((item) => {
+      if (applyToStyle && item.filename !== selectedFurnitureLight.filename) return item;
+      if (!applyToStyle && item.id !== selectedFurnitureLight.id) return item;
+      const nextSettings = updates.lightSettings
+        ? normalizeFurnitureLightSettings({
+            ...(item.lightSettings ?? {}),
+            ...updates.lightSettings,
+          })
+        : item.lightSettings;
+      return normalizeFurnitureLightState({
+        ...item,
+        ...updates,
+        lightSettings: nextSettings,
+      });
+    }));
+  }, [markSceneMutation, selectedFurnitureLight]);
+  const saveFurnitureLightStyleOverride = useCallback(async (item) => {
+    if (!item?.filename || !item?.emitsLight) return;
+    const payload = {
+      filename: item.filename,
+      emitsLight: item.emitsLight,
+      defaultLightActive: item.lightActive,
+      defaultLightSettings: normalizeFurnitureLightSettings(item.lightSettings),
+    };
+    await axiosClient.put('/api/models/light-style', payload);
+    updateCachedModelManifest(item.filename, payload);
+  }, []);
 
   const setSelectedFurnitureTint = useCallback((nextTint) => {
     if (!selectedFurnitureId) return;
@@ -3634,6 +4129,7 @@ export default function RoomScene({ initialScene = null }) {
   const replaceItem = (newMeta) => {
     if (!selectedFurniture) return;
     markSceneMutation();
+    const lightDefaults = getFurnitureLightDefaults(newMeta);
     const newItem = {
       id: uuidv4(), filename: newMeta.filename, name: newMeta.name, url: newMeta.url,
       category: newMeta.category || null,
@@ -3641,6 +4137,9 @@ export default function RoomScene({ initialScene = null }) {
       rotation: [...selectedFurniture.rotation],
       scale:    [...selectedFurniture.scale],
       tint:     selectedFurniture.tint ?? null,
+      emitsLight: lightDefaults.emitsLight,
+      lightActive: lightDefaults.lightActive,
+      lightSettings: lightDefaults.lightSettings,
     };
     setPlacedItems((p) => [...p.filter((i) => i.id !== selectedFurnitureId), newItem]);
     setSelectedFurnitureId(newItem.id);
@@ -3744,7 +4243,7 @@ export default function RoomScene({ initialScene = null }) {
         setSelectedFurnitureId(menu.targetId);
         setSelectedWallId(null);
         setSelectedLightId(null);
-        setActiveTab('furniture');
+        setActiveTab(menu.entity?.emitsLight ? 'lighting' : 'furniture');
       } else if (menu.kind === 'light') {
         setSelectedLightId(menu.targetId);
         setSelectedWallId(null);
@@ -3795,20 +4294,107 @@ export default function RoomScene({ initialScene = null }) {
       if (menu.kind === 'light') duplicateLight(menu.entity);
     }
 
+    if (action === 'toggleFurnitureLight' && menu.kind === 'furniture' && menu.entity?.emitsLight) {
+      updateSelectedFurnitureLight(
+        { lightActive: !menu.entity.lightActive },
+        { applyToStyle: false },
+      );
+    }
+
     setElementContextMenu(null);
-  }, [deleteWall, duplicateItem, duplicateLight, duplicateWall, elementContextMenu, lightingState, setGizmoMode]);
+  }, [deleteWall, duplicateItem, duplicateLight, duplicateWall, elementContextMenu, lightingState, setGizmoMode, updateSelectedFurnitureLight]);
 
   // Camera helpers 
-  function applyCameraPreset(preset) {
+  function applyCameraPreset(preset, modeOverride = cameraMode) {
     setCurrentViewPreset(preset);
     const { position, target } = getCameraPresetConfig(preset);
-    if (cameraMode === 'orbit' && orbitControlsRef.current) {
+    if (modeOverride === 'orbit' && orbitControlsRef.current) {
       gsap.to(orbitControlsRef.current.target, { x: target[0], y: target[1], z: target[2], duration: 1, ease: "power2.inOut" });
       gsap.to(orbitControlsRef.current.object.position, { x: position[0], y: position[1], z: position[2], duration: 1, ease: "power2.inOut", onUpdate: () => orbitControlsRef.current.update() });
-    } else if (cameraMode === 'firstPerson') {
+    } else if (modeOverride === 'firstPerson') {
       setTeleportTarget([position[0], 1.28, position[2]]);
     }
   }
+
+  const captureWalkPreview = useCallback(async () => {
+    const captured = await new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const snapshotApi = snapshotApiRef.current;
+          const dataUrl = snapshotApi?.capture?.() ?? takeSnapshot(canvasWrapperRef.current);
+          resolve(dataUrl && dataUrl !== 'data:,' ? dataUrl : null);
+        });
+      });
+    });
+
+    if (captured) {
+      setWalkPreviewSrc(captured);
+    }
+
+    return captured;
+  }, []);
+
+  const handleEnterOrbitView = useCallback(() => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    setCameraMode('orbit');
+    applyCameraPreset('perspective', 'orbit');
+  }, [applyCameraPreset]);
+
+  const handleEnterWalkView = useCallback(() => {
+    void captureWalkPreview();
+    setCameraMode('firstPerson');
+    setTeleportTarget([0, 1.28, 0]);
+  }, [captureWalkPreview]);
+
+  const handleExitWalkView = useCallback(() => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    setCameraMode('orbit');
+    applyCameraPreset('perspective', 'orbit');
+  }, [applyCameraPreset]);
+
+  const handleApplyViewOrientation = useCallback((preset) => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    setCameraMode('orbit');
+    applyCameraPreset(preset, 'orbit');
+  }, [applyCameraPreset]);
+
+  const renderViewSidebarPanel = useCallback(() => (
+    <ViewSidebarPanel
+      cameraMode={cameraMode}
+      currentViewPreset={currentViewPreset}
+      supportsFirstPersonWalk={supportsFirstPersonWalk}
+      walkPreviewSrc={walkPreviewSrc}
+      wallCount={walls.length}
+      objectCount={placedItems.length}
+      lightCount={placedLights.length}
+      wallsHidden={wallsHidden}
+      ceilingHidden={ceilingHidden}
+      onEnterOrbit={handleEnterOrbitView}
+      onEnterWalk={handleEnterWalkView}
+      onExitWalk={handleExitWalkView}
+      onApplyOrientation={handleApplyViewOrientation}
+      onRequestWalkPreview={captureWalkPreview}
+      onToggleWalls={toggleWallsHidden}
+      onToggleCeiling={toggleCeilingHidden}
+    />
+  ), [
+    cameraMode,
+    captureWalkPreview,
+    ceilingHidden,
+    currentViewPreset,
+    handleApplyViewOrientation,
+    handleEnterOrbitView,
+    handleEnterWalkView,
+    handleExitWalkView,
+    placedItems.length,
+    placedLights.length,
+    supportsFirstPersonWalk,
+    toggleCeilingHidden,
+    toggleWallsHidden,
+    walkPreviewSrc,
+    walls.length,
+    wallsHidden,
+  ]);
 
   const handlePointerMissed = () => {
     setSelectedWallId(null);
@@ -3833,6 +4419,11 @@ export default function RoomScene({ initialScene = null }) {
     setActiveTab(tabKey);
     setDesktopPanelOpen(true);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'view') return;
+    void captureWalkPreview();
+  }, [activeTab, captureWalkPreview]);
 
   const prepareMobileGuidePanel = useCallback(() => {
     if (!isMobile) return;
@@ -3951,23 +4542,41 @@ export default function RoomScene({ initialScene = null }) {
     manualSceneGuideActive
       ? getSceneGuideStepConfig(manualSceneGuideStep)
       : null;
-
   const desktopNavItems = useMemo(() => {
-    const items = [
-      { key: 'walls', label: 'Build', icon: ArchitectureRoundedIcon },
-      { key: 'materials', label: 'Style', icon: TextureRoundedIcon },
-      { key: 'lighting', label: 'Light', icon: LightbulbRoundedIcon },
+    return [
+      { key: 'materials', label: 'Style', icon: PaletteOutlinedIcon },
+      { key: 'lighting', label: 'Lighting', icon: LightbulbRoundedIcon },
       { key: 'furniture', label: 'Furnish', icon: ChairRoundedIcon },
-      { key: 'projects', label: 'Projects', icon: FolderCopyRoundedIcon },
+      { key: 'projects', label: 'Projects', icon: ViewInArOutlinedIcon },
       { key: 'view', label: 'View', icon: VisibilityRoundedIcon },
     ];
+  }, []);
 
-    if (selectedRoom) {
-      items.splice(1, 0, { key: 'room', label: 'Room', icon: HomeWorkRoundedIcon });
-    }
-
-    return items;
-  }, [selectedRoom]);
+  const desktopUtilityItems = useMemo(() => ([
+    {
+      key: 'settings',
+      label: 'Settings',
+      icon: SettingOutlined,
+      onClick: () => setSettingsOpen(true),
+    },
+    {
+      key: 'help',
+      label: 'Help',
+      icon: QuestionCircleOutlined,
+      onClick: () => {
+        setManualSceneGuideActive(true);
+        setManualSceneGuideStep("scene-guide-launch");
+      },
+    },
+    {
+      key: 'logout',
+      label: 'Sign Out',
+      icon: LogoutOutlined,
+      onClick: () => handleLogout(),
+      dataTour: 'scene-logout',
+      danger: true,
+    },
+  ]), [handleDashboard, handleLogout]);
 
   const desktopPanelTitle =
     activeTab === 'room' ? 'Room' :
@@ -4000,9 +4609,11 @@ export default function RoomScene({ initialScene = null }) {
             <button type="button" className={activeTool === 'window' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('window')}>Add Window</button>
             <button type="button" className="room-secondary-chip" onClick={splitWall}>Split</button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
             <button type="button" className={activeTool === 'build' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('build')}>Build</button>
-            <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
+            {!isMobile && (
+              <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
+            )}
             <button type="button" className="room-secondary-chip is-danger" onClick={() => deleteWall(selectedWall.id)}>Delete</button>
           </div>
           {selectedOpeningEntity && (
@@ -4067,7 +4678,12 @@ export default function RoomScene({ initialScene = null }) {
       activeTheme={activeTheme}
     />
   ) : activeTab === 'lighting' ? (
-    <LightingPanel {...lightingState} />
+    <LightingPanel
+      {...lightingState}
+      selectedFurnitureLight={selectedFurnitureLight}
+      onUpdateFurnitureLight={updateSelectedFurnitureLight}
+      onSaveFurnitureLightStyle={saveFurnitureLightStyleOverride}
+    />
   ) : activeTab === 'furniture' ? (
     <FurniturePicker
       selectedItem={selectedFurniture}
@@ -4091,7 +4707,7 @@ export default function RoomScene({ initialScene = null }) {
     />
   ) : (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {renderViewPanel('desktop')}
+      {renderViewSidebarPanel()}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <div className="room-stat-chip">
           <span className="room-stat-dot" />
@@ -4125,7 +4741,6 @@ export default function RoomScene({ initialScene = null }) {
     </div>
   ) : activeTab === 'walls' ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {renderRoomActionPanel('mobile')}
       <WallEditorPanel
         selectedWall={selectedWall} addWall={addWall} splitWall={splitWall}
         deleteWall={deleteWall} updateWall={updateWall}
@@ -4148,7 +4763,12 @@ export default function RoomScene({ initialScene = null }) {
       applyTheme={trackedApplyTheme} activeTheme={activeTheme}
     />
   ) : activeTab === 'lighting' ? (
-    <LightingPanel {...lightingState} />
+    <LightingPanel
+      {...lightingState}
+      selectedFurnitureLight={selectedFurnitureLight}
+      onUpdateFurnitureLight={updateSelectedFurnitureLight}
+      onSaveFurnitureLightStyle={saveFurnitureLightStyleOverride}
+    />
   ) : activeTab === 'furniture' ? (
     <FurniturePicker
       selectedItem={selectedFurniture} placedItems={placedItems}
@@ -4169,7 +4789,7 @@ export default function RoomScene({ initialScene = null }) {
       createNewProject={handleCreateNewProject}
     />
   ) : activeTab === 'view' ? (
-    renderViewPanel('mobile')
+    renderViewSidebarPanel()
   ) : (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
@@ -4198,7 +4818,7 @@ export default function RoomScene({ initialScene = null }) {
       </div>
 
       {selectedRoom && renderRoomActionPanel('mobile')}
-      {renderViewPanel('mobile')}
+      {renderViewSidebarPanel()}
 
       <div className="room-mobile-section">
         <div className="room-mobile-section-title">Scene</div>
@@ -4259,6 +4879,10 @@ export default function RoomScene({ initialScene = null }) {
       <div className="room-mobile-section">
         <div className="room-mobile-section-title">Project</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+          <button type="button" className="room-mobile-action-tile" onClick={() => setSettingsOpen(true)}>
+            <SettingOutlined />
+            <span>Settings</span>
+          </button>
           <button type="button" className="room-mobile-action-tile" onClick={() => setActiveTab('projects')}>
             <FolderOpenOutlined />
             <span>Projects</span>
@@ -4283,7 +4907,6 @@ export default function RoomScene({ initialScene = null }) {
     </div>
   );
 
-  const mobileTopActionLabel = 'Select';
   const mobileDisplayProjectName = projectSave.projectName?.trim() || 'Untitled Room';
   const mobileSceneChipLabel = selectedRoom?.name?.trim() || mobileDisplayProjectName;
   const mobileBottomTabs = [
@@ -4347,7 +4970,14 @@ export default function RoomScene({ initialScene = null }) {
     {
       key: 'lighting',
       label: <span className="room-tab-label"><BulbOutlined /> Light</span>,
-      children: <LightingPanel {...lightingState} />,
+      children: (
+        <LightingPanel
+          {...lightingState}
+          selectedFurnitureLight={selectedFurnitureLight}
+          onUpdateFurnitureLight={updateSelectedFurnitureLight}
+          onSaveFurnitureLightStyle={saveFurnitureLightStyleOverride}
+        />
+      ),
     },
     {
       key: 'furniture',
@@ -4467,6 +5097,7 @@ export default function RoomScene({ initialScene = null }) {
             lighting={lighting}
             globalBrightness={lightingState.globalBrightness}
             placedLights={placedLights}
+            attachedFurnitureLights={attachedFurnitureLights}
             moodAmbient={lightingState.moodAmbientOverride}
           />
 
@@ -4536,6 +5167,15 @@ export default function RoomScene({ initialScene = null }) {
                 fallbackColor={floorMaterial.color}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (pendingFurniturePlacement?.roomId === room.id) {
+                    placeFurnitureInRoom(room.id, event.point);
+                    return;
+                  }
+                  if (pendingFurniturePlacement?.roomId && pendingFurniturePlacement.roomId !== room.id) {
+                    const placementRoom = rooms.find((entry) => entry.id === pendingFurniturePlacement.roomId);
+                    toast.info(placementRoom?.name ? `Place this item inside ${placementRoom.name}.` : 'Place this item inside the selected room.');
+                    return;
+                  }
                   selectRoom(room.id, 'walls');
                 }}
                 onContextMenu={(event) => {
@@ -4606,8 +5246,65 @@ export default function RoomScene({ initialScene = null }) {
               )}
 
               {(roomWalls.length > 1 || room.id === selectedRoom?.id) && (
-                room.id === selectedRoom?.id ? (
-                  <Html position={[room.x, room.height + 0.62, room.z]} center distanceFactor={10}>
+                editingSceneRoomId === room.id ? (
+                  <Html position={[room.x, room.height + 0.84, room.z]} center distanceFactor={10}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        pointerEvents: 'auto',
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          minHeight: 54,
+                          padding: '7px 10px',
+                          borderRadius: 999,
+                          background: 'linear-gradient(180deg, rgba(22, 19, 17, 0.96) 0%, rgba(14, 12, 11, 0.94) 100%)',
+                          border: '1px solid rgba(201, 171, 146, 0.22)',
+                          boxShadow: '0 18px 36px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.04)',
+                          backdropFilter: 'blur(18px)',
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={sceneRoomNameDraft}
+                          onChange={(event) => setSceneRoomNameDraft(event.target.value)}
+                          onBlur={commitSceneRoomRename}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              commitSceneRoomRename();
+                            } else if (event.key === 'Escape') {
+                              event.preventDefault();
+                              cancelSceneRoomRename();
+                            }
+                          }}
+                          autoFocus
+                          style={{
+                            minWidth: 110,
+                            maxWidth: 190,
+                            height: 34,
+                            padding: '0 14px',
+                            borderRadius: 999,
+                            border: '1px solid rgba(223, 190, 146, 0.32)',
+                            background: 'rgba(255,255,255,0.03)',
+                            color: '#f4d2ab',
+                            fontSize: 15,
+                            fontWeight: 700,
+                            letterSpacing: '0.02em',
+                            outline: 'none',
+                            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </Html>
+                ) : room.id === selectedRoom?.id ? (
+                  <Html position={[room.x, room.height + 0.84, room.z]} center distanceFactor={10}>
                     <div
                       style={{
                         display: 'flex',
@@ -4635,6 +5332,7 @@ export default function RoomScene({ initialScene = null }) {
                           whiteSpace: 'nowrap',
                           backdropFilter: 'blur(18px)',
                         }}
+                        onDoubleClick={() => beginSceneRoomRename(room.id)}
                       >
                         <span>{room.name}</span>
                         <button
@@ -4668,11 +5366,12 @@ export default function RoomScene({ initialScene = null }) {
                   </Html>
                 ) : (
                   <Text
-                    position={[room.x, room.height + 0.28, room.z]}
+                    position={[room.x, room.height + 0.42, room.z]}
                     fontSize={0.24}
                     color={COLORS.text}
                     anchorX="center"
                     anchorY="middle"
+                    onDoubleClick={() => beginSceneRoomRename(room.id)}
                   >
                     {room.name}
                   </Text>
@@ -4691,6 +5390,7 @@ export default function RoomScene({ initialScene = null }) {
                   selectedOpening={selectedOpening?.wallId === wall.id ? selectedOpening : null}
                   openingPreview={openingPreview?.wallId === wall.id ? openingPreview : null}
                   activeOpeningTool={activeTool === 'door' || activeTool === 'window' ? activeTool : null}
+                  onDoubleClick={(focusedWall) => focusWallInScene(focusedWall, room.id)}
                   onSelect={() => {
                     setSelectedRoomId(room.id);
                     setSelectedWallId(wall.id);
@@ -4765,6 +5465,7 @@ export default function RoomScene({ initialScene = null }) {
               selectedOpening={selectedOpening?.wallId === wall.id ? selectedOpening : null}
               openingPreview={openingPreview?.wallId === wall.id ? openingPreview : null}
               activeOpeningTool={activeTool === 'door' || activeTool === 'window' ? activeTool : null}
+              onDoubleClick={(focusedWall) => focusWallInScene(focusedWall, focusedWall.roomId ?? null)}
               onSelect={() => {
                 setSelectedRoomId(wall.roomId ?? null);
                 setSelectedWallId(wall.id);
@@ -4937,6 +5638,7 @@ export default function RoomScene({ initialScene = null }) {
                 item={item}
                 isSelected={item.id === selectedFurnitureId}
                 onSelect={() => { setSelectedFurnitureId(item.id); setSelectedWallId(null); setSelectedLightId(null); }}
+                onDoubleClick={focusFurnitureInScene}
                 onContextMenu={({ item: contextItem, clientX, clientY }) => {
                   setSelectedFurnitureId(contextItem.id);
                   setSelectedWallId(null);
@@ -4964,6 +5666,7 @@ export default function RoomScene({ initialScene = null }) {
             gizmoMode={gizmoMode}
             updateItem={updateItem}
             setOrbitEnabled={setOrbitEnabled}
+            snapItemToSurfaces={snapFurnitureItemToSurfaces}
           />
 
           <WallGizmo
@@ -4975,11 +5678,13 @@ export default function RoomScene({ initialScene = null }) {
           />
 
           {/* Collision highlights */}
-          <CollisionHighlight
-            placedItems={placedItems}
-            itemStates={spatial.itemStates}
-            furnitureRefs={furnitureRefs}
-          />
+          {showSpatialWarnings && (
+            <CollisionHighlight
+              placedItems={placedItems}
+              itemStates={spatial.itemStates}
+              furnitureRefs={furnitureRefs}
+            />
+          )}
 
           {/* Placed lights */}
           {placedLights.map((light) => (
@@ -4987,11 +5692,20 @@ export default function RoomScene({ initialScene = null }) {
               key={light.id}
               light={light}
               isSelected={light.id === selectedLightId}
-              onSelect={() => { setSelectedLightId(light.id); setSelectedWallId(null); setSelectedFurnitureId(null); setActiveTab('lighting'); }}
+              onSelect={() => {
+                setSelectedLightId(light.id);
+                setSelectedWallId(null);
+                setSelectedFurnitureId(null);
+                setActiveTab('lighting');
+                setDesktopPanelOpen(true);
+              }}
+              onDoubleClick={focusLightInScene}
               onContextMenu={({ light: contextLight, clientX, clientY }) => {
                 setSelectedLightId(contextLight.id);
                 setSelectedWallId(null);
                 setSelectedFurnitureId(null);
+                setActiveTab('lighting');
+                setDesktopPanelOpen(true);
                 openElementContextMenu({
                   kind: 'light',
                   targetType: 'light',
@@ -5256,20 +5970,6 @@ export default function RoomScene({ initialScene = null }) {
               <FolderCopyRoundedIcon style={{ fontSize: 18 }} />
               <span>Projects</span>
             </button>
-            <button
-              type="button"
-              className="room-mobile-top-pill"
-              onClick={() => {
-                if (isSaving) return;
-                if (document.pointerLockElement) document.exitPointerLock();
-                setCameraMode('orbit');
-                setActiveTool('select');
-                openMobilePanel('walls');
-              }}
-            >
-              <ArchitectureRoundedIcon style={{ fontSize: 18 }} />
-              <span>{mobileTopActionLabel}</span>
-            </button>
           </div>
 
           <div style={{ position: 'fixed', inset: 0 }}>
@@ -5477,6 +6177,15 @@ export default function RoomScene({ initialScene = null }) {
             >
               {ceilingHidden ? 'Show Ceiling' : 'Hide Ceiling'}
             </Button>
+            <Button
+              type="default"
+              disabled={isSaving}
+              icon={surfaceSnapEnabled ? <CheckOutlined /> : <CloseOutlined />}
+              onClick={() => setSurfaceSnapEnabled((enabled) => !enabled)}
+              className="room-standalone-action-button"
+            >
+              {surfaceSnapEnabled ? 'Disable Snap' : 'Enable Snap'}
+            </Button>
           </div>
 
           <div style={{ position: 'relative', height: '100%', padding: 20 }}>
@@ -5484,57 +6193,135 @@ export default function RoomScene({ initialScene = null }) {
               <div style={{ height: '100%', width: '100%', borderRadius: 24, overflow: 'hidden', background: `linear-gradient(180deg, ${COLORS.surface}80 0%, ${COLORS.background}20 100%)`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
                 {canvasBlock}
               </div>
-              <div ref={desktopFloatingRef} style={{ position: 'absolute', top: 24, left: 24, zIndex: 950, display: 'flex', alignItems: 'flex-start', gap: 14, pointerEvents: 'none' }}>
-                <div className="room-floating-rail">
-                  <div className="room-floating-brand">
-                    <span className="room-floating-brand-dot" />
-                  </div>
-                  <div className="room-floating-rail-items" data-tour="scene-navbar">
-                    {desktopNavItems.map(({ key, label, icon: Icon }) => {
-                      const isActive = desktopPanelOpen && activeTab === key;
-                      return (
-                        <RevealActionButton
+              <div ref={desktopFloatingRef} style={{ position: 'absolute', top: 24, left: 24, zIndex: 950, display: 'flex', alignItems: 'flex-start', gap: 18, pointerEvents: 'none' }}>
+                <div className="room-reference-sidebar-shell">
+                  <div className="room-reference-sidebar-glow" />
+                  <div className="room-reference-sidebar">
+                    <div className="room-reference-sidebar-header">
+                      <div className="room-reference-brand">
+                        <img src={lmIcon} alt="Lumiere Maison" className="room-reference-brand-mark" />
+                        <div className="room-reference-brand-copy">
+                          <span>LUMIERE</span>
+                          <strong>MAISON</strong>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="room-reference-collapse"
+                        onClick={() => { if (!isSaving) setDesktopPanelOpen((open) => !open); }}
+                        aria-label={desktopPanelOpen ? 'Collapse sidebar panel' : 'Expand sidebar panel'}
+                      >
+                        {desktopPanelOpen ? <LeftOutlined /> : <RightOutlined />}
+                      </button>
+                    </div>
+
+                    <div className="room-reference-sidebar-divider" />
+
+                    <div className="room-reference-nav-list" data-tour="scene-navbar">
+                      {desktopNavItems.map(({ key, label, icon: Icon }) => {
+                        const isActive = activeTab === key;
+                        const showInlineMaterials = key === 'materials' && desktopPanelOpen && isActive;
+                        const showInlineLighting = key === 'lighting' && desktopPanelOpen && isActive;
+                        const showInlineFurniture = key === 'furniture' && desktopPanelOpen && isActive;
+                        const showInlineProjects = key === 'projects' && desktopPanelOpen && isActive;
+                        const showInlineView = key === 'view' && desktopPanelOpen && isActive;
+                        const showInlinePanel = showInlineMaterials || showInlineLighting || showInlineFurniture || showInlineProjects || showInlineView;
+                        return (
+                          <div key={key} className={showInlinePanel ? 'room-reference-nav-group is-open' : 'room-reference-nav-group'}>
+                            <button
+                              type="button"
+                              className={isActive ? 'room-reference-nav-item is-active' : 'room-reference-nav-item'}
+                              onClick={() => { if (!isSaving) toggleDesktopPanel(key); }}
+                              data-tour={key === "furniture" ? "scene-nav-furniture" : undefined}
+                            >
+                              <span className="room-reference-nav-icon"><Icon style={{ fontSize: 28 }} /></span>
+                              <span className="room-reference-nav-label">{label}</span>
+                              <span className="room-reference-nav-arrow">{showInlinePanel ? <DownOutlined /> : <RightOutlined />}</span>
+                            </button>
+                            {showInlineMaterials && (
+                              <div className="room-reference-inline-panel">
+                                <MaterialPanel
+                                  compact
+                                  selectedWall={selectedWall}
+                                  walls={walls}
+                                  floorMaterial={floorMaterial}
+                                  ceilingMaterial={ceilingMaterial}
+                                  applyTexture={trackedApplyTexture}
+                                  updateSurface={trackedUpdateSurface}
+                                  applyTheme={trackedApplyTheme}
+                                  activeTheme={activeTheme}
+                                />
+                              </div>
+                            )}
+                            {showInlineLighting && (
+                              <div className="room-reference-inline-panel">
+                                <LightingPanel
+                                  compact
+                                  {...lightingState}
+                                  selectedFurnitureLight={selectedFurnitureLight}
+                                  onUpdateFurnitureLight={updateSelectedFurnitureLight}
+                                  onSaveFurnitureLightStyle={saveFurnitureLightStyleOverride}
+                                />
+                              </div>
+                            )}
+                            {showInlineFurniture && (
+                              <div className="room-reference-inline-panel">
+                                <FurnishPanel
+                                  rooms={rooms}
+                                  selectedRoomId={selectedRoomId}
+                                  onBeginPlacement={beginFurniturePlacement}
+                                  pendingPlacement={pendingFurniturePlacement}
+                                />
+                              </div>
+                            )}
+                            {showInlineProjects && (
+                              <div className="room-reference-inline-panel">
+                                <ProjectsSidebarPanel
+                                  currentProjectId={currentProjectId}
+                                  currentProjectName={projectSave.projectName}
+                                  listProjects={projectSave.listProjects}
+                                  loadProject={projectSave.loadProject}
+                                  deleteProject={projectSave.deleteProject}
+                                  createNewProject={projectSave.createNewProject}
+                                  saveProject={projectSave.saveProject}
+                                  setProjectName={projectSave.setProjectName}
+                                  projectName={projectSave.projectName}
+                                  exportJSON={projectSave.exportJSON}
+                                  autosaveEnabled={projectSave.autosaveEnabled}
+                                  setAutosaveEnabled={projectSave.setAutosaveEnabled}
+                                  onProjectOpened={() => setActiveTab('walls')}
+                                />
+                              </div>
+                            )}
+                            {showInlineView && (
+                              <div className="room-reference-inline-panel">
+                                {renderViewSidebarPanel()}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="room-reference-sidebar-divider room-reference-sidebar-divider-bottom" />
+
+                    <div className="room-reference-utility-list">
+                      {desktopUtilityItems.map(({ key, label, icon: Icon, onClick, dataTour, danger }) => (
+                        <button
                           key={key}
-                          label={label}
-                          icon={Icon}
-                          active={isActive}
-                          onClick={() => { if (!isSaving) toggleDesktopPanel(key); }}
-                          variant="sidebar"
-                          dataTour={key === "furniture" ? "scene-nav-furniture" : undefined}
-                        />
-                      );
-                    })}
+                          type="button"
+                          className={danger ? 'room-reference-utility-item is-danger' : 'room-reference-utility-item'}
+                          onClick={() => { if (!isSaving) onClick(); }}
+                          data-tour={dataTour}
+                        >
+                          <span className="room-reference-nav-icon"><Icon style={{ fontSize: 28 }} /></span>
+                          <span className="room-reference-nav-label">{label}</span>
+                          <span className="room-reference-nav-arrow"><RightOutlined /></span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-
-                <button
-                  type="button"
-                  data-tour="scene-guide-launch"
-                  onClick={() => {
-                    setManualSceneGuideActive(true);
-                    setManualSceneGuideStep("scene-guide-launch");
-                  }}
-                  style={{
-                    pointerEvents: 'auto',
-                    width: 42,
-                    height: 42,
-                    borderRadius: 999,
-                    border: '1px solid rgba(224,186,137,0.55)',
-                    background: 'radial-gradient(circle at 50% 42%, rgba(138,104,76,0.98) 0%, rgba(93,68,52,0.98) 52%, rgba(54,39,31,1) 100%)',
-                    color: '#ffe7c8',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,241,221,0.14), 0 12px 28px rgba(0,0,0,0.26), 0 0 18px rgba(214,171,120,0.34), 0 0 34px rgba(255,225,183,0.18)',
-                    backdropFilter: 'blur(20px)',
-                    cursor: 'pointer',
-                    marginTop: 2,
-                    animation: 'lumiereSceneGuidePulse 2.4s ease-in-out infinite',
-                  }}
-                  aria-label="Open scene guide"
-                >
-                  <QuestionCircleOutlined style={{ fontSize: 18 }} />
-                </button>
 
                 <div
                   className="room-desktop-budget-controls"
@@ -5711,23 +6498,6 @@ export default function RoomScene({ initialScene = null }) {
                     </div>
                   )}
                 </div>
-
-                <div className={desktopPanelOpen ? 'room-floating-panel is-open' : 'room-floating-panel'}>
-                  <div className={desktopPanelOpen ? 'room-floating-panel-inner is-open' : 'room-floating-panel-inner'}>
-                    <div className="room-floating-panel-header">
-                      <div>
-                        <div className="room-floating-kicker">Context</div>
-                        <div className="room-floating-title">{desktopPanelTitle}</div>
-                      </div>
-                      <button type="button" className="room-floating-close" onClick={() => { if (!isSaving) setDesktopPanelOpen(false); }} disabled={isSaving}>
-                        Collapse
-                      </button>
-                    </div>
-                    <div className="room-floating-panel-scroll">
-                      {desktopPanelContent}
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -5759,7 +6529,7 @@ export default function RoomScene({ initialScene = null }) {
                     </div>
                   </div>
                   <div style={{ marginBottom: 16, position: 'relative', zIndex: 1 }}>
-                  {renderViewPanel('desktop')}
+                  {renderViewSidebarPanel()}
                 </div>
                   {selectedWall && (
                     <div style={{ marginBottom: 16, position: 'relative', zIndex: 1 }}>
@@ -5780,9 +6550,11 @@ export default function RoomScene({ initialScene = null }) {
                           <button type="button" className={activeTool === 'window' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => startOpeningPlacement('window')}>Add Window</button>
                           <button type="button" className="room-secondary-chip" onClick={splitWall}>Split</button>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
                           <button type="button" className={activeTool === 'build' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('build')}>Build</button>
-                          <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
+                          {!isMobile && (
+                            <button type="button" className={activeTool === 'select' ? 'room-secondary-chip is-active' : 'room-secondary-chip'} onClick={() => setActiveTool('select')}>Select</button>
+                          )}
                           <button type="button" className="room-secondary-chip is-danger" onClick={() => deleteWall(selectedWall.id)}>Delete</button>
                         </div>
           {selectedOpeningEntity && (
@@ -5886,6 +6658,8 @@ export default function RoomScene({ initialScene = null }) {
           score={spatial.score}
           suggestions={spatial.suggestions}
           visible={placedItems.length > 0}
+          showSpatialWarnings={showSpatialWarnings}
+          onToggleSpatialWarnings={() => setShowSpatialWarnings((current) => !current)}
         />
       )}
 
@@ -5914,12 +6688,12 @@ export default function RoomScene({ initialScene = null }) {
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
             {renderElementContextButton('Edit', () => handleElementContextAction('edit'))}
-            {renderElementContextButton('Material', () => handleElementContextAction('material'), {
-              disabled: elementContextMenu.kind === 'light',
-            })}
-            {renderElementContextButton('Transform', () => handleElementContextAction('transform'), {
-              disabled: elementContextMenu.kind === 'floor' || elementContextMenu.kind === 'ceiling',
-            })}
+            {elementContextMenu.kind === 'furniture' && elementContextMenu.entity?.emitsLight
+              ? renderElementContextButton(
+                  elementContextMenu.entity.lightActive ? 'Turn Off' : 'Turn On',
+                  () => handleElementContextAction('toggleFurnitureLight'),
+                )
+              : null}
             {renderElementContextButton('Duplicate', () => handleElementContextAction('duplicate'), {
               disabled: elementContextMenu.kind === 'floor' || elementContextMenu.kind === 'ceiling',
             })}
@@ -6642,6 +7416,12 @@ export default function RoomScene({ initialScene = null }) {
         </div>
       )}
 
+      <WorkspaceSettingsShell
+        open={settingsOpen}
+        variant="modal"
+        onClose={() => setSettingsOpen(false)}
+      />
+
       {isSaving && (
         <div
           style={{
@@ -7007,80 +7787,215 @@ export default function RoomScene({ initialScene = null }) {
           border-color: ${COLORS.action}AA !important;
           background: ${COLORS.surface} !important;
         }
-        .room-floating-rail {
+        .room-reference-sidebar-shell {
           pointer-events: auto;
-          width: 74px;
-          padding: 14px 10px;
-          border-radius: 999px;
-          background: linear-gradient(180deg, rgba(58, 48, 43, 0.94) 0%, rgba(31, 24, 21, 0.98) 100%);
-          border: 1px solid rgba(196, 154, 108, 0.18);
-          box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255,255,255,0.08);
-          backdrop-filter: blur(24px);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: flex-start;
-          gap: 18px;
-          height: 100%;
-          min-height: 0;
+          position: relative;
+          width: clamp(220px, 17vw, 270px);
+          max-width: calc(100vw - 280px);
+          height: calc(100vh - 84px);
+          border-radius: 26px;
           overflow: hidden;
         }
-        .room-floating-brand {
-          width: 46px;
-          height: 46px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: radial-gradient(circle at 30% 30%, rgba(242,229,213,0.9), rgba(196,154,108,0.34) 42%, rgba(58,48,43,0.96) 100%);
-          box-shadow: 0 0 24px rgba(196, 154, 108, 0.24), inset 0 1px 0 rgba(255,255,255,0.45);
+        .room-reference-sidebar-glow {
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(circle at 24% 20%, rgba(174, 117, 55, 0.2) 0%, rgba(174, 117, 55, 0.06) 20%, transparent 48%),
+            linear-gradient(180deg, rgba(32, 26, 24, 0.96) 0%, rgba(21, 18, 17, 0.98) 100%);
+          opacity: 0.98;
         }
-        .room-floating-brand-dot {
-          width: 18px;
-          height: 18px;
-          border-radius: 50%;
-          background: linear-gradient(135deg, ${COLORS.text} 0%, ${COLORS.action} 100%);
-          box-shadow: 0 0 18px rgba(196, 154, 108, 0.52);
-        }
-        .room-floating-rail-items {
+        .room-reference-sidebar {
+          position: relative;
+          z-index: 1;
+          height: 100%;
+          padding: 18px 14px 16px;
           display: flex;
           flex-direction: column;
-          gap: 12px;
-          align-items: center;
-          width: 100%;
-          min-height: 0;
+          gap: 14px;
           overflow-y: auto;
-          overscroll-behavior: contain;
-          scrollbar-width: none;
+          overflow-x: hidden;
+          border: 1px solid rgba(151, 116, 81, 0.58);
+          border-radius: 26px;
+          background:
+            radial-gradient(circle at 22% 18%, rgba(143, 96, 47, 0.18) 0%, rgba(143, 96, 47, 0.08) 18%, rgba(16, 14, 13, 0) 42%),
+            linear-gradient(180deg, rgba(34, 29, 27, 0.94) 0%, rgba(18, 15, 14, 0.98) 100%);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 223, 190, 0.07),
+            0 20px 54px rgba(0, 0, 0, 0.35);
+          backdrop-filter: blur(20px);
+          scrollbar-width: thin;
+          scrollbar-color: rgba(229, 173, 106, 0.48) transparent;
         }
-        .room-floating-rail-items::-webkit-scrollbar {
-          display: none;
+        .room-reference-sidebar::-webkit-scrollbar {
+          width: 8px;
         }
-        .room-floating-rail-button {
-          width: 48px;
-          height: 48px;
+        .room-reference-sidebar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .room-reference-sidebar::-webkit-scrollbar-thumb {
+          background: rgba(229, 173, 106, 0.34);
           border-radius: 999px;
-          border: 1px solid rgba(225, 255, 247, 0.08);
-          background: rgba(255,255,255,0.06);
-          color: rgba(235, 255, 250, 0.78);
+          border: 2px solid transparent;
+          background-clip: padding-box;
+        }
+        .room-reference-sidebar::-webkit-scrollbar-thumb:hover {
+          background: rgba(229, 173, 106, 0.52);
+          background-clip: padding-box;
+        }
+        .room-reference-sidebar-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 4px 2px 8px;
+        }
+        .room-reference-brand {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+        .room-reference-brand-mark {
+          width: 38px;
+          height: 38px;
+          object-fit: contain;
+          filter: sepia(1) saturate(1.45) hue-rotate(-10deg) brightness(1.06);
+        }
+        .room-reference-brand-copy {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          min-width: 0;
+        }
+        .room-reference-brand-copy span,
+        .room-reference-brand-copy strong {
+          color: #e5ad6a;
+          line-height: 1;
+          text-transform: uppercase;
+          text-shadow: 0 0 20px rgba(229, 173, 106, 0.08);
+        }
+        .room-reference-brand-copy span {
+          font-size: 12px;
+          font-weight: 500;
+          letter-spacing: 0.14em;
+        }
+        .room-reference-brand-copy strong {
+          font-size: 10px;
+          font-weight: 400;
+          letter-spacing: 0.14em;
+        }
+        .room-reference-collapse {
+          width: 34px;
+          height: 34px;
+          flex: 0 0 auto;
+          border: 1px solid rgba(138, 104, 74, 0.34);
+          border-radius: 11px;
+          background: rgba(255,255,255,0.02);
+          color: #ddb17a;
           display: inline-flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: transform 0.24s ease, background 0.24s ease, box-shadow 0.24s ease, color 0.24s ease, border-color 0.24s ease;
-          backdrop-filter: blur(14px);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+          transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
         }
-        .room-floating-rail-button:hover {
-          transform: translateY(-2px) scale(1.02);
-          color: #ffffff;
-          background: rgba(255,255,255,0.12);
-          border-color: rgba(225, 255, 247, 0.16);
+        .room-reference-collapse:hover {
+          border-color: rgba(229, 173, 106, 0.52);
+          background: rgba(229, 173, 106, 0.08);
+          transform: translateY(-1px);
         }
-        .room-floating-rail-button.is-active {
-          color: ${COLORS.background};
-          background: linear-gradient(135deg, ${COLORS.text} 0%, #dbc0a2 100%);
-          border-color: rgba(255,255,255,0.55);
-          box-shadow: 0 0 0 6px rgba(196, 154, 108, 0.12), 0 0 24px rgba(196, 154, 108, 0.26), 0 12px 26px rgba(0,0,0,0.28);
+        .room-reference-sidebar-divider {
+          height: 1px;
+          background: linear-gradient(90deg, rgba(113, 86, 63, 0.28) 0%, rgba(113, 86, 63, 0.62) 50%, rgba(113, 86, 63, 0.28) 100%);
+          margin: 4px 0 6px;
+        }
+        .room-reference-sidebar-divider-bottom {
+          margin-top: auto;
+        }
+        .room-reference-nav-list,
+        .room-reference-utility-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .room-reference-nav-group {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .room-reference-nav-group.is-open {
+          gap: 6px;
+          margin-bottom: 32px;
+        }
+        .room-reference-nav-item,
+        .room-reference-utility-item {
+          width: 100%;
+          min-height: 52px;
+          padding: 0 14px;
+          border-radius: 14px;
+          border: 1px solid rgba(105, 80, 57, 0.38);
+          background: rgba(255, 255, 255, 0.015);
+          color: #f2e7d7;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          text-align: left;
+          cursor: pointer;
+          transition: border-color 0.22s ease, box-shadow 0.22s ease, background 0.22s ease, transform 0.22s ease;
+        }
+        .room-reference-nav-item:hover,
+        .room-reference-utility-item:hover {
+          border-color: rgba(226, 169, 102, 0.54);
+          background: rgba(226, 169, 102, 0.05);
+          transform: translateY(-1px);
+        }
+        .room-reference-nav-item.is-active {
+          border-color: rgba(239, 171, 89, 0.86);
+          background:
+            radial-gradient(circle at 30% 40%, rgba(182, 117, 43, 0.18) 0%, rgba(182, 117, 43, 0.1) 34%, rgba(182, 117, 43, 0) 74%),
+            rgba(74, 49, 30, 0.46);
+          box-shadow:
+            inset 0 0 0 1px rgba(255, 194, 126, 0.18),
+            0 0 0 1px rgba(239, 171, 89, 0.18),
+            0 0 34px rgba(239, 171, 89, 0.18);
+        }
+        .room-reference-utility-item {
+          min-height: 48px;
+          background: transparent;
+          border-color: transparent;
+          padding-inline: 14px 10px;
+        }
+        .room-reference-utility-item.is-danger {
+          color: #f3e6d8;
+        }
+        .room-reference-nav-icon {
+          width: 22px;
+          height: 22px;
+          flex: 0 0 auto;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          color: #e5ad6a;
+        }
+        .room-reference-nav-label {
+          flex: 1;
+          font-size: 11px;
+          line-height: 1.1;
+          font-weight: 400;
+          letter-spacing: 0;
+        }
+        .room-reference-nav-arrow {
+          width: 16px;
+          height: 16px;
+          flex: 0 0 auto;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          color: #dfa762;
+          font-size: 12px;
+        }
+        .room-reference-inline-panel {
+          padding: 2px 0 0 0;
         }
         .room-desktop-budget-controls {
           pointer-events: auto;
@@ -7088,29 +8003,32 @@ export default function RoomScene({ initialScene = null }) {
           flex-direction: column;
           align-items: flex-start;
           gap: 10px;
+          margin-top: 10px;
           flex: 0 0 auto;
         }
         .room-floating-panel {
           pointer-events: none;
           width: 0;
           opacity: 0;
-          transform: translateX(-16px);
+          transform: translateX(-18px);
           transition: width 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
           overflow: hidden;
         }
         .room-floating-panel.is-open {
           pointer-events: auto;
-          width: min(430px, calc(100vw - 180px));
+          width: clamp(300px, 31vw, 420px);
           opacity: 1;
           transform: translateX(0);
         }
         .room-floating-panel-inner {
-          height: auto;
-          max-height: min(78vh, calc(100vh - 120px));
-          border-radius: 34px;
-          background: linear-gradient(180deg, rgba(58, 48, 43, 0.88) 0%, rgba(34, 27, 24, 0.96) 100%);
-          border: 1px solid rgba(196, 154, 108, 0.14);
-          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255,255,255,0.09);
+          height: min(calc(100vh - 120px), 820px);
+          max-height: min(calc(100vh - 120px), 820px);
+          border-radius: 32px;
+          background:
+            radial-gradient(circle at 18% 20%, rgba(110, 77, 42, 0.08) 0%, rgba(110, 77, 42, 0.02) 24%, rgba(0, 0, 0, 0) 56%),
+            linear-gradient(180deg, rgba(24, 20, 19, 0.96) 0%, rgba(17, 14, 13, 0.99) 100%);
+          border: 1px solid rgba(126, 97, 70, 0.48);
+          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255,255,255,0.05);
           backdrop-filter: blur(28px);
           display: flex;
           flex-direction: column;
@@ -7128,8 +8046,8 @@ export default function RoomScene({ initialScene = null }) {
           align-items: flex-start;
           justify-content: space-between;
           gap: 12px;
-          padding: 18px 18px 14px;
-          border-bottom: 1px solid rgba(196, 154, 108, 0.1);
+          padding: 20px 18px 14px;
+          border-bottom: 1px solid rgba(126, 97, 70, 0.42);
         }
         .room-floating-kicker {
           color: rgba(196, 154, 108, 0.8);
@@ -7141,32 +8059,84 @@ export default function RoomScene({ initialScene = null }) {
         }
         .room-floating-title {
           color: ${COLORS.text};
-          font-size: 24px;
+          font-size: 18px;
           font-weight: 700;
           letter-spacing: -0.03em;
         }
         .room-floating-close {
-          border: 1px solid rgba(196,154,108,0.16);
-          border-radius: 999px;
-          background: rgba(255,255,255,0.06);
-          color: ${COLORS.text};
-          min-height: 36px;
-          padding: 0 14px;
+          border: 1px solid rgba(138, 104, 74, 0.32);
+          border-radius: 14px;
+          background: rgba(255,255,255,0.03);
+          color: #ddb17a;
+          min-height: 42px;
+          padding: 0 16px;
           cursor: pointer;
           transition: background 0.2s ease, transform 0.2s ease;
         }
         .room-floating-close:hover {
-          background: rgba(196,154,108,0.14);
+          background: rgba(196,154,108,0.12);
           transform: translateY(-1px);
         }
         .room-floating-panel-scroll {
           flex: 1;
-          max-height: calc(78vh - 84px);
+          max-height: calc(100vh - 210px);
           overflow-y: auto;
-          padding: 16px 18px 20px;
+          padding: 14px 16px 18px;
         }
         .room-floating-panel-scroll > * {
           animation: roomFloatingContentIn 0.28s ease;
+        }
+        @media (max-width: 1180px) {
+          .room-reference-sidebar-shell {
+            width: clamp(200px, 19vw, 230px);
+            height: calc(100vh - 92px);
+          }
+          .room-reference-sidebar {
+            padding: 16px 12px 14px;
+            gap: 12px;
+            border-radius: 22px;
+          }
+          .room-reference-brand-mark {
+            width: 32px;
+            height: 32px;
+          }
+          .room-reference-brand-copy span {
+            font-size: 10px;
+          }
+          .room-reference-brand-copy strong {
+            font-size: 9px;
+          }
+          .room-reference-collapse {
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+          }
+          .room-reference-nav-item {
+            min-height: 46px;
+            padding-inline: 12px;
+            border-radius: 12px;
+            gap: 10px;
+          }
+          .room-reference-utility-item {
+            min-height: 42px;
+            padding-inline: 12px 8px;
+            gap: 10px;
+          }
+          .room-reference-nav-icon {
+            width: 18px;
+            height: 18px;
+          }
+          .room-reference-nav-label {
+            font-size: 10px;
+          }
+          .room-floating-panel.is-open {
+            width: clamp(260px, 30vw, 340px);
+          }
+          .room-floating-panel-inner {
+            height: min(calc(100vh - 112px), 760px);
+            max-height: min(calc(100vh - 112px), 760px);
+            border-radius: 28px;
+          }
         }
         .room-mobile-reference-topbar {
           position: fixed;
@@ -8022,29 +8992,11 @@ export default function RoomScene({ initialScene = null }) {
             height: 34px;
             font-size: 22px;
           }
-          .room-floating-rail {
-            width: 64px !important;
-            padding: 8px 6px 10px !important;
-            gap: 12px;
-            border-radius: 32px;
-          }
-          .room-floating-brand {
-            width: 38px;
-            height: 38px;
-            flex: 0 0 auto;
-          }
-          .room-floating-brand-dot {
-            width: 14px;
-            height: 14px;
-          }
-          .room-floating-rail-items {
-            gap: 8px;
-            padding-right: 1px;
-          }
           .room-floating-panel.is-open {
             width: min(392px, calc(100vw - 16px));
           }
           .room-floating-panel-inner {
+            height: auto;
             max-height: calc(100dvh - 188px);
             border-radius: 24px;
           }

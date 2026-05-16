@@ -5,7 +5,7 @@ from datetime import timedelta
 import bcrypt
 import jwt
 from bson import ObjectId
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import ACCESS_TOKEN_EXPIRE_MINUTES, JWT_ALGORITHM, JWT_SECRET_KEY
@@ -100,3 +100,24 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+
+async def get_current_user_optional(request: Request) -> dict | None:
+    auth_header = request.headers.get("authorization", "").strip()
+    if not auth_header.lower().startswith("bearer "):
+        return None
+
+    token = auth_header[7:].strip()
+    if not token:
+        return None
+
+    try:
+        payload = decode_access_token(token)
+    except HTTPException:
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id or not ObjectId.is_valid(user_id):
+        return None
+
+    return await users_collection.find_one({"_id": ObjectId(user_id)})

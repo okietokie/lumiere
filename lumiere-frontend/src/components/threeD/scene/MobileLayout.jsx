@@ -152,7 +152,6 @@ export function SlidePanel({ open, onClose, title, children, height = '75vh' }) 
 }
 export function BottomNav({ activeTab, onTabChange }) {
   const tabs = [
-    { key: 'walls', label: 'Build', icon: ICONS.walls },
     { key: 'materials', label: 'Style', icon: ICONS.materials },
     { key: 'furniture', label: 'Furnish', icon: ICONS.furniture },
     { key: 'lighting', label: 'Light', icon: ICONS.lighting },

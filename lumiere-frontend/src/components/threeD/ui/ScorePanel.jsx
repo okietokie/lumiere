@@ -1,3 +1,4 @@
+import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { COLORS } from '../../../utils/colors';
@@ -25,7 +26,13 @@ function scoreLabel(score) {
   return 'Poor Layout';
 }
 
-export default function ScorePanel({ score, suggestions, visible }) {
+export default function ScorePanel({
+  score,
+  suggestions,
+  visible,
+  showSpatialWarnings = true,
+  onToggleSpatialWarnings,
+}) {
   const panelRef    = useRef(null);
   const prevScore   = useRef(score);
   const [open, setOpen] = useState(false);
@@ -59,6 +66,35 @@ export default function ScorePanel({ score, suggestions, visible }) {
         pointerEvents: 'auto',
       }}
     >
+      {typeof onToggleSpatialWarnings === 'function' && (
+        <button
+          type="button"
+          aria-pressed={showSpatialWarnings}
+          aria-label={showSpatialWarnings ? 'Hide spatial warning boxes' : 'Show spatial warning boxes'}
+          onClick={onToggleSpatialWarnings}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 10px',
+            borderRadius: 999,
+            border: `1px solid ${COLORS.secondary}40`,
+            background: `${COLORS.surface}D8`,
+            color: showSpatialWarnings ? COLORS.text : COLORS.secondary,
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 8px 18px rgba(0,0,0,0.26)',
+            cursor: 'pointer',
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: '0.01em',
+            transition: 'background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease',
+          }}
+        >
+          {showSpatialWarnings ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+          <span>{showSpatialWarnings ? 'Boxes on' : 'Boxes off'}</span>
+        </button>
+      )}
+
       {/*  Suggestions panel (expandable)  */}
       {open && suggestions.length > 0 && (
         <div style={{

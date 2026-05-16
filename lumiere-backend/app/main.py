@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -8,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import (
     APP_DESCRIPTION,
@@ -18,7 +20,7 @@ from app.core.config import (
     VIDEOS_DIR,
     get_allowed_origins,
 )
-from app.core.database import ensure_indexes, ping_database
+from app.core.database import close_database, connect_database, ensure_indexes, get_active_database_label, get_active_database_uri
 from app.routes import auth_routes, model_routes, project_routes
 from app.services.sync_b2_to_mongo import sync_b2_to_mongo
 
@@ -26,6 +28,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _http_client: httpx.AsyncClient | None = None
+
+
+class ProcessTimeHeaderMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start_time = time.perf_counter()
+
+        async def send_with_process_time(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                process_time = f"{time.perf_counter() - start_time:.6f}".encode("ascii")
+                headers.append((b"x-process-time", process_time))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_process_time)
+        except asyncio.CancelledError:
+            logger.debug("Request cancelled during shutdown: %s", scope.get("path"))
+            return
 
 
 def get_http_client() -> httpx.AsyncClient:
@@ -42,12 +70,16 @@ def get_http_client() -> httpx.AsyncClient:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Lumiere backend is starting up...")
-    success = await ping_database()
+    success = await connect_database()
     if success:
-        logger.info("MongoDB connected")
+        logger.info(
+            "MongoDB ready via %s (%s)",
+            get_active_database_label(),
+            get_active_database_uri(),
+        )
         await ensure_indexes()
     else:
-        logger.error("MongoDB connection failed")
+        logger.error("MongoDB connection failed for both primary and local fallback")
 
     try:
         await sync_b2_to_mongo()
@@ -59,6 +91,7 @@ async def lifespan(app: FastAPI):
     global _http_client
     if _http_client and not _http_client.is_closed:
         await _http_client.aclose()
+    close_database()
     logger.info("Lumiere backend is shutting down...")
 
 
@@ -78,14 +111,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*", "Content-Length", "Cache-Control", "ETag"],
 )
-
-
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    response.headers["X-Process-Time"] = str(time.time() - start_time)
-    return response
+app.add_middleware(ProcessTimeHeaderMiddleware)
 
 
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["Authentication"])

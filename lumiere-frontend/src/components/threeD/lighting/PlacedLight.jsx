@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { LIGHT_TYPES } from '../../../hooks/useLighting';
 
 export default function PlacedLight({
-  light, isSelected, onSelect, onContextMenu, updateLight, setOrbitEnabled,
+  light, isSelected, onSelect, onDoubleClick, onContextMenu, updateLight, setOrbitEnabled,
 }) {
   const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
@@ -86,6 +86,10 @@ export default function PlacedLight({
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'grab'; }}
         onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto'; }}
         onClick={(e)       => { e.stopPropagation(); onSelect(); }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onDoubleClick?.(light);
+        }}
         onContextMenu={(e) => {
           e.stopPropagation();
           const sourceEvent = e.nativeEvent ?? e.sourceEvent;

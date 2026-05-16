@@ -11,6 +11,8 @@ APP_VERSION = "1.0.0"
 APP_DESCRIPTION = "Backend API for Lumiere Interior Design Platform"
 
 MONGO_URI = os.getenv("MONGO_URI")
+LOCAL_MONGO_URI = os.getenv("LOCAL_MONGO_URI", "mongodb://127.0.0.1:27017")
+MONGO_FALLBACK_ENABLED = os.getenv("MONGO_FALLBACK_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "lumiere")
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY") or "lumiere-dev-secret"

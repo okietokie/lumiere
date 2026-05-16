@@ -760,6 +760,7 @@ function RoomShape({
   room, mode, selectedRoom, selectedCorner, selectedWall, hoveredWall,
   visibleWallRanges,
   onRoomClick, onWallClick, onWallHover, onWallHoverOut,
+  onRoomLabelDoubleClick,
   selectedOpening, onOpeningClick, onOpeningMenu,
   onGeometryMenu,
   onOpeningDragStart, onOpeningDragMove, onOpeningDragEnd,
@@ -840,22 +841,46 @@ function RoomShape({
       {room.walls.map(wall=><WallLabel key={wall.id} wall={wall}/>)}
 
       {/* ⑧ Room name + area */}
-      <Rect
-        x={cx - roomLabelWidth / 2}
-        y={cy - 20}
-        width={roomLabelWidth}
-        height={20}
-        cornerRadius={10}
-        fill="rgba(31, 26, 23, 0.72)"
-        stroke="rgba(201,169,110,0.16)"
-        strokeWidth={0.8}
-        listening={false}
-      />
-      <Text x={cx} y={cy-17} text={room.name}
-        width={roomLabelWidth}
-        offsetX={roomLabelWidth / 2}
-        fontSize={11} fontFamily="'Cormorant Garamond', serif" fontStyle="600"
-        fill="rgba(233,199,136,0.92)" align="center" listening={false}/>
+      <Group
+        onClick={(event) => {
+          event.cancelBubble = true;
+          onRoomClick?.(room.id);
+        }}
+        onTap={(event) => {
+          event.cancelBubble = true;
+          onRoomClick?.(room.id);
+        }}
+        onDblClick={(event) => {
+          event.cancelBubble = true;
+          onRoomLabelDoubleClick?.(room.id);
+        }}
+        onDblTap={(event) => {
+          event.cancelBubble = true;
+          onRoomLabelDoubleClick?.(room.id);
+        }}
+        onMouseEnter={(event) => {
+          event.target.getStage().container().style.cursor = "text";
+        }}
+        onMouseLeave={(event) => {
+          event.target.getStage().container().style.cursor = inSelect ? "default" : "crosshair";
+        }}
+      >
+        <Rect
+          x={cx - roomLabelWidth / 2}
+          y={cy - 20}
+          width={roomLabelWidth}
+          height={20}
+          cornerRadius={10}
+          fill="rgba(31, 26, 23, 0.72)"
+          stroke="rgba(201,169,110,0.16)"
+          strokeWidth={0.8}
+        />
+        <Text x={cx} y={cy-17} text={room.name}
+          width={roomLabelWidth}
+          offsetX={roomLabelWidth / 2}
+          fontSize={11} fontFamily="'Cormorant Garamond', serif" fontStyle="600"
+          fill="rgba(233,199,136,0.92)" align="center" listening={false}/>
+      </Group>
       <Text x={cx} y={cy+3} text={`${aM2} m²`}
         fontSize={9} fontFamily="'Archivo', sans-serif"
         fill={floor.color} opacity={0.55} align="center" offsetX={20} listening={false}/>
@@ -1329,6 +1354,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const stageRef     = useRef(null);
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
   const [stageView, setStageView] = useState({ x: 0, y: 0, scale: 1 });
+  const [inlineRoomEditor, setInlineRoomEditor] = useState(null);
   const stageGestureRef = useRef({
     lastPinchDistance: null,
     lastPinchCenter: null,
@@ -1550,6 +1576,31 @@ export default function RoomCanvas({ initialPlan = null }) {
     const point = stageRef.current?.getPointerPosition() ?? { x: 0, y: 0 };
     return screenToPlanPoint(point);
   }, [screenToPlanPoint]);
+  const beginInlineRoomRename = useCallback((roomId) => {
+    const room = rooms.find((entry) => entry.id === roomId);
+    if (!room) return;
+    setSelectedRoom({ roomId });
+    setInlineRoomEditor({ roomId, value: room.name ?? "" });
+  }, [rooms, setSelectedRoom]);
+  const cancelInlineRoomRename = useCallback(() => {
+    setInlineRoomEditor(null);
+  }, []);
+  const commitInlineRoomRename = useCallback(() => {
+    if (!inlineRoomEditor) return;
+    const room = rooms.find((entry) => entry.id === inlineRoomEditor.roomId);
+    const nextName = inlineRoomEditor.value.trim();
+    if (room && nextName && nextName !== room.name) {
+      renameRoom(room.id, nextName);
+    }
+    setInlineRoomEditor(null);
+  }, [inlineRoomEditor, renameRoom, rooms]);
+  useEffect(() => {
+    if (!inlineRoomEditor) return;
+    const room = rooms.find((entry) => entry.id === inlineRoomEditor.roomId);
+    if (!room) {
+      setInlineRoomEditor(null);
+    }
+  }, [inlineRoomEditor, rooms]);
   const handleOpeningPlacement = useCallback((roomId, wallId, event) => {
     const point = getEventScreenPoint(event, stageRef.current?.getPointerPosition?.() ?? { x: 0, y: 0 });
     const planPoint = screenToPlanPoint(point);
@@ -1848,6 +1899,7 @@ export default function RoomCanvas({ initialPlan = null }) {
       cancelText: 'Continue Without Saving',
       tone: 'warning',
     });
+    if (shouldSave === null) return;
     if (shouldSave) {
       try {
         await saveProject(projectName, true);
@@ -1864,7 +1916,9 @@ export default function RoomCanvas({ initialPlan = null }) {
   }, [dialogs, isSaving, projectName, saveProject]);
 
   const handleDashboard = useCallback(() => {
-    leaveEditorWithSavePrompt(() => navigate("/user/dashboard"), "going to the dashboard");
+    leaveEditorWithSavePrompt(() => navigate("/user/dashboard", {
+      state: { skipDashboardAutoRedirect: true },
+    }), "going to the dashboard");
   }, [leaveEditorWithSavePrompt, navigate]);
 
   const handleLogout = useCallback(() => {
@@ -2182,6 +2236,20 @@ export default function RoomCanvas({ initialPlan = null }) {
   const hasRooms = rooms.length > 0;
   const hasEnclosedRooms = enclosedRooms.length > 0;
   const hasDraft = draftPts.length > 0;
+  const inlineRoomEditorLayout = useMemo(() => {
+    if (!inlineRoomEditor) return null;
+    const room = rooms.find((entry) => entry.id === inlineRoomEditor.roomId);
+    if (!room?.points?.length) return null;
+    const centerX = room.points.reduce((sum, point) => sum + point.x, 0) / room.points.length;
+    const centerY = room.points.reduce((sum, point) => sum + point.y, 0) / room.points.length;
+    const labelWidth = Math.max(84, Math.min(188, String(inlineRoomEditor.value ?? room.name ?? "").length * 9.5));
+    return {
+      left: stageView.x + (centerX * stageView.scale) - ((labelWidth * stageView.scale) / 2),
+      top: stageView.y + ((centerY - 20) * stageView.scale),
+      width: labelWidth * stageView.scale,
+      height: 20 * stageView.scale,
+    };
+  }, [inlineRoomEditor, rooms, stageView]);
   const handleClearAll = useCallback(async () => {
     if (!hasDraft && !hasRooms) return;
 
@@ -2779,49 +2847,53 @@ export default function RoomCanvas({ initialPlan = null }) {
             </div>
           )}
           </div>
+        </div>
 
-          <div className="mobile-editor-menu-actions">
+        <div className="mobile-editor-menu-actions">
+          <button
+            type="button"
+            onClick={() => setSaveModalOpen(true)}
+            disabled={isSaving}
+            className="canvas-action-btn canvas-action-btn-save"
+          >
+            <SaveOutlined />
+            {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={switchTo3D}
+            disabled={isSaving}
+            data-tour="planner-switch-3d"
+            className="canvas-action-btn canvas-action-btn-view"
+          >
+            Switch to 3D
+          </button>
+          <div className="canvas-nav-segment" role="group" aria-label="Editor navigation">
             <button
               type="button"
-              onClick={() => setSaveModalOpen(true)}
+              onClick={handleDashboard}
               disabled={isSaving}
-              className="canvas-action-btn canvas-action-btn-save"
+              className="canvas-segment-btn"
             >
-              <SaveOutlined />
-              {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
+              <AppstoreOutlined />
+              Dashboard
             </button>
             <button
               type="button"
-              onClick={switchTo3D}
+              onClick={handleLogout}
               disabled={isSaving}
-              data-tour="planner-switch-3d"
-              className="canvas-action-btn canvas-action-btn-view"
+              className="canvas-segment-btn canvas-segment-btn-danger"
             >
-              Switch to 3D
+              <LogoutOutlined />
+              Logout
             </button>
-            <div className="canvas-nav-segment" role="group" aria-label="Editor navigation">
-              <button
-                type="button"
-                onClick={handleDashboard}
-                disabled={isSaving}
-                className="canvas-segment-btn"
-              >
-                <AppstoreOutlined />
-                Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={isSaving}
-                className="canvas-segment-btn canvas-segment-btn-danger"
-              >
-                <LogoutOutlined />
-                Logout
-              </button>
-            </div>
           </div>
+        </div>
 
         <div className="sidebar-mobile-legacy-content">
+        <div className="sidebar-header sidebar-legacy-header">
+          <div className="sidebar-logo">LUMIERE<span>Maison Studio</span></div>
+        </div>
         {/* Tools */}
         <div className="sidebar-section sidebar-main-tools-section">
           <div className="sidebar-section-title">Tools</div>
@@ -3077,7 +3149,6 @@ export default function RoomCanvas({ initialPlan = null }) {
             );
           })}
           {!hasRooms&&!hasDraft&&<div style={{padding:"8px",fontSize:"11px",color:"rgba(122,112,104,0.5)",textAlign:"center"}}>No rooms or walls yet</div>}
-        </div>
         </div>
         </div>
       </aside>
@@ -3405,6 +3476,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                   selectedWall={selectedWall} selectedOpening={selectedOpening} hoveredWall={hoveredWall}
                   visibleWallRanges={visibleWallRanges}
                   onRoomClick={id=>setSelectedRoom({roomId:id})}
+                  onRoomLabelDoubleClick={beginInlineRoomRename}
                   onWallClick={handleOpeningPlacement}
                   onOpeningClick={(rId,wId,oId)=>{setSelectedRoom({roomId:rId});setSelectedWall({roomId:rId,wallId:wId});setSelectedOpening({roomId:rId,wallId:wId,openingId:oId});}}
                   onOpeningMenu={openOpeningContextMenu}
@@ -3442,6 +3514,33 @@ export default function RoomCanvas({ initialPlan = null }) {
               {mode!=="select"&&<SnapCursor pos={displayPos} rawPos={mousePos} snapEnabled={snapEnabled} isClosing={closingSnap}/>}
             </Layer>
           </Stage>
+          {inlineRoomEditor && inlineRoomEditorLayout && (
+            <input
+              type="text"
+              className="canvas-room-inline-input"
+              value={inlineRoomEditor.value}
+              onChange={(event) => setInlineRoomEditor((prev) => (prev ? { ...prev, value: event.target.value } : prev))}
+              onBlur={commitInlineRoomRename}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitInlineRoomRename();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelInlineRoomRename();
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              autoFocus
+              style={{
+                left: `${inlineRoomEditorLayout.left}px`,
+                top: `${inlineRoomEditorLayout.top}px`,
+                width: `${inlineRoomEditorLayout.width}px`,
+                height: `${Math.max(inlineRoomEditorLayout.height, 28)}px`,
+                fontSize: `${Math.max(11, stageView.scale * 11)}px`,
+              }}
+            />
+          )}
 
           <div className="canvas-viewport-controls" onPointerDown={(event) => event.stopPropagation()}>
             <button

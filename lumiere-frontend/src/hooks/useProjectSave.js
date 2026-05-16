@@ -14,6 +14,7 @@ import {
 import { createEmptySceneBudget } from '../utils/budgetContract';
 import { normalizeShareUrl } from '../utils/shareUrl';
 import { useBudgetStore } from '../stores/useBudgetStore';
+import { normalizeFurnitureLightState } from '../utils/furnitureLight';
 import useThemedDialogs from './useThemedDialogs.jsx';
 
 const AUTOSAVE_MS = 30_000;
@@ -173,7 +174,7 @@ export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceili
       })),
       measurements: buildWallMeasurements({ id, roomId, start, end, height, doors, windows }),
     })),
-    furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale, tint }) => ({
+    furniture: placedItems.map(({ id, filename, name, url, category, position, rotation, scale, tint, emitsLight, lightActive, lightSettings }) => ({
       id,
       type: category || 'furniture',
       filename,
@@ -186,6 +187,9 @@ export function buildSceneData({ rooms, walls, placedItems, floorMaterial, ceili
       rotation,
       scale,
       tint,
+      emitsLight: emitsLight ?? false,
+      lightActive: lightActive ?? false,
+      lightSettings: lightSettings ?? null,
       measurements: buildItemMeasurements({ scale }),
     })),
     materials: {
@@ -228,7 +232,7 @@ export function applySceneData(sceneData, { setRooms, setWalls, setPlacedItems, 
     setWalls(sceneData.walls);
   }
   const furniture = sceneData.furniture ?? sceneData.placedItems ?? [];
-  setPlacedItems(Array.isArray(furniture) ? furniture : []);
+  setPlacedItems(Array.isArray(furniture) ? furniture.map((item) => normalizeFurnitureLightState(item)) : []);
   const floor = sceneData.materials?.floor ?? sceneData.floorMaterial;
   const ceiling = sceneData.materials?.ceiling ?? sceneData.ceilingMaterial;
   if (floor) setFloor(floor);
@@ -278,6 +282,7 @@ export default function useProjectSave({
   const [modelAssets, setModelAssets] = useState(EMPTY_MODEL_ASSETS);
   const [assetUploadStatus, setAssetUploadStatus] = useState({ glb: 'idle', usdz: 'idle' });
   const autosaveTimer = useRef(null);
+  const saveInFlightRef = useRef(false);
   const hasAttemptedInitialLoad = useRef(false);
   const getSceneBudget = useBudgetStore((state) => state.getSceneBudget);
   const hydrateBudgetFromScene = useBudgetStore((state) => state.hydrateFromSceneBudget);
@@ -316,7 +321,12 @@ export default function useProjectSave({
   }, [getCanvas, snapshotApiRef]);
 
   const saveProject = useCallback(async (name = projectName, withThumbnail = true, options = {}) => {
-    setSaveStatus('saving');
+    const { silent = false, createNew = false } = options;
+    if (saveInFlightRef.current) {
+      return null;
+    }
+    saveInFlightRef.current = true;
+    if (!silent) setSaveStatus('saving');
     try {
       const scene = getSceneData();
       const thumbnail = await new Promise((resolve) => {
@@ -328,7 +338,7 @@ export default function useProjectSave({
       });
 
       let response;
-      if (currentProjectId && !options.createNew) {
+      if (currentProjectId && !createNew) {
         response = await axiosClient.put(`/api/projects/${currentProjectId}`, {
           title: name,
           scene_data: scene,
@@ -348,13 +358,19 @@ export default function useProjectSave({
       setProjectName(data.title || name);
       setShareUrl(normalizeShareUrl(data.share_url));
       setModelAssets(data.model_assets || EMPTY_MODEL_ASSETS);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2500);
+      if (!silent) {
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2500);
+      }
       return data;
     } catch (e) {
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 3000);
+      if (!silent) {
+        setSaveStatus('error');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      }
       throw e;
+    } finally {
+      saveInFlightRef.current = false;
     }
   }, [projectName, currentProjectId, getSceneData, captureSnapshot, hydrateBudgetFromScene, setCurrentProjectId]);
 
@@ -615,7 +631,7 @@ export default function useProjectSave({
   useEffect(() => {
     if (!autosaveEnabled || !currentProjectId) return;
     autosaveTimer.current = setInterval(() => {
-      saveProject(projectName, true).catch(() => {});
+      saveProject(projectName, false, { silent: true }).catch(() => {});
     }, AUTOSAVE_MS);
     return () => clearInterval(autosaveTimer.current);
   }, [autosaveEnabled, currentProjectId, saveProject, projectName]);

@@ -2,9 +2,9 @@
   "name": "lumiere-project",
   "version": "1.0.0",
   "scripts": {
-    "dev": "concurrently \"npm:dev-backend\" \"npm:dev-frontend\"",
-    "dev-backend": "cd lumiere-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --reload-dir app",
-    "dev-frontend": "cd lumiere-frontend && npm run dev"
+    "dev": "concurrently --kill-others --handle-input --names dev-backend,dev-frontend \"npm:dev-backend\" \"npm:dev-frontend\"",
+    "dev-backend": "lumiere-backend\\venv\\Scripts\\python.exe -m uvicorn app.main:app --app-dir lumiere-backend --reload --reload-dir lumiere-backend\\app",
+    "dev-frontend": "npm --prefix lumiere-frontend run dev"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

@@ -3,7 +3,7 @@ import { useRef, useEffect } from 'react';
 import { TransformControls } from '@react-three/drei';
 
 export default function FurnitureGizmo({
-  selectedItem, itemRef, gizmoMode, updateItem, setOrbitEnabled,
+  selectedItem, itemRef, gizmoMode, updateItem, setOrbitEnabled, snapItemToSurfaces,
 }) {
   if (!selectedItem || !itemRef?.current) return null;
   return (
@@ -14,14 +14,23 @@ export default function FurnitureGizmo({
       gizmoMode={gizmoMode}
       updateItem={updateItem}
       setOrbitEnabled={setOrbitEnabled}
+      snapItemToSurfaces={snapItemToSurfaces}
     />
   );
 }
 
-function FurnitureGizmoInner({ selectedItem, itemRef, gizmoMode, updateItem, setOrbitEnabled }) {
+function FurnitureGizmoInner({
+  selectedItem,
+  itemRef,
+  gizmoMode,
+  updateItem,
+  setOrbitEnabled,
+  snapItemToSurfaces,
+}) {
   const snapshotRef  = useRef(null);
   const controlsRef  = useRef(null);
   const draggingRef  = useRef(false);
+  const liveSnapRef  = useRef(null);
 
   // Imperative mode update — avoids remounting TransformControls
   useEffect(() => {
@@ -46,6 +55,7 @@ function FurnitureGizmoInner({ selectedItem, itemRef, gizmoMode, updateItem, set
 
   const handleMouseDown = () => {
     draggingRef.current = true;
+    liveSnapRef.current = null;
     setOrbitEnabled(false);
     const obj = itemRef.current;
     if (!obj) return;
@@ -63,6 +73,28 @@ function FurnitureGizmoInner({ selectedItem, itemRef, gizmoMode, updateItem, set
     obj.scale.set(...snapshotRef.current.scale);
   };
 
+  const handleObjectChange = () => {
+    if (!draggingRef.current || gizmoMode !== 'translate') return;
+    const obj = itemRef.current;
+    if (!obj) return;
+
+    const snappedUpdate = snapItemToSurfaces?.({
+      ...selectedItem,
+      position: [obj.position.x, obj.position.y, obj.position.z],
+      rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+      scale: [
+        Math.max(0.01, obj.scale.x),
+        Math.max(0.01, obj.scale.y),
+        Math.max(0.01, obj.scale.z),
+      ],
+    }, obj);
+
+    liveSnapRef.current = snappedUpdate ?? null;
+    if (snappedUpdate?.position) {
+      obj.position.set(...snappedUpdate.position);
+    }
+  };
+
   const handleMouseUp = () => {
     draggingRef.current = false;
     setOrbitEnabled(true);
@@ -76,14 +108,27 @@ function FurnitureGizmoInner({ selectedItem, itemRef, gizmoMode, updateItem, set
       Math.max(0.01, obj.scale.y),
       Math.max(0.01, obj.scale.z),
     ];
-
-    updateItem(selectedItem.id, {
+    const snappedUpdate = liveSnapRef.current ?? snapItemToSurfaces?.({
+      ...selectedItem,
       position: newPosition,
       rotation: newRotation,
+      scale: newScale,
+    }, obj);
+    const finalPosition = snappedUpdate?.position ?? newPosition;
+
+    if (snappedUpdate?.position) {
+      obj.position.set(...snappedUpdate.position);
+    }
+
+    updateItem(selectedItem.id, {
+      position: finalPosition,
+      rotation: newRotation,
       scale:    newScale,
+      ...(snappedUpdate?.roomId ? { roomId: snappedUpdate.roomId } : {}),
     });
 
     snapshotRef.current = null;
+    liveSnapRef.current = null;
   };
 
   return (
@@ -91,6 +136,7 @@ function FurnitureGizmoInner({ selectedItem, itemRef, gizmoMode, updateItem, set
       ref={controlsRef}
       object={itemRef.current}
       mode={gizmoMode}
+      onObjectChange={handleObjectChange}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
     />

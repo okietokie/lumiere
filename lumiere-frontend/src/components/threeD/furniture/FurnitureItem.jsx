@@ -20,7 +20,11 @@ useGLTF.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'
 // This way VITE_CDN_BASE env var is never needed — the CDN base is discovered
 // at runtime from live API data.
 
-let _learnedCdnBase = import.meta.env.CDN_BASE || '';  // env var as initial value
+const DEFAULT_MODEL_CDN_BASE =
+  import.meta.env.CDN_BASE ||
+  'https://models.lumiere-maison.site/file/lumiere-models';
+
+let _learnedCdnBase = DEFAULT_MODEL_CDN_BASE;  // env var or stable production fallback
 const _modelUrlByFilename = new Map();
 
 function normalizePath(value) {
@@ -264,7 +268,7 @@ class FurnitureErrorBoundary extends React.Component {
 }
 
 const FurnitureInner = forwardRef(({
-  item, resolvedUrl, isSelected, onSelect, onContextMenu, setOrbitEnabled,
+  item, resolvedUrl, isSelected, onSelect, onDoubleClick, onContextMenu, setOrbitEnabled,
 }, ref) => {
   const { scene }             = useGLTF(resolvedUrl);
   const [hovered, setHovered] = useState(false);
@@ -381,7 +385,10 @@ const FurnitureInner = forwardRef(({
         }
         onSelect();
       }}
-      onDoubleClick={openContextMenu}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onDoubleClick?.(item);
+      }}
       onContextMenu={openContextMenu}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true);  document.body.style.cursor = 'pointer'; }}
       onPointerOut={()   => {                      setHovered(false); document.body.style.cursor = 'auto';    }}

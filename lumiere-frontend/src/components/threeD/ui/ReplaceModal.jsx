@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Modal, Spin, Empty } from 'antd';
 import { SwapOutlined, ReloadOutlined } from '@ant-design/icons';
 import { COLORS } from '../../../utils/colors';
+import { getAccessToken } from '../../../utils/authStorage';
 import { apiUrl } from '../../../utils/apiBase';
 import { resolveModelPreviewUrls } from '../furniture/FurnitureItem';
 
@@ -14,7 +15,10 @@ export default function ReplaceModal({ open, onClose, selectedItem, onReplace })
   const fetchModels = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res  = await fetch(apiUrl('/models/list'));
+      const token = getAccessToken();
+      const res  = await fetch(apiUrl('/models/list'), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error();
       setModels(await res.json());
     } catch {
