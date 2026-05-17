@@ -551,6 +551,7 @@ function WallRect({ wall, isSelected, isHovered, onClick, onMenu, visibleRanges 
           onClick={onClick}
           onTap={onClick}
           onDblClick={e => { e.cancelBubble = true; onMenu?.(e); }}
+          onDblTap={e => { e.cancelBubble = true; onMenu?.(e); }}
           onContextMenu={e => { e.evt.preventDefault(); e.cancelBubble = true; onMenu?.(e); }}
           onMouseEnter={e => { if(onClick) e.target.getStage().container().style.cursor="pointer"; }}
           onMouseLeave={e => { if(onClick) e.target.getStage().container().style.cursor="crosshair"; }}
@@ -759,7 +760,8 @@ function DragHandle({
 function RoomShape({
   room, mode, selectedRoom, selectedCorner, selectedWall, hoveredWall,
   visibleWallRanges,
-  onRoomClick, onWallClick, onWallHover, onWallHoverOut,
+  onRoomClick, onRoomDoubleClick, onWallClick, onWallHover, onWallHoverOut,
+  onWallSelect,
   onRoomLabelDoubleClick,
   selectedOpening, onOpeningClick, onOpeningMenu,
   onGeometryMenu,
@@ -778,15 +780,23 @@ function RoomShape({
   const [r,g,b]   = hexToRgbArr(floor.color);
   const roomLabelWidth = Math.max(84, Math.min(148, room.name.length * 9.5));
   const areaLabelWidth = 76;
+  const handleRoomDoubleClick = useCallback((event) => {
+    if (!inSelect) return;
+    event.cancelBubble = true;
+    onRoomDoubleClick?.(room.id);
+  }, [inSelect, onRoomDoubleClick, room.id]);
 
   return (
-    <Group>
+    <Group onDblClick={handleRoomDoubleClick} onDblTap={handleRoomDoubleClick}>
       {/* ① Textured floor fill */}
       {!isWallShape && <FloorFill room={room} isSelected={isRSel}/>}
 
       {/* ② Clickable floor overlay (transparent, catches clicks) */}
-      {!isWallShape && <Line points={flat} closed fill="transparent" stroke="transparent"
-        onClick={()=>onRoomClick(room.id)}/>}
+      {!isWallShape && <Line points={flat} closed fill="rgba(0,0,0,0.001)" stroke="transparent"
+        onClick={()=>onRoomClick(room.id)}
+        onTap={()=>onRoomClick(room.id)}
+        onDblClick={handleRoomDoubleClick}
+        onDblTap={handleRoomDoubleClick}/>}
 
       {/* ③ Selection dashed border */}
       {!isWallShape && isRSel && <Line points={flat} closed fill="transparent"
@@ -799,7 +809,14 @@ function RoomShape({
           isHovered={hoveredWall?.wallId===wall.id && inOpening}
           visibleRanges={visibleWallRanges?.get(wall.id)}
           onMenu={inSelect ? e=>onGeometryMenu({ type: "edge", roomId: room.id, wallId: wall.id, event: e }) : null}
-          onClick={inOpening ? (e) => onWallClick(room.id, wall.id, e) : null}
+          onClick={inOpening
+            ? (e) => onWallClick(room.id, wall.id, e)
+            : inSelect
+              ? (e) => {
+                  e.cancelBubble = true;
+                  onWallSelect?.(room.id, wall.id);
+                }
+              : null}
         />
       ))}
 
@@ -851,10 +868,18 @@ function RoomShape({
           onRoomClick?.(room.id);
         }}
         onDblClick={(event) => {
+          if (inSelect) {
+            handleRoomDoubleClick(event);
+            return;
+          }
           event.cancelBubble = true;
           onRoomLabelDoubleClick?.(room.id);
         }}
         onDblTap={(event) => {
+          if (inSelect) {
+            handleRoomDoubleClick(event);
+            return;
+          }
           event.cancelBubble = true;
           onRoomLabelDoubleClick?.(room.id);
         }}
@@ -1476,7 +1501,7 @@ export default function RoomCanvas({ initialPlan = null }) {
     draftPts, mousePos, snappedPos, closingSnap,
     handleCanvasClick, handleMouseMove, handleDoubleClick,
     undo, redo, canUndo, canRedo, beginHistoryAction, cancelDraft, clearAll,
-    rooms, deleteRoom, renameRoom, dragCorner, deleteCorner, deleteWallEdge,
+    rooms, deleteRoom, renameRoom, dragCorner, deleteCorner, deleteWallEdge, deleteWall,
     updateFloor, applyRoomPreset,
     furniture, selectedFurnitureId, setSelectedFurnitureId,
     pendingFurniture, setPendingFurniture,
@@ -1613,6 +1638,21 @@ export default function RoomCanvas({ initialPlan = null }) {
     const point = stageRef.current?.getPointerPosition() ?? { x: 0, y: 0 };
     return screenToPlanPoint(point);
   }, [screenToPlanPoint]);
+  const centerRoomInView = useCallback((roomId) => {
+    const room = rooms.find((entry) => entry.id === roomId && entry.kind !== "wall");
+    if (!room?.points?.length || stageSize.width <= 0 || stageSize.height <= 0) return;
+
+    const centerX = room.points.reduce((sum, point) => sum + point.x, 0) / room.points.length;
+    const centerY = room.points.reduce((sum, point) => sum + point.y, 0) / room.points.length;
+
+    setSelectedRoom({ roomId });
+    stageGestureRef.current.userAdjusted = true;
+    setStageView((prev) => ({
+      ...prev,
+      x: (stageSize.width / 2) - (centerX * prev.scale),
+      y: (stageSize.height / 2) - (centerY * prev.scale),
+    }));
+  }, [rooms, setSelectedRoom, stageSize.height, stageSize.width]);
   const beginInlineRoomRename = useCallback((roomId) => {
     const room = rooms.find((entry) => entry.id === roomId);
     if (!room) return;
@@ -2263,11 +2303,14 @@ export default function RoomCanvas({ initialPlan = null }) {
   // Keyboard
   useEffect(() => {
     const onKey = e => {
+      if (isSaving) {
+        if (e.ctrlKey || e.metaKey) e.preventDefault();
+        return;
+      }
+      if (isTypingTarget(e.target)) return;
       if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="s") {
         e.preventDefault();
-        if (isTypingTarget(e.target)) return;
-        if (currentProjectId) saveProject(projectName, true).catch(() => {});
-        else setSaveModalOpen(true);
+        saveProject(projectName, true).catch(() => {});
       }
       if ((e.ctrlKey||e.metaKey) && e.key==="z") { e.preventDefault(); undo(); }
       if ((e.ctrlKey||e.metaKey) && e.key==="y") { e.preventDefault(); redo(); }
@@ -2285,7 +2328,7 @@ export default function RoomCanvas({ initialPlan = null }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, cancelDraft, setMode, setSnapEnabled, selectedFurnitureId, deleteFurniture, rotateFurniture, setSelectedCorner, setSelectedWall, setSelectedOpening, setSelectedFurnitureId, setPendingFurniture, currentProjectId, projectName, saveProject, isTypingTarget, rooms]);
+  }, [undo, redo, cancelDraft, setMode, setSnapEnabled, selectedFurnitureId, deleteFurniture, rotateFurniture, setSelectedCorner, setSelectedWall, setSelectedOpening, setSelectedFurnitureId, setPendingFurniture, projectName, saveProject, isTypingTarget, rooms, isSaving]);
 
   const enclosedRooms = rooms.filter((room) => room.kind !== "wall");
   const wallShapes = rooms.filter((room) => room.kind === "wall");
@@ -2323,6 +2366,20 @@ export default function RoomCanvas({ initialPlan = null }) {
   const selRoom  = selectedRoom ? rooms.find(r=>r.id===selectedRoom.roomId) : null;
   const selFurn  = selectedFurnitureId ? furniture.find(f=>f.id===selectedFurnitureId) : null;
   const selWallObj = selectedWall ? rooms.flatMap(r=>r.walls).find(w=>w.id===selectedWall.wallId) : null;
+  const selectedWallRoom = selectedWall ? rooms.find((room) => room.id === selectedWall.roomId) : null;
+  const isStandaloneWallRoom = useCallback((room) => Boolean(
+    room && (
+      room.kind === "wall"
+      || ((room.points?.length ?? 0) <= 2
+        && (room.walls?.length ?? 0) <= 1
+        && Math.abs(Number(room.area ?? 0)) < 0.001)
+    )
+  ), []);
+  const selectedWallIsStandalone = isStandaloneWallRoom(selectedWallRoom);
+  const geometryContextRoom = geometryContextMenu
+    ? rooms.find((room) => room.id === geometryContextMenu.roomId)
+    : null;
+  const geometryContextIsStandaloneWall = isStandaloneWallRoom(geometryContextRoom);
   const selectedOpeningObj = selectedOpening && selWallObj
     ? selWallObj.openings.find(op=>op.id===selectedOpening.openingId)
     : null;
@@ -3177,6 +3234,12 @@ export default function RoomCanvas({ initialPlan = null }) {
                   </div>
                 ))}
               </div>
+              <ToolBtn
+                label="Delete Wall"
+                danger
+                icon="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
+                onClick={() => deleteWall(selectedWall.roomId, selWallObj.id)}
+              />
               {selectedOpeningObj && (
                 <div className="thickness-control" style={{ marginTop: 12 }}>
                   <div className="thickness-label">
@@ -3378,6 +3441,12 @@ export default function RoomCanvas({ initialPlan = null }) {
                       </div>
                       <input type="range" min={20} max={80} value={mode==="door"?doorWidth:windowWidth} onChange={e=>mode==="door"?setDoorWidth(Number(e.target.value)):setWindowWidth(Number(e.target.value))} className="thickness-slider"/>
                     </div>
+                    <ToolBtn
+                      label="Delete Wall"
+                      danger
+                      icon={UI_ICONS.clear}
+                      onClick={() => deleteWall(selectedWall.roomId, selWallObj.id)}
+                    />
                   </div>
                 )}
                 {selWallObj && (
@@ -3401,6 +3470,12 @@ export default function RoomCanvas({ initialPlan = null }) {
                         </div>
                       ))}
                     </div>
+                    <ToolBtn
+                      label="Delete Wall"
+                      danger
+                      icon={UI_ICONS.clear}
+                      onClick={() => deleteWall(selectedWall.roomId, selWallObj.id)}
+                    />
                   </div>
                 )}
               </>
@@ -3631,8 +3706,14 @@ export default function RoomCanvas({ initialPlan = null }) {
                   selectedWall={selectedWall} selectedOpening={selectedOpening} hoveredWall={hoveredWall}
                   visibleWallRanges={visibleWallRanges}
                   onRoomClick={id=>setSelectedRoom({roomId:id})}
+                  onRoomDoubleClick={centerRoomInView}
                   onRoomLabelDoubleClick={beginInlineRoomRename}
                   onWallClick={handleOpeningPlacement}
+                  onWallSelect={(rId, wId) => {
+                    setSelectedRoom({ roomId: rId });
+                    setSelectedWall({ roomId: rId, wallId: wId });
+                    setSelectedOpening(null);
+                  }}
                   onOpeningClick={(rId,wId,oId)=>{setSelectedRoom({roomId:rId});setSelectedWall({roomId:rId,wallId:wId});setSelectedOpening({roomId:rId,wallId:wId,openingId:oId});}}
                   onOpeningMenu={openOpeningContextMenu}
                   onGeometryMenu={openGeometryContextMenu}
@@ -3933,9 +4014,17 @@ export default function RoomCanvas({ initialPlan = null }) {
             role="menuitem"
             onClick={() => {
               if (geometryContextMenu.type === "point") {
-                deleteCorner(geometryContextMenu.roomId, geometryContextMenu.pointIndex);
+                if (geometryContextIsStandaloneWall) {
+                  deleteWall(geometryContextMenu.roomId, geometryContextMenu.wallId);
+                } else {
+                  deleteCorner(geometryContextMenu.roomId, geometryContextMenu.pointIndex);
+                }
               } else if (geometryContextMenu.type === "edge") {
-                deleteWallEdge(geometryContextMenu.roomId, geometryContextMenu.wallId);
+                if (geometryContextIsStandaloneWall) {
+                  deleteWall(geometryContextMenu.roomId, geometryContextMenu.wallId);
+                } else {
+                  deleteWallEdge(geometryContextMenu.roomId, geometryContextMenu.wallId);
+                }
               }
               setGeometryContextMenu(null);
             }}
@@ -3957,7 +4046,7 @@ export default function RoomCanvas({ initialPlan = null }) {
             }}
           >
             <DeleteOutlined />
-            Delete {geometryContextMenu.type}
+            {geometryContextIsStandaloneWall ? "Delete Wall" : `Delete ${geometryContextMenu.type}`}
           </button>
         </div>
       )}

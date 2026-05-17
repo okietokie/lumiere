@@ -59,7 +59,6 @@ import WallGizmo from "../walls/WallGizmo";
 import WallEditorPanel from "../walls/WallEditor";
 import FurnitureItem   from "../furniture/FurnitureItem";
 import FurnitureGizmo  from "../furniture/FurnitureGizmo";
-import FurniturePicker from "../furniture/FurniturePicker";
 import FurnishPanel from "../furniture/FurnishPanel";
 import { PreviewPortal } from "../furniture/ModelPreview";
 import SceneLighting from "../lighting/SceneLighting";
@@ -3647,20 +3646,37 @@ export default function RoomScene({ initialScene = null }) {
       if (e.key === 'Escape') {
         setSelectedWallId(null);
         setSelectedFurnitureId(null);
+        setSelectedLightId(null);
         setSelectedOpening(null);
         setOpeningPreview(null);
         setActiveTool('select');
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFurnitureId) {
-        deleteItem(selectedFurnitureId);
-      }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedOpening) {
-        removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id);
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedOpening) {
+          e.preventDefault();
+          removeWallOpening(selectedOpening.wallId, selectedOpening.type, selectedOpening.id);
+          return;
+        }
+        if (selectedFurnitureId) {
+          e.preventDefault();
+          deleteItem(selectedFurnitureId);
+          return;
+        }
+        if (selectedLightId) {
+          e.preventDefault();
+          lightingState.deleteLight(selectedLightId);
+          return;
+        }
+        if (selectedWallId) {
+          e.preventDefault();
+          deleteWall(selectedWallId);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, selectedWallId, selectedFurnitureId, selectedOpening, removeWallOpening, currentProjectId, projectSave, isTypingTarget, isSaving]);
+  }, [undo, redo, selectedWallId, selectedFurnitureId, selectedLightId, selectedOpening, removeWallOpening, currentProjectId, projectSave, isTypingTarget, isSaving]);
 
   // Furniture helpers
   const addItem = (modelMeta) => {
@@ -4748,16 +4764,11 @@ export default function RoomScene({ initialScene = null }) {
       onSaveFurnitureLightStyle={saveFurnitureLightStyleOverride}
     />
   ) : activeTab === 'furniture' ? (
-    <FurniturePicker
-      selectedItem={selectedFurniture}
-      placedItems={placedItems}
-      addItem={addItem}
-      deleteItem={deleteItem}
-      gizmoMode={gizmoMode}
-      setGizmoMode={setGizmoMode}
-      furnitureRefs={furnitureRefs}
-      tint={selectedFurniture?.tint ?? null}
-      setTint={setSelectedFurnitureTint}
+    <FurnishPanel
+      rooms={rooms}
+      selectedRoomId={selectedRoomId}
+      onBeginPlacement={beginFurniturePlacement}
+      pendingPlacement={pendingFurniturePlacement}
     />
   ) : activeTab === 'projects' ? (
     <SavedProjectsPanel
@@ -4828,11 +4839,14 @@ export default function RoomScene({ initialScene = null }) {
       onSaveFurnitureLightStyle={saveFurnitureLightStyleOverride}
     />
   ) : activeTab === 'furniture' ? (
-    <FurniturePicker
-      selectedItem={selectedFurniture} placedItems={placedItems}
-      addItem={(model) => { addItem(model); setMobilePanelOpen(false); }}
-      deleteItem={deleteItem} gizmoMode={gizmoMode} setGizmoMode={setGizmoMode}
-      furnitureRefs={furnitureRefs} tint={selectedFurniture?.tint ?? null} setTint={setSelectedFurnitureTint}
+    <FurnishPanel
+      rooms={rooms}
+      selectedRoomId={selectedRoomId}
+      onBeginPlacement={(model, roomId) => {
+        beginFurniturePlacement(model, roomId);
+        setMobilePanelOpen(false);
+      }}
+      pendingPlacement={pendingFurniturePlacement}
     />
   ) : activeTab === 'projects' ? (
     <SavedProjectsPanel
@@ -5051,16 +5065,11 @@ export default function RoomScene({ initialScene = null }) {
       key: 'furniture',
       label: <span className="room-tab-label"><AppstoreOutlined /> Furnish</span>,
       children: (
-        <FurniturePicker
-          selectedItem={selectedFurniture}
-          placedItems={placedItems}
-          addItem={addItem}
-          deleteItem={deleteItem}
-          gizmoMode={gizmoMode}
-          setGizmoMode={setGizmoMode}
-          furnitureRefs={furnitureRefs}
-          tint={selectedFurniture?.tint ?? null}
-          setTint={setSelectedFurnitureTint}
+        <FurnishPanel
+          rooms={rooms}
+          selectedRoomId={selectedRoomId}
+          onBeginPlacement={beginFurniturePlacement}
+          pendingPlacement={pendingFurniturePlacement}
         />
       ),
     },
@@ -6805,8 +6814,10 @@ export default function RoomScene({ initialScene = null }) {
         navigateTo={navigateTo}
         selectedItem={selectedWall}
         onPrecisionUpdate={(updates) => selectedWall && updateWall(selectedWall.id, updates)}
-        isPinned={wallToolbarPinned}
+        isPinned={isMobile || wallToolbarPinned}
         onPinnedChange={setWallToolbarPinned}
+        showPinButton={!isMobile}
+        forceDesktopLayout={isMobile}
       />
       <ContextToolbar
         type="furniture"

@@ -69,7 +69,6 @@ if not _mongo_candidates:
 _active_client = _build_client(_mongo_candidates[0][1])
 _active_database = _active_client[MONGO_DB_NAME]
 _active_label = _mongo_candidates[0][0]
-_active_uri = _mongo_candidates[0][1]
 
 database = AsyncDatabaseProxy(lambda: _active_database)
 users_collection = AsyncCollectionProxy(database, "users")
@@ -80,7 +79,7 @@ client = _active_client
 
 
 async def connect_database() -> bool:
-    global _active_client, _active_database, _active_label, _active_uri, client
+    global _active_client, _active_database, _active_label, client
 
     last_error: PyMongoError | None = None
 
@@ -90,7 +89,7 @@ async def connect_database() -> bool:
             await next_client.admin.command("ping")
         except PyMongoError as exc:
             last_error = exc
-            logger.warning("MongoDB connection failed for %s (%s): %s", label, uri, exc)
+            logger.warning("MongoDB connection failed")
             next_client.close()
             continue
 
@@ -100,13 +99,12 @@ async def connect_database() -> bool:
         _active_client = next_client
         _active_database = next_client[MONGO_DB_NAME]
         _active_label = label
-        _active_uri = uri
         client = next_client
-        logger.info("MongoDB connected using %s (%s)", label, uri)
+        logger.info("MongoDB connected using %s configuration", label)
         return True
 
     if last_error:
-        logger.error("All MongoDB connection attempts failed: %s", last_error)
+        logger.error("All MongoDB connection attempts failed")
     return False
 
 
@@ -115,17 +113,12 @@ async def ping_database() -> bool:
         await _active_client.admin.command("ping")
         return True
     except PyMongoError as exc:
-        logger.error("MongoDB ping failed: %s", exc)
+        logger.error("MongoDB ping failed")
         return False
 
 
 def get_active_database_label() -> str:
     return _active_label
-
-
-def get_active_database_uri() -> str:
-    return _active_uri
-
 
 def close_database() -> None:
     _active_client.close()

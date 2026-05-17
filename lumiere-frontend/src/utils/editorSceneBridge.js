@@ -115,6 +115,10 @@ function isClosedPlanRoom(room) {
   return room?.kind !== "wall" && Array.isArray(room?.points) && room.points.length >= 3;
 }
 
+function isStandalonePlanWall(room) {
+  return room?.kind === "wall" && Array.isArray(room?.points) && room.points.length >= 2;
+}
+
 function projectPointOnSegment(point, start, end) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -308,16 +312,16 @@ function convertOpeningTo2D(opening, segment, targetWall, shiftX, shiftY) {
 }
 
 export function convert3DSceneTo2DPlan(snapshot) {
-  if (!snapshot?.rooms?.length) return null;
-
+  const snapshotRooms = Array.isArray(snapshot?.rooms) ? snapshot.rooms : [];
   const walls = Array.isArray(snapshot.walls) ? snapshot.walls : [];
+  if (!snapshotRooms.length && !walls.length) return null;
   const furniture = Array.isArray(snapshot.placedItems)
     ? snapshot.placedItems
     : (Array.isArray(snapshot.furniture) ? snapshot.furniture : []);
   const floorColor = snapshot?.floorMaterial?.color ?? snapshot?.materials?.floor?.color ?? "#c9a96e";
 
   const wallPoints = walls.flatMap((wall) => [wall?.start, wall?.end]).filter(Boolean);
-  const roomFootprints = snapshot.rooms.flatMap((room) =>
+  const roomFootprints = snapshotRooms.flatMap((room) =>
     Array.isArray(room?.footprint) && room.footprint.length >= 3
       ? room.footprint
       : [
@@ -332,8 +336,9 @@ export function convert3DSceneTo2DPlan(snapshot) {
   const minY = ys.length ? Math.min(...ys) : -3;
   const shiftX = VIEW_PADDING_PX - minX * PX_PER_M;
   const shiftY = VIEW_PADDING_PX - minY * PX_PER_M;
+  const matchedRoomWallIds = new Set();
 
-  const planRooms = snapshot.rooms.map((room, roomIndex) => {
+  const planRooms = snapshotRooms.map((room, roomIndex) => {
     const roomWalls = walls.filter((wall) => wall?.roomId === room.id);
     const tracedFootprint = traceWallFootprint(roomWalls);
     const points = tracedFootprint?.length
@@ -372,6 +377,7 @@ export function convert3DSceneTo2DPlan(snapshot) {
           .sort((a, b) => a.projection.distance - b.projection.distance)[0];
 
         if (!bestMatch || bestMatch.projection.distance > 24) return;
+        if (segment?.id) matchedRoomWallIds.add(segment.id);
 
         const openings = [
           ...(segment?.doors ?? []).map((opening) => ({ ...opening, type: "door" })),
@@ -399,6 +405,98 @@ export function convert3DSceneTo2DPlan(snapshot) {
       },
       source3DRoom: room,
     };
+  });
+
+  const roomIds = new Set(snapshotRooms.map((room) => room?.id).filter(Boolean));
+  const standaloneGroupMap = new Map();
+
+  walls
+    .filter((wall) => wall?.standaloneWallGroupId || !roomIds.has(wall?.roomId) || !matchedRoomWallIds.has(wall?.id))
+    .forEach((wall, index) => {
+      const groupId = wall?.standaloneWallGroupId ?? `standalone_wall_${wall?.id ?? index}`;
+      const existing = standaloneGroupMap.get(groupId) ?? {
+        id: groupId,
+        name: wall?.standaloneWallGroupName ?? `Wall ${standaloneGroupMap.size + 1}`,
+        segments: [],
+      };
+      existing.segments.push(wall);
+      standaloneGroupMap.set(groupId, existing);
+    });
+
+  standaloneGroupMap.forEach((group) => {
+    const orderedSegments = [...group.segments].sort((a, b) =>
+      (a?.standaloneWallSegmentIndex ?? 0) - (b?.standaloneWallSegmentIndex ?? 0)
+    );
+
+    const rawPointsMeters = orderedSegments.flatMap((segment, index) => {
+      const start = Array.isArray(segment?.standaloneWallPlanStart) ? segment.standaloneWallPlanStart : segment?.start;
+      const end = Array.isArray(segment?.standaloneWallPlanEnd) ? segment.standaloneWallPlanEnd : segment?.end;
+      if (!Array.isArray(start) || !Array.isArray(end)) return [];
+      return index === 0 ? [start, end] : [end];
+    });
+
+    const dedupedPointsMeters = rawPointsMeters.filter((point, index, list) => {
+      if (!Array.isArray(point)) return false;
+      if (index === 0) return true;
+      const prev = list[index - 1];
+      return !prev || Math.hypot((point[0] ?? 0) - (prev[0] ?? 0), (point[1] ?? 0) - (prev[1] ?? 0)) > 1e-6;
+    });
+
+    if (dedupedPointsMeters.length < 2) return;
+
+    const points = dedupedPointsMeters.map(([x, z]) => ({
+      x: x * PX_PER_M + shiftX,
+      y: z * PX_PER_M + shiftY,
+    }));
+
+    const sourceWalls = orderedSegments.map((segment) => {
+      const sourceWall = {
+        id: segment?.id ?? `wall_${group.id}_${Date.now()}`,
+        thickness: Math.max(8, Math.round((segment?.thickness ?? 0.2) * PX_PER_M)),
+        openings: [],
+      };
+
+      const tempTargetWall = {
+        start: {
+          x: (segment?.standaloneWallPlanStart?.[0] ?? segment?.start?.[0] ?? 0) * PX_PER_M + shiftX,
+          y: (segment?.standaloneWallPlanStart?.[1] ?? segment?.start?.[1] ?? 0) * PX_PER_M + shiftY,
+        },
+        end: {
+          x: (segment?.standaloneWallPlanEnd?.[0] ?? segment?.end?.[0] ?? 0) * PX_PER_M + shiftX,
+          y: (segment?.standaloneWallPlanEnd?.[1] ?? segment?.end?.[1] ?? 0) * PX_PER_M + shiftY,
+        },
+      };
+
+      sourceWall.openings = [
+        ...(segment?.doors ?? []).map((opening) => ({ ...opening, type: "door" })),
+        ...(segment?.windows ?? []).map((opening) => ({ ...opening, type: "window" })),
+      ]
+        .map((opening) => convertOpeningTo2D(opening, segment, tempTargetWall, shiftX, shiftY))
+        .filter(Boolean);
+
+      return sourceWall;
+    });
+
+    planRooms.push({
+      id: group.id,
+      kind: "wall",
+      name: group.name,
+      points,
+      walls: buildWalls(points, group.id, sourceWalls, { closed: false }).map((wall, index) => ({
+        ...wall,
+        thickness: sourceWalls[index]?.thickness ?? wall.thickness,
+        openings: sourceWalls[index]?.openings ?? wall.openings,
+      })),
+      area: 0,
+      floor: {
+        type: "custom",
+        color: floorColor,
+        opacity: 0.08,
+        pattern: "solid",
+        scale: 1,
+        rotation: 0,
+      },
+    });
   });
 
   const planFurniture = furniture.map((item, index) => {
@@ -619,6 +717,7 @@ export function convert2DPlanTo3DScene(plan, options = {}) {
   if (!plan?.rooms?.length) return null;
   const manifest = Array.isArray(options?.manifest) ? options.manifest : [];
   const closedRooms = plan.rooms.filter(isClosedPlanRoom);
+  const standaloneWalls = plan.rooms.filter(isStandalonePlanWall);
   const hasWalls = plan.rooms.some((room) => Array.isArray(room?.walls) && room.walls.length > 0);
   if (!closedRooms.length && !hasWalls) return null;
 
@@ -661,6 +760,7 @@ export function convert2DPlanTo3DScene(plan, options = {}) {
       id: room.id ?? `wall_host_${roomIndex + 1}`,
       height: DEFAULT_ROOM_HEIGHT_M,
     };
+    const isStandaloneWall = isStandalonePlanWall(room);
     (room?.walls ?? []).forEach((wall) => {
       const start = [
         toMeters((wall?.start?.x ?? 0) + shiftX),
@@ -691,7 +791,7 @@ export function convert2DPlanTo3DScene(plan, options = {}) {
 
       const nextWall = {
         id: wall.id ?? `wall_${room3D.id}_${Date.now()}`,
-        roomId: room3D.id,
+        roomId: isStandaloneWall ? null : room3D.id,
         start: canonicalStart,
         end: canonicalEnd,
         height: room3D.height,
@@ -704,6 +804,11 @@ export function convert2DPlanTo3DScene(plan, options = {}) {
         windows: normalizedWindows,
         source: "manual",
         boundaryType: "custom",
+        standaloneWallGroupId: isStandaloneWall ? room.id : null,
+        standaloneWallGroupName: isStandaloneWall ? room.name ?? `Wall ${roomIndex + 1}` : null,
+        standaloneWallSegmentIndex: isStandaloneWall ? (room?.walls ?? []).findIndex((candidate) => candidate?.id === wall?.id) : null,
+        standaloneWallPlanStart: isStandaloneWall ? start : null,
+        standaloneWallPlanEnd: isStandaloneWall ? end : null,
       };
 
       const existingWall = wallMap.get(key);
@@ -764,6 +869,11 @@ export function convert2DPlanTo3DScene(plan, options = {}) {
   return {
     rooms,
     walls,
+    standaloneWallGroups: standaloneWalls.map((room) => ({
+      id: room.id,
+      name: room.name ?? "Wall",
+      points: (room?.points ?? []).map((point) => [toMeters(point.x + shiftX), toMeters(point.y + shiftY)]),
+    })),
     placedItems,
     floorMaterial,
     ceilingMaterial: {

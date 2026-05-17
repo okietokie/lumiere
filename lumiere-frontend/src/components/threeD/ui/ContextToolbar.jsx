@@ -109,6 +109,8 @@ export default function ContextToolbar({
   activeOpeningTool,
   isPinned = false,
   onPinnedChange,
+  showPinButton = true,
+  forceDesktopLayout = false,
 }) {
   const toolbarRef              = useRef(null);
   const [tintOpen, setTintOpen] = useState(false);
@@ -144,9 +146,10 @@ export default function ContextToolbar({
   useEffect(() => { setPrecisionMode(null); }, [selectedItem?.id]);
   useEffect(() => { setTutorialStep(null); }, [selectedItem?.id, type]);
 
-  const toolbarWidth = isNarrow
+  const compactLayout = isNarrow && !forceDesktopLayout;
+  const toolbarWidth = compactLayout
     ? Math.min(window.innerWidth - 20, buttonsMaxWidth(type, true))
-    : buttonsMaxWidth(type, false);
+    : Math.min(window.innerWidth - 20, buttonsMaxWidth(type, false));
   const computedPos = isPinned
     ? {
         x: Math.max(10, Math.round((window.innerWidth - toolbarWidth) / 2)),
@@ -179,7 +182,7 @@ export default function ContextToolbar({
 
   useEffect(() => {
     measureTutorialTarget();
-  }, [computedPos?.x, computedPos?.y, isNarrow, measureTutorialTarget, tintOpen]);
+  }, [compactLayout, computedPos?.x, computedPos?.y, measureTutorialTarget, tintOpen]);
 
   useEffect(() => {
     if (tutorialStep == null) return undefined;
@@ -243,8 +246,8 @@ export default function ContextToolbar({
     if (!text) return;
     const r = btnEl?.getBoundingClientRect();
     setBubble(r
-      ? { text, x: r.left + r.width / 2, y: isPinned ? r.bottom + 8 : r.top, placeBelow: isPinned || isNarrow }
-      : { text, x: (computedPos.x ?? 0) + 100, y: computedPos.y ?? 0, placeBelow: isPinned || isNarrow },
+      ? { text, x: r.left + r.width / 2, y: isPinned ? r.bottom + 8 : r.top, placeBelow: isPinned || compactLayout }
+      : { text, x: (computedPos.x ?? 0) + 100, y: computedPos.y ?? 0, placeBelow: isPinned || compactLayout },
     );
     bubbleTimer.current = setTimeout(() => setBubble(null), 3000);
   };
@@ -293,20 +296,20 @@ export default function ContextToolbar({
   };
 
   const mobilePinButtonStyle = {
-    width: isNarrow ? (isPinned ? 140 : 44) : 36,
-    minWidth: isNarrow ? (isPinned ? 140 : 44) : 36,
-    height: isNarrow ? 44 : 36,
-    borderRadius: isNarrow ? (isPinned ? 50 : '50%') : 999,
-    border: isNarrow
+    width: compactLayout ? (isPinned ? 140 : 44) : 36,
+    minWidth: compactLayout ? (isPinned ? 140 : 44) : 36,
+    height: compactLayout ? 44 : 36,
+    borderRadius: compactLayout ? (isPinned ? 50 : '50%') : 999,
+    border: compactLayout
       ? 'none'
       : (isPinned ? '1px solid rgba(196,154,108,0.55)' : '1px solid rgba(255,255,255,0.08)'),
-    background: isNarrow
+    background: compactLayout
       ? (isPinned ? COLORS.action : '#1f1814')
       : (isPinned ? 'rgba(196,154,108,0.18)' : 'rgba(255,255,255,0.04)'),
-    color: isNarrow
+    color: compactLayout
       ? COLORS.text
       : (isPinned ? '#C49A6C' : 'rgba(232,224,216,0.8)'),
-    boxShadow: isNarrow
+    boxShadow: compactLayout
       ? `0 0 0 4px ${isPinned ? 'rgba(196, 154, 108, 0.32)' : 'rgba(122, 101, 89, 0.28)'}`
       : 'none',
   };
@@ -358,21 +361,23 @@ export default function ContextToolbar({
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: isNarrow ? 8 : 2,
-          padding: isNarrow ? '8px' : '5px 6px',
-          overflowX: isNarrow ? 'auto' : 'visible',
+          gap: compactLayout ? 8 : 2,
+          padding: compactLayout ? '8px' : '5px 6px',
+          overflowX: compactLayout ? 'auto' : 'visible',
           scrollbarWidth: 'none',
         }}>
-          <MobilePinButton
-            compact={isNarrow}
-            pinned={isPinned}
-            style={mobilePinButtonStyle}
-            onClick={() => {
-              const next = !isPinned;
-              onPinnedChange?.(next);
-              showBubble(next ? 'Toolbar pinned to top' : 'Toolbar follows selection again', toolbarRef.current);
-            }}
-          />
+          {showPinButton && (
+            <MobilePinButton
+              compact={compactLayout}
+              pinned={isPinned}
+              style={mobilePinButtonStyle}
+              onClick={() => {
+                const next = !isPinned;
+                onPinnedChange?.(next);
+                showBubble(next ? 'Toolbar pinned to top' : 'Toolbar follows selection again', toolbarRef.current);
+              }}
+            />
+          )}
           {buttons.map((btn, i) => {
             const gizmoKey   = btn.action.startsWith('gizmo:') ? btn.action.split(':')[1] : null;
             const isActive   = (gizmoKey && gizmoKey === gizmoMode)
@@ -387,7 +392,7 @@ export default function ContextToolbar({
                 btn={btn}
                 active={isActive}
                 precisionActive={precActive}
-                compact={isNarrow}
+                compact={compactLayout}
                 onClick={(e) => handle(btn, e.currentTarget)}
               />
             );
@@ -462,7 +467,7 @@ export default function ContextToolbar({
         <FurnitureTutorialOverlay
           stepIndex={tutorialStep}
           targetRect={tutorialRect}
-          compact={isNarrow}
+          compact={compactLayout}
           onClose={() => setTutorialStep(null)}
           onPrev={() => setTutorialStep((step) => Math.max(0, step - 1))}
           onNext={() => setTutorialStep((step) => {

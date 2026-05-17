@@ -25,9 +25,9 @@ async def sync_b2_to_mongo():
         b2_api = B2Api(info)
         b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
         bucket = b2_api.get_bucket_by_name(B2_BUCKET_NAME)
-        logger.info("B2 sync: connected to '%s'.", B2_BUCKET_NAME)
-    except Exception as exc:
-        logger.error("B2 sync: could not connect - %s", exc)
+        logger.info("B2 sync: storage connection established.")
+    except Exception:
+        logger.error("B2 sync: could not connect to storage.")
         return
 
     existing: dict[str, int | None] = {}
@@ -35,8 +35,8 @@ async def sync_b2_to_mongo():
         async for doc in database["models"].find({}, {"url": 1, "size_bytes": 1}):
             if doc.get("url"):
                 existing[doc["url"]] = doc.get("size_bytes")
-    except PyMongoError as exc:
-        logger.error("B2 sync: MongoDB unavailable during existing-model scan - %s", exc)
+    except PyMongoError:
+        logger.error("B2 sync: MongoDB unavailable during existing-model scan.")
         return
 
     inserted = 0
@@ -92,17 +92,11 @@ async def sync_b2_to_mongo():
                 upsert=True,
             )
             inserted += 1
-            logger.info(
-                "B2 sync: registered '%s' -> %s%s",
-                name,
-                cdn_url,
-                f" ({size_bytes // 1024}KB)" if size_bytes else "",
-            )
-    except PyMongoError as exc:
-        logger.error("B2 sync: MongoDB write failed - %s", exc)
+    except PyMongoError:
+        logger.error("B2 sync: MongoDB write failed.")
         return
-    except Exception as exc:
-        logger.error("B2 sync: error listing bucket - %s", exc)
+    except Exception:
+        logger.error("B2 sync: error listing bucket.")
         return
 
     total_mb = total_bytes / 1024 / 1024

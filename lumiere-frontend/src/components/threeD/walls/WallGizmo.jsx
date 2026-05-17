@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { TransformControls } from '@react-three/drei';
+import * as THREE from 'three';
 
 export default function WallGizmo({
   selectedWall, wallRefs, gizmoMode, updateWall, setOrbitEnabled,
@@ -24,6 +25,18 @@ function WallGizmoInner({ selectedWall, wallRefs, gizmoMode, updateWall, setOrbi
   const draggingRef = useRef(false);
   const liveHeightRef = useRef(null);
   const [target, setTarget] = useState(null);
+
+  const getPlanarAngleFromObject = (obj, fallbackAngle = 0) => {
+    const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(obj.quaternion);
+    axis.y = 0;
+
+    if (axis.lengthSq() < 1e-6) {
+      return fallbackAngle;
+    }
+
+    axis.normalize();
+    return Math.atan2(axis.z, axis.x);
+  };
 
   useEffect(() => {
     let frameId = null;
@@ -83,6 +96,7 @@ function WallGizmoInner({ selectedWall, wallRefs, gizmoMode, updateWall, setOrbi
     const angle = Math.atan2(end[1] - start[1], end[0] - start[0]);
 
     snapshotRef.current = {
+      angle,
       length: Math.hypot(end[0] - start[0], end[1] - start[1]),
       height,
       thickness,
@@ -95,11 +109,17 @@ function WallGizmoInner({ selectedWall, wallRefs, gizmoMode, updateWall, setOrbi
   };
 
   const handleObjectChange = () => {
-    if (!draggingRef.current || gizmoMode !== 'scale') return;
-
     const obj = getTarget();
     const snap = snapshotRef.current;
     if (!obj || !snap) return;
+
+    if (draggingRef.current && gizmoMode === 'rotate') {
+      const nextAngle = getPlanarAngleFromObject(obj, snap.angle);
+      obj.rotation.set(0, -nextAngle, 0);
+      return;
+    }
+
+    if (!draggingRef.current || gizmoMode !== 'scale') return;
 
     const scaledHeight = Math.max(0.3, (liveHeightRef.current ?? snap.height) * Math.abs(obj.scale.y));
     const nextHeight = Math.round(scaledHeight * 1000) / 1000;
@@ -122,7 +142,9 @@ function WallGizmoInner({ selectedWall, wallRefs, gizmoMode, updateWall, setOrbi
 
     const cx = obj.position.x;
     const cz = obj.position.z;
-    const newAngle = -obj.rotation.y;
+    const newAngle = gizmoMode === 'rotate'
+      ? getPlanarAngleFromObject(obj, snap.angle)
+      : -obj.rotation.y;
     const newLength = Math.max(0.3, snap.length * Math.abs(obj.scale.x));
     const baseHeight = liveHeightRef.current ?? snap.height;
     const newHeight = Math.max(0.3, baseHeight * Math.abs(obj.scale.y));
@@ -155,6 +177,9 @@ function WallGizmoInner({ selectedWall, wallRefs, gizmoMode, updateWall, setOrbi
       ref={controlsRef}
       object={target}
       mode={gizmoMode}
+      showX={gizmoMode !== 'rotate'}
+      showY
+      showZ={gizmoMode !== 'rotate'}
       onObjectChange={handleObjectChange}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}

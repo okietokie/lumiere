@@ -1,3 +1,4 @@
+# scene_schema.py
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field

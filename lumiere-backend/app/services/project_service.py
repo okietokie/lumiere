@@ -1,6 +1,9 @@
 import logging
 import os
 import json
+import shutil
+import tempfile
+import asyncio
 from uuid import uuid4
 from urllib.parse import urlparse
 
@@ -16,6 +19,7 @@ from app.core.config import (
 )
 from app.core.database import projects_collection
 from app.schemas.budget_schema import BudgetRuleCreate, BudgetRuleUpdate
+from app.services.preview_service import build_public_asset_url, has_b2_storage, has_public_asset_base, upload_local_file
 from app.utils.helpers import serialize_document, utcnow
 from app.utils.budget_estimator import calculate_budget_summary
 from app.utils.measurements import with_scene_measurements
@@ -26,6 +30,9 @@ MAX_STORAGE_MB = 20
 MAX_STORAGE_BYTES = MAX_STORAGE_MB * 1024 * 1024
 MAX_PROJECTS = 50
 MAX_ROOMS = 200
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_PROJECT_ASSET_BYTES = 250 * 1024 * 1024
 
 
 def _project_title(payload_title: str | None, payload_name: str | None) -> str:
@@ -74,8 +81,17 @@ def _raise_storage_limit_exceeded() -> None:
     )
 
 
+def _should_compute_budget_summary(scene_data: dict) -> bool:
+    budget = scene_data.get("budget") if isinstance(scene_data.get("budget"), dict) else {}
+    rules = budget.get("rules") if isinstance(budget.get("rules"), list) else []
+    return bool(budget.get("enabled") or rules)
+
+
 def _scene_with_budget_summary(scene: dict | None, project_name: str | None = None) -> dict:
     scene_data = with_scene_measurements(scene or {})
+    if not _should_compute_budget_summary(scene_data):
+        return scene_data
+
     budget = scene_data.get("budget") or {}
     calculated_at = utcnow()
     summary = calculate_budget_summary(scene_data, budget.get("rules") or [], project_name, calculated_at)
@@ -104,13 +120,14 @@ async def _serialize_project_with_recalculated_budget(doc: dict | None, *, persi
     if not doc:
         return None
 
-    scene_data = _scene_with_budget_summary(doc.get("scene_data") or doc.get("scene") or {}, doc.get("title"))
+    source_scene = doc.get("scene_data") or doc.get("scene") or {}
+    scene_data = _scene_with_budget_summary(source_scene, doc.get("title"))
     next_doc = {
         **doc,
         "scene_data": scene_data,
     }
 
-    if persist:
+    if persist and scene_data != source_scene:
         await projects_collection.update_one(
             {"_id": doc["_id"]},
             {"$set": {"scene_data": scene_data}},
@@ -372,7 +389,7 @@ async def get_latest_project(user_id: str) -> dict | None:
         {"user_id": ObjectId(user_id)},
         sort=[("last_opened_at", -1), ("updated_at", -1)],
     )
-    return await _serialize_project_with_recalculated_budget(doc, persist=True)
+    return await _serialize_project_with_recalculated_budget(doc, persist=False)
 
 
 async def get_project(project_id: str) -> dict | None:
@@ -387,7 +404,7 @@ async def open_owned_project(project_id: str, user_id: str) -> dict | None:
         {"$set": {"last_opened_at": now, "updated_at": now}},
     )
     doc = await get_owned_project(project_id, user_id)
-    return await _serialize_project_with_recalculated_budget(doc, persist=True)
+    return await _serialize_project_with_recalculated_budget(doc, persist=False)
 
 
 async def delete_project(project_id: str, user_id: str) -> bool:
@@ -397,29 +414,92 @@ async def delete_project(project_id: str, user_id: str) -> bool:
     return result.deleted_count > 0
 
 
-async def save_project_video(project_id: str, user_id: str, data: bytes) -> str | None:
+def _write_upload_to_temp(upload, suffix: str, max_bytes: int) -> tuple[str, int]:
+    temp_dir = tempfile.gettempdir()
+    total_bytes = 0
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir) as temp_file:
+            temp_path = temp_file.name
+            while True:
+                chunk = upload.file.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Upload too large (max {max_bytes // 1024 // 1024} MB)",
+                    )
+                temp_file.write(chunk)
+    except Exception:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                logger.warning("Temporary oversized upload cleanup failed: %s", temp_path)
+        raise
+    return temp_path, total_bytes
+
+
+async def _store_uploaded_file(
+    *,
+    temp_path: str,
+    destination_dir: str,
+    destination_name: str,
+    remote_path: str,
+    content_type: str | None = None,
+) -> tuple[str, str]:
+    try:
+        if has_b2_storage() and has_public_asset_base():
+            return await asyncio.to_thread(upload_local_file, temp_path, remote_path, content_type)
+
+        os.makedirs(destination_dir, exist_ok=True)
+        final_path = os.path.join(destination_dir, destination_name)
+        await asyncio.to_thread(shutil.move, temp_path, final_path)
+        return final_path, final_path
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                logger.warning("Temporary upload cleanup failed: %s", temp_path)
+
+
+async def save_project_video(project_id: str, user_id: str, upload) -> str | None:
     project = await get_owned_project(project_id, user_id)
     if not project:
         return None
 
     filename = f"{project_id}_{int(utcnow().timestamp())}.webm"
-    video_url = f"{VIDEO_SERVE_URL.rstrip('/')}/api/videos/{filename}"
-    next_project = {
-        **project,
-        "preview_video": video_url,
-    }
-    await _ensure_storage_capacity(
-        user_id,
-        _estimate_project_bytes(next_project, {"preview_video": len(data)})[0],
-        exclude_project_id=project["_id"],
-    )
-
     try:
-        os.makedirs(VIDEOS_DIR, exist_ok=True)
-        path = os.path.join(VIDEOS_DIR, filename)
-        with open(path, "wb") as file_obj:
-            file_obj.write(data)
-        logger.info("Video saved locally: %s", path)
+        temp_path, byte_count = _write_upload_to_temp(upload, ".webm", MAX_VIDEO_UPLOAD_BYTES)
+        if byte_count <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty upload")
+        video_url = (
+            build_public_asset_url(f"project-videos/{filename}")
+            if has_b2_storage() and has_public_asset_base()
+            else f"{VIDEO_SERVE_URL.rstrip('/')}/api/videos/{filename}"
+        )
+        next_project = {
+            **project,
+            "preview_video": video_url,
+        }
+        await _ensure_storage_capacity(
+            user_id,
+            _estimate_project_bytes(next_project, {"preview_video": byte_count})[0],
+            exclude_project_id=project["_id"],
+        )
+        stored_path, _ = await _store_uploaded_file(
+            temp_path=temp_path,
+            destination_dir=VIDEOS_DIR,
+            destination_name=filename,
+            remote_path=f"project-videos/{filename}",
+            content_type=upload.content_type or "video/webm",
+        )
+        logger.info("Video saved: %s", stored_path)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("save_project_video failed: %s", exc)
         return None
@@ -542,8 +622,7 @@ async def save_project_asset(
     project_id: str,
     user_id: str,
     asset_kind: str,
-    data: bytes,
-    filename: str | None,
+    upload,
 ) -> dict | None:
     project = await get_owned_project(project_id, user_id)
     if not project:
@@ -552,32 +631,43 @@ async def save_project_asset(
         raise ValueError(f"Unsupported asset kind: {asset_kind}")
 
     extension = f".{asset_kind}"
-    original_name = _sanitize_upload_name(filename, f"design{extension}")
-    if not original_name.lower().endswith(extension):
-        original_name = f"{os.path.splitext(original_name)[0]}{extension}"
-
-    stamped_name = f"{project_id}_{asset_kind}_{int(utcnow().timestamp())}_{original_name}"
-    asset_url = f"{PROJECT_ASSET_SERVE_URL.rstrip('/')}/api/project-assets/{stamped_name}"
-    next_project = {
-        **project,
-        "model_assets": {
-            **(project.get("model_assets") or {}),
-            f"{asset_kind}_url": asset_url,
-            f"{asset_kind}_filename": original_name,
-        },
-    }
-    await _ensure_storage_capacity(
-        user_id,
-        _estimate_project_bytes(next_project, {asset_kind: len(data)})[0],
-        exclude_project_id=project["_id"],
-    )
-
     try:
-        os.makedirs(PROJECT_ASSETS_DIR, exist_ok=True)
-        path = os.path.join(PROJECT_ASSETS_DIR, stamped_name)
-        with open(path, "wb") as file_obj:
-            file_obj.write(data)
-        logger.info("Project %s asset saved locally: %s", asset_kind, path)
+        temp_path, byte_count = _write_upload_to_temp(upload, extension, MAX_PROJECT_ASSET_BYTES)
+        if byte_count <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty asset file")
+        original_name = _sanitize_upload_name(upload.filename, f"design{extension}")
+        if not original_name.lower().endswith(extension):
+            original_name = f"{os.path.splitext(original_name)[0]}{extension}"
+
+        stamped_name = f"{project_id}_{asset_kind}_{int(utcnow().timestamp())}_{original_name}"
+        asset_url = (
+            build_public_asset_url(f"project-assets/{stamped_name}")
+            if has_b2_storage() and has_public_asset_base()
+            else f"{PROJECT_ASSET_SERVE_URL.rstrip('/')}/api/project-assets/{stamped_name}"
+        )
+        next_project = {
+            **project,
+            "model_assets": {
+                **(project.get("model_assets") or {}),
+                f"{asset_kind}_url": asset_url,
+                f"{asset_kind}_filename": original_name,
+            },
+        }
+        await _ensure_storage_capacity(
+            user_id,
+            _estimate_project_bytes(next_project, {asset_kind: byte_count})[0],
+            exclude_project_id=project["_id"],
+        )
+        stored_path, _ = await _store_uploaded_file(
+            temp_path=temp_path,
+            destination_dir=PROJECT_ASSETS_DIR,
+            destination_name=stamped_name,
+            remote_path=f"project-assets/{stamped_name}",
+            content_type=upload.content_type or "application/octet-stream",
+        )
+        logger.info("Project %s asset saved: %s", asset_kind, stored_path)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("save_project_asset failed: %s", exc)
         return None

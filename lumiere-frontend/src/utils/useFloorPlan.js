@@ -188,6 +188,15 @@ function rebuildPlanEntity(entity, points) {
   };
 }
 
+function isStandaloneWallEntity(entity) {
+  if (!entity || typeof entity !== "object") return false;
+  if (entity.kind === "wall") return true;
+  const pointCount = Array.isArray(entity.points) ? entity.points.length : 0;
+  const wallCount = Array.isArray(entity.walls) ? entity.walls.length : 0;
+  const area = Number(entity.area ?? 0);
+  return pointCount <= 2 && wallCount <= 1 && Math.abs(area) < 0.001;
+}
+
 export function hitTestWall(wall, cx, cy, pad = 10) {
   const dx = wall.end.x - wall.start.x, dy = wall.end.y - wall.start.y;
   const len = wall.length;
@@ -216,6 +225,282 @@ export function pointInPolygon(px, py, pts) {
       inside = !inside;
   }
   return inside;
+}
+
+const SPLIT_TOLERANCE_PX = 14;
+const MIN_SPLIT_ROOM_AREA = 1;
+
+function pointsAlmostEqual(a, b, tolerance = 0.75) {
+  return Math.hypot((a?.x ?? 0) - (b?.x ?? 0), (a?.y ?? 0) - (b?.y ?? 0)) <= tolerance;
+}
+
+function distanceToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (!lengthSq) {
+    return {
+      distance: Math.hypot(point.x - start.x, point.y - start.y),
+      t: 0,
+      projection: { x: start.x, y: start.y },
+    };
+  }
+
+  const rawT = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSq;
+  const t = Math.max(0, Math.min(1, rawT));
+  const projection = {
+    x: start.x + dx * t,
+    y: start.y + dy * t,
+  };
+
+  return {
+    distance: Math.hypot(point.x - projection.x, point.y - projection.y),
+    t,
+    projection,
+  };
+}
+
+function flipOpeningForReversedWall(opening) {
+  if (!opening) return opening;
+  return {
+    ...opening,
+    t: typeof opening.t === "number" ? 1 - opening.t : opening.t,
+    swingDir: opening.swingDir === "left" ? "right" : opening.swingDir === "right" ? "left" : opening.swingDir,
+  };
+}
+
+function buildWallsFromTransferredSegments(points, roomId, sourceWalls = [], { closed = true, fallbackThickness = WALL_THICKNESS } = {}) {
+  const nextWalls = buildWalls(points, roomId, [], { closed });
+  const used = new Set();
+
+  return nextWalls.map((wall, index) => {
+    const matchIndex = sourceWalls.findIndex((candidate, candidateIndex) => {
+      if (used.has(candidateIndex)) return false;
+      const sameDirection = pointsAlmostEqual(candidate?.start, wall.start) && pointsAlmostEqual(candidate?.end, wall.end);
+      const reversedDirection = pointsAlmostEqual(candidate?.start, wall.end) && pointsAlmostEqual(candidate?.end, wall.start);
+      return sameDirection || reversedDirection;
+    });
+
+    if (matchIndex < 0) {
+      return {
+        ...wall,
+        id: `wall_${roomId}_${index}_${Date.now()}`,
+        thickness: fallbackThickness,
+        openings: [],
+      };
+    }
+
+    used.add(matchIndex);
+    const sourceWall = sourceWalls[matchIndex];
+    const reversedDirection = pointsAlmostEqual(sourceWall?.start, wall.end) && pointsAlmostEqual(sourceWall?.end, wall.start);
+
+    return {
+      ...wall,
+      id: sourceWall?.id ?? wall.id,
+      thickness: sourceWall?.thickness ?? fallbackThickness,
+      openings: reversedDirection
+        ? (sourceWall?.openings ?? []).map(flipOpeningForReversedWall)
+        : (sourceWall?.openings ?? []),
+    };
+  });
+}
+
+function dedupePolygonPoints(points) {
+  const next = [];
+  points.forEach((point) => {
+    if (!point) return;
+    if (!next.length || !pointsAlmostEqual(next[next.length - 1], point)) {
+      next.push({ x: point.x, y: point.y });
+    }
+  });
+  if (next.length > 1 && pointsAlmostEqual(next[0], next[next.length - 1])) {
+    next.pop();
+  }
+  return next;
+}
+
+function isPointInsideOrOnPolygon(point, polygon, tolerance = SPLIT_TOLERANCE_PX) {
+  if (pointInPolygon(point.x, point.y, polygon)) return true;
+  return polygon.some((start, index) => {
+    const end = polygon[(index + 1) % polygon.length];
+    return distanceToSegment(point, start, end).distance <= tolerance;
+  });
+}
+
+function findBoundaryAnchor(points, target, tolerance = SPLIT_TOLERANCE_PX) {
+  const vertexIndex = points.findIndex((point) => Math.hypot(point.x - target.x, point.y - target.y) <= tolerance);
+  if (vertexIndex >= 0) {
+    return {
+      kind: "vertex",
+      point: { ...points[vertexIndex] },
+      vertexIndex,
+    };
+  }
+
+  let best = null;
+  points.forEach((start, index) => {
+    const end = points[(index + 1) % points.length];
+    const candidate = distanceToSegment(target, start, end);
+    if (candidate.distance > tolerance || candidate.t <= 0 || candidate.t >= 1) return;
+    if (!best || candidate.distance < best.distance) {
+      best = {
+        kind: "edge",
+        point: candidate.projection,
+        edgeIndex: index,
+        t: candidate.t,
+        distance: candidate.distance,
+      };
+    }
+  });
+  return best;
+}
+
+function augmentPolygonWithAnchors(points, anchors) {
+  const indexMap = new Map();
+  const edgeAnchors = new Map();
+
+  anchors.forEach((anchor) => {
+    if (!anchor) return;
+    if (anchor.kind === "vertex") {
+      indexMap.set(anchor.role, anchor.vertexIndex);
+      return;
+    }
+    const list = edgeAnchors.get(anchor.edgeIndex) ?? [];
+    list.push(anchor);
+    edgeAnchors.set(anchor.edgeIndex, list);
+  });
+
+  const nextPoints = [];
+  points.forEach((point, index) => {
+    nextPoints.push({ ...point });
+    if (anchors.some((anchor) => anchor?.kind === "vertex" && anchor.vertexIndex === index)) {
+      anchors.forEach((anchor) => {
+        if (anchor?.kind === "vertex" && anchor.vertexIndex === index) {
+          indexMap.set(anchor.role, nextPoints.length - 1);
+        }
+      });
+    }
+
+    const inserts = (edgeAnchors.get(index) ?? []).sort((a, b) => a.t - b.t);
+    inserts.forEach((anchor) => {
+      if (!pointsAlmostEqual(nextPoints[nextPoints.length - 1], anchor.point)) {
+        nextPoints.push({ ...anchor.point });
+      }
+      indexMap.set(anchor.role, nextPoints.length - 1);
+    });
+  });
+
+  return { points: nextPoints, indexMap };
+}
+
+function pathAlongPolygon(points, startIndex, endIndex) {
+  const path = [{ ...points[startIndex] }];
+  let cursor = startIndex;
+  while (cursor !== endIndex) {
+    cursor = (cursor + 1) % points.length;
+    path.push({ ...points[cursor] });
+  }
+  return path;
+}
+
+function splitRoomWithDivider(room, dividerPoints, nextRoomNumber, fallbackThickness = WALL_THICKNESS) {
+  if (!room || room.kind === "wall" || !Array.isArray(room.points) || room.points.length < 3) return null;
+  if (!Array.isArray(dividerPoints) || dividerPoints.length < 2) return null;
+
+  const startAnchor = findBoundaryAnchor(room.points, dividerPoints[0]);
+  const endAnchor = findBoundaryAnchor(room.points, dividerPoints[dividerPoints.length - 1]);
+  if (!startAnchor || !endAnchor) return null;
+  if (startAnchor.kind === "edge" && endAnchor.kind === "edge" && startAnchor.edgeIndex === endAnchor.edgeIndex) return null;
+  if (startAnchor.kind === "vertex" && endAnchor.kind === "vertex" && startAnchor.vertexIndex === endAnchor.vertexIndex) return null;
+  if (pointsAlmostEqual(startAnchor.point, endAnchor.point)) return null;
+
+  const interior = dividerPoints.slice(1, -1);
+  if (interior.some((point) => !isPointInsideOrOnPolygon(point, room.points))) return null;
+
+  const { points: augmentedPoints, indexMap } = augmentPolygonWithAnchors(room.points, [
+    { ...startAnchor, role: "start" },
+    { ...endAnchor, role: "end" },
+  ]);
+  const startIndex = indexMap.get("start");
+  const endIndex = indexMap.get("end");
+  if (startIndex == null || endIndex == null || startIndex === endIndex) return null;
+
+  const startPoint = augmentedPoints[startIndex];
+  const endPoint = augmentedPoints[endIndex];
+  const divider = [startPoint, ...interior.map((point) => ({ x: point.x, y: point.y })), endPoint];
+  const boundaryForward = pathAlongPolygon(augmentedPoints, startIndex, endIndex);
+  const boundaryBackward = pathAlongPolygon(augmentedPoints, endIndex, startIndex);
+
+  const firstRoomPoints = dedupePolygonPoints([
+    ...boundaryForward,
+    ...divider.slice(1, -1).reverse(),
+  ]);
+  const secondRoomPoints = dedupePolygonPoints([
+    ...divider,
+    ...boundaryBackward.slice(1, -1),
+  ]);
+
+  if (firstRoomPoints.length < 3 || secondRoomPoints.length < 3) return null;
+  if (calcArea(firstRoomPoints) <= MIN_SPLIT_ROOM_AREA || calcArea(secondRoomPoints) <= MIN_SPLIT_ROOM_AREA) return null;
+
+  const dividerSourceWalls = buildWalls(divider, room.id, [], { closed: false }).map((wall) => ({
+    ...wall,
+    thickness: fallbackThickness,
+    openings: [],
+  }));
+  const sourceWalls = [...(room.walls ?? []), ...dividerSourceWalls];
+  const makeSplitRoom = (points, suffix, name) => {
+    const id = `room_${Date.now()}_${suffix}`;
+    return {
+    ...room,
+    id,
+    name,
+    points,
+    walls: buildWallsFromTransferredSegments(points, id, sourceWalls, {
+      fallbackThickness,
+    }),
+    area: calcArea(points),
+    floor: { ...DEFAULT_ROOM_FLOOR, ...(room.floor ?? {}) },
+    };
+  };
+
+  return [
+    makeSplitRoom(firstRoomPoints, "a", room.name ?? `Room ${nextRoomNumber}`),
+    makeSplitRoom(secondRoomPoints, "b", `Room ${nextRoomNumber}`),
+  ];
+}
+
+function reassignFurnitureToRooms(items, nextRooms) {
+  return items.map((item) => {
+    const room = nextRooms.find((candidate) => candidate.kind !== "wall" && pointInPolygon(item.x, item.y, candidate.points));
+    return {
+      ...item,
+      roomId: room?.id ?? item.roomId ?? null,
+    };
+  });
+}
+
+function getDividerProbePoints(points) {
+  if (!Array.isArray(points) || points.length < 2) return [];
+
+  const probes = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    probes.push({
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+    });
+  }
+
+  if (!probes.length) {
+    probes.push({
+      x: (points[0].x + points[points.length - 1].x) / 2,
+      y: (points[0].y + points[points.length - 1].y) / 2,
+    });
+  }
+
+  return probes;
 }
 
 // ─── main hook ────────────────────────────────────────────────────────────────
@@ -333,6 +618,30 @@ export function useFloorPlan(initialState = null) {
   const finalizeWall = useCallback((pts) => {
     if (pts.length < 2) return;
     pushHistory();
+    const nextRoomNumber = rooms.filter((room) => room?.kind !== "wall").length + 1;
+    const probePoints = getDividerProbePoints(pts);
+    const roomToSplit = rooms.find((room) => {
+      if (room?.kind === "wall") return false;
+      if (!findBoundaryAnchor(room.points, pts[0]) || !findBoundaryAnchor(room.points, pts[pts.length - 1])) {
+        return false;
+      }
+      return probePoints.every((point) => isPointInsideOrOnPolygon(point, room.points));
+    });
+
+    if (roomToSplit) {
+      const splitRooms = splitRoomWithDivider(roomToSplit, pts, nextRoomNumber, wallThickness);
+      if (splitRooms?.length === 2) {
+        const nextRooms = rooms.flatMap((room) => room.id === roomToSplit.id ? splitRooms : [room]);
+        setRooms(nextRooms);
+        setFurniture((currentFurniture) => reassignFurnitureToRooms(currentFurniture, nextRooms));
+        setDraftPts([]); draftRef.current = [];
+        setClosingSnap(false); setMousePos(null); setSnappedPos(null);
+        setSelectedRoom({ roomId: splitRooms[0].id }); setSelectedCorner(null);
+        setSelectedWall(null); setSelectedOpening(null);
+        return;
+      }
+    }
+
     const id = `wall_shape_${Date.now()}`;
     const walls = buildWalls(pts, id, [], { closed: false }).map((wall) => ({
       ...wall,
@@ -533,8 +842,11 @@ export function useFloorPlan(initialState = null) {
     pushHistory();
     setRooms(prev => prev.flatMap((room) => {
       if (room.id !== roomId) return [room];
-      const minPoints = room.kind === "wall" ? 2 : 3;
-      if (room.points.length <= minPoints) return [room];
+      const isWallEntity = isStandaloneWallEntity(room);
+      const minPoints = isWallEntity ? 2 : 3;
+      if (room.points.length <= minPoints) {
+        return isWallEntity ? [] : [room];
+      }
       const pts = room.points.filter((_, index) => index !== ptIdx);
       if (pts.length < minPoints) return [];
       return [rebuildPlanEntity(room, pts)];
@@ -548,8 +860,11 @@ export function useFloorPlan(initialState = null) {
     pushHistory();
     setRooms(prev => prev.flatMap(room => {
       if (room.id !== roomId) return [room];
-      const minPoints = room.kind === "wall" ? 2 : 3;
-      if (room.points.length <= minPoints) return [room];
+      const isWallEntity = isStandaloneWallEntity(room);
+      const minPoints = isWallEntity ? 2 : 3;
+      if (room.points.length <= minPoints) {
+        return isWallEntity ? [] : [room];
+      }
       const wallIndex = room.walls.findIndex(wall => wall.id === wallId);
       if (wallIndex < 0) return [room];
       const removePointIndex = (wallIndex + 1) % room.points.length;
@@ -557,6 +872,34 @@ export function useFloorPlan(initialState = null) {
       if (pts.length < minPoints) return [];
       return [rebuildPlanEntity(room, pts)];
     }));
+    setSelectedCorner(null);
+    setSelectedWall(null);
+    setSelectedOpening(null);
+  }, [pushHistory]);
+
+  const deleteWall = useCallback((roomId, wallId = null) => {
+    pushHistory();
+    setRooms((prev) => prev.flatMap((room) => {
+      if (room.id !== roomId) return [room];
+
+      const isWallEntity = isStandaloneWallEntity(room);
+      if (isWallEntity) {
+        return [];
+      }
+
+      if (!wallId) {
+        return [room];
+      }
+
+      const wallIndex = room.walls.findIndex((wall) => wall.id === wallId);
+      if (wallIndex < 0) return [room];
+
+      const removePointIndex = (wallIndex + 1) % room.points.length;
+      const nextPoints = room.points.filter((_, index) => index !== removePointIndex);
+      if (nextPoints.length < 3) return [];
+      return [rebuildPlanEntity(room, nextPoints)];
+    }));
+    setSelectedRoom(null);
     setSelectedCorner(null);
     setSelectedWall(null);
     setSelectedOpening(null);
@@ -685,7 +1028,7 @@ export function useFloorPlan(initialState = null) {
     draftPts, mousePos, snappedPos, closingSnap,
     handleCanvasClick, handleMouseMove, handleDoubleClick,
     undo, redo, canUndo, canRedo, beginHistoryAction, cancelDraft, clearAll,
-    rooms, closeRoom, deleteRoom, renameRoom, dragCorner, deleteCorner, deleteWallEdge,
+    rooms, closeRoom, deleteRoom, renameRoom, dragCorner, deleteCorner, deleteWallEdge, deleteWall,
     updateFloor, applyRoomPreset,
     furniture, selectedFurnitureId, setSelectedFurnitureId,
     pendingFurniture, setPendingFurniture,

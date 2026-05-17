@@ -1,4 +1,5 @@
 
+# model_routes.py
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from typing import Optional
@@ -17,7 +18,7 @@ class ModelUpsertRequest(BaseModel):
     filename:   str
     category:   str
     url:        str
-    size_bytes: Optional[int] = None   # filled in by upload script if available
+    size_bytes: Optional[int] = None   
     emitsLight: Optional[bool] = None
     defaultLightActive: Optional[bool] = None
     defaultLightSettings: Optional[dict] = None

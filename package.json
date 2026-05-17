@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "concurrently --kill-others --handle-input --names dev-backend,dev-frontend \"npm:dev-backend\" \"npm:dev-frontend\"",
     "dev-backend": "lumiere-backend\\venv\\Scripts\\python.exe -m uvicorn app.main:app --app-dir lumiere-backend --reload --reload-dir lumiere-backend\\app",
-    "dev-frontend": "npm --prefix lumiere-frontend run dev"
+    "dev-frontend": "npm --prefix lumiere-frontend run dev",
+    "sync-b2-models": "lumiere-backend\\venv\\Scripts\\python.exe lumiere-backend\\run_sync_b2_to_mongo.py"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

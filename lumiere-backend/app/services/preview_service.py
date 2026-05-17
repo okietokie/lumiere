@@ -6,9 +6,15 @@ B2_KEY_ID = os.getenv("B2_KEY_ID")
 B2_APP_KEY = os.getenv("B2_APP_KEY")
 B2_BUCKET_NAME = os.getenv("B2_BUCKET_NAME")
 CDN_BASE = os.getenv("CDN_BASE", "")
+B2_PUBLIC_URL = os.getenv("B2_PUBLIC_URL", "")
+_bucket = None
 
 
 def _get_bucket():
+    global _bucket
+    if _bucket is not None:
+        return _bucket
+
     if not B2_KEY_ID or not B2_APP_KEY or not B2_BUCKET_NAME:
         raise RuntimeError("B2 credentials are not configured")
 
@@ -17,7 +23,20 @@ def _get_bucket():
     info = InMemoryAccountInfo()
     api = B2Api(info)
     api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
-    return api.get_bucket_by_name(B2_BUCKET_NAME)
+    _bucket = api.get_bucket_by_name(B2_BUCKET_NAME)
+    return _bucket
+
+
+def has_b2_storage() -> bool:
+    return bool(B2_KEY_ID and B2_APP_KEY and B2_BUCKET_NAME)
+
+
+def _public_base_url() -> str:
+    return (CDN_BASE or B2_PUBLIC_URL).rstrip("/")
+
+
+def has_public_asset_base() -> bool:
+    return bool(_public_base_url())
 
 
 def build_preview_path(model_filename: str, extension: str) -> str:
@@ -31,7 +50,23 @@ def build_preview_path(model_filename: str, extension: str) -> str:
 
 
 def build_preview_url(preview_path: str) -> str:
-    return f"{CDN_BASE.rstrip('/')}/{preview_path.lstrip('/')}"
+    return f"{_public_base_url()}/{preview_path.lstrip('/')}"
+
+
+def build_public_asset_url(path: str) -> str:
+    base = _public_base_url()
+    if not base:
+        raise RuntimeError("Public asset base URL is not configured")
+    return f"{base}/{path.lstrip('/')}"
+
+
+def upload_local_file(file_path: str, remote_path: str, content_type: str | None = None) -> tuple[str, str]:
+    bucket = _get_bucket()
+    kwargs = {"local_file": file_path, "file_name": remote_path}
+    if content_type:
+        kwargs["content_type"] = content_type
+    bucket.upload_local_file(**kwargs)
+    return remote_path, build_public_asset_url(remote_path)
 
 
 def upload_preview_bytes(model_filename: str, data: bytes, content_type: str, extension: str) -> tuple[str, str]:

@@ -1,3 +1,4 @@
+# project_routes.py
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.core.security import get_current_user
@@ -183,12 +184,7 @@ async def upload_project_video(
 ):
     if not video.content_type or "video" not in video.content_type:
         raise HTTPException(status_code=400, detail="File must be a video")
-
-    data = await video.read()
-    if len(data) > 100 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Video too large (max 100 MB)")
-
-    video_url = await save_project_video(project_id, str(current_user["_id"]), data)
+    video_url = await save_project_video(project_id, str(current_user["_id"]), video)
     if not video_url:
         raise HTTPException(status_code=404, detail="Project not found or failed to save video")
     return {"video_url": video_url}
@@ -205,12 +201,6 @@ async def upload_project_asset(
     if normalized_kind not in {"glb", "usdz"}:
         raise HTTPException(status_code=400, detail="Asset kind must be glb or usdz")
 
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty asset file")
-    if len(data) > 250 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="3D asset too large (max 250 MB)")
-
     upload_name = (file.filename or "").lower()
     if normalized_kind == "glb" and not upload_name.endswith(".glb"):
         raise HTTPException(status_code=400, detail="GLB upload must end with .glb")
@@ -221,8 +211,7 @@ async def upload_project_asset(
         project_id,
         str(current_user["_id"]),
         normalized_kind,
-        data,
-        file.filename,
+        file,
     )
     if not asset:
         raise HTTPException(status_code=404, detail="Project not found or failed to save 3D asset")
