@@ -24,6 +24,7 @@ import {
   convert3DSceneTo2DPlan,
   getLatestLiveEditorSnapshot,
 } from "./utils/editorSceneBridge";
+import { isDemoQuery } from "./utils/demoProjectTransfer.js";
 import { ToastProvider } from "./ui/ToastNotification";
 import useModelPrefetch from "./hooks/useModelPrefetch";
 import { fetchModelManifest } from "./hooks/useModelPrefetch";
@@ -33,6 +34,16 @@ import { COLORS } from "./utils/colors";
 
 function RequireAuth({ children }) {
   return getAccessToken() ? children : <Navigate to="/login" replace />;
+}
+
+function RequireAuthOrDemo({ children }) {
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  if (getAccessToken() || isDemoQuery(searchParams)) {
+    return children;
+  }
+  const redirect = `${location.pathname}${location.search}`;
+  return <Navigate to={`/login?redirect=${encodeURIComponent(redirect)}`} replace />;
 }
 
 function RedirectAuthenticated({ children }) {
@@ -306,21 +317,21 @@ function RouteShell() {
           <Route
             path="/user/room"
             element={
-              <RequireAuth>
+              <RequireAuthOrDemo>
                 <EditorRoute mode="3d">
                   <LiveRoomSceneRoute />
                 </EditorRoute>
-              </RequireAuth>
+              </RequireAuthOrDemo>
             }
           />
           <Route
             path="/user/room-2d"
             element={
-              <RequireAuth>
+              <RequireAuthOrDemo>
                 <EditorRoute mode="2d">
                   <LiveRoomCanvasRoute />
                 </EditorRoute>
-              </RequireAuth>
+              </RequireAuthOrDemo>
             }
           />
           <Route path="/canvas" element={<Navigate to="/user/room-2d" replace />} />

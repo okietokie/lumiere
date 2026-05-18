@@ -77,7 +77,7 @@ import ProjectsSidebarPanel from "../ui/ProjectsSidebarPanel";
 import ViewSidebarPanel from "../ui/ViewSidebarPanel";
 import { useToast }        from "../../../ui/ToastNotification";
 import RevealActionButton from "./RevealActionButton";
-import useProjectSave, { takeSnapshot } from "../../../hooks/useProjectSave";
+import useProjectSave, { buildSceneData, takeSnapshot } from "../../../hooks/useProjectSave";
 import axiosClient from "../../../api/axiosClient";
 import { useBudgetStore } from "../../../stores/useBudgetStore";
 import { calculateBudgetSummary } from "../../../utils/budgetEstimator";
@@ -116,7 +116,12 @@ import ViewInArOutlinedIcon from "@mui/icons-material/ViewInArOutlined";
 
 import useRecorder          from '../../../hooks/useRecorder';
 import RecordingIndicator   from '../ui/RecordingIndicator';
-import { clearAuthSession } from "../../../utils/authStorage";
+import { clearAuthSession, getAccessToken } from "../../../utils/authStorage";
+import {
+  buildDemoAuthRedirect,
+  isDemoQuery,
+  saveDemoProjectDraft,
+} from "../../../utils/demoProjectTransfer";
 import {
   convert3DSceneTo2DPlan,
   saveLive2DPlanSnapshot,
@@ -620,6 +625,7 @@ export default function RoomScene({ initialScene = null }) {
   const [searchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
   const shouldPreferLiveSnapshot = searchParams.get("live") === "1";
+  const isDemoMode = !getAccessToken() && isDemoQuery(searchParams);
   const shouldLoadSelectedProject = Boolean(selectedProjectId && !(shouldPreferLiveSnapshot && initialScene));
   const switchTo2DUrl = useMemo(() => {
     const nextSearch = new URLSearchParams(searchParams);
@@ -855,6 +861,57 @@ export default function RoomScene({ initialScene = null }) {
 
   const [ignoredSpatialSuggestionKeys, setIgnoredSpatialSuggestionKeys] = useState(() => new Set());
   const spatial = useSpatialAnalysis(placedItems, walls, furnitureRefs, ignoredSpatialSuggestionKeys);
+  const getSceneBudget = useBudgetStore((state) => state.getSceneBudget);
+
+  const captureDemoThumbnail = useCallback(() => {
+    const snapshotApi = snapshotApiRef.current;
+    if (snapshotApi?.capture) {
+      const captured = snapshotApi.capture();
+      if (captured && captured !== 'data:,') return captured;
+    }
+    return takeSnapshot(canvasWrapperRef.current);
+  }, []);
+
+  const requestDemoUpgrade = useCallback(async (reason, draftName = 'Untitled Room') => {
+    saveDemoProjectDraft({
+      title: draftName,
+      scene_data: buildSceneData({
+        rooms,
+        walls,
+        placedItems,
+        floorMaterial,
+        ceilingMaterial,
+        lightingState,
+        budget: getSceneBudget(),
+      }),
+      thumbnail_url: captureDemoThumbnail(),
+      reason,
+      source: '3d-demo',
+    });
+
+    const confirmed = await dialogs.confirm({
+      title: 'Create an Account to Continue',
+      content: 'We saved this demo project for you. Create an account to keep adding furniture and use features that save work to your account.',
+      okText: 'Create Account',
+      cancelText: 'Stay in Demo',
+      tone: 'warning',
+    });
+
+    if (confirmed) {
+      navigate(buildDemoAuthRedirect('/user/room'));
+    }
+  }, [
+    captureDemoThumbnail,
+    ceilingMaterial,
+    dialogs,
+    floorMaterial,
+    getSceneBudget,
+    lightingState,
+    navigate,
+    placedItems,
+    rooms,
+    walls,
+  ]);
 
   const projectSave = useProjectSave({
     rooms, setRooms,
@@ -868,6 +925,8 @@ export default function RoomScene({ initialScene = null }) {
     currentProjectId, setCurrentProjectId,
     skipInitialLatestLoad: Boolean(selectedProjectId || initialScene),
     localMutationVersionRef,
+    demoMode: isDemoMode,
+    onRequireAccount: ({ projectName: draftName }) => requestDemoUpgrade('save-project', draftName),
   });
   const { loadProject, saveProject, projectName } = projectSave;
   const isSaving = projectSave.saveStatus === 'saving';
@@ -3680,6 +3739,10 @@ export default function RoomScene({ initialScene = null }) {
 
   // Furniture helpers
   const addItem = (modelMeta) => {
+    if (isDemoMode && placedItems.length >= 1) {
+      void requestDemoUpgrade('multiple-furniture');
+      return;
+    }
     markSceneMutation();
     const lightDefaults = getFurnitureLightDefaults(modelMeta);
     const item = {
@@ -4090,6 +4153,10 @@ export default function RoomScene({ initialScene = null }) {
 
   const beginFurniturePlacement = useCallback((modelMeta, roomId) => {
     if (!modelMeta || !roomId) return;
+    if (isDemoMode && placedItems.length >= 1) {
+      void requestDemoUpgrade('multiple-furniture');
+      return;
+    }
     const room = rooms.find((entry) => entry.id === roomId);
     setPendingFurniturePlacement({ modelMeta, roomId });
     setSelectedRoomId(roomId);
@@ -4101,10 +4168,14 @@ export default function RoomScene({ initialScene = null }) {
     setDesktopPanelOpen(true);
     focusRoomTopView(roomId);
     toast.info(room?.name ? `Top view opened for ${room.name}. Click where you want it to be placed.` : 'Top view opened. Click where you want it to be placed.');
-  }, [focusRoomTopView, rooms, toast]);
+  }, [focusRoomTopView, isDemoMode, placedItems.length, requestDemoUpgrade, rooms, toast]);
 
   const placeFurnitureInRoom = useCallback((roomId, point) => {
     if (!pendingFurniturePlacement?.modelMeta || !point) return false;
+    if (isDemoMode && placedItems.length >= 1) {
+      void requestDemoUpgrade('multiple-furniture');
+      return false;
+    }
     markSceneMutation();
     const lightDefaults = getFurnitureLightDefaults(pendingFurniturePlacement.modelMeta);
     const item = {
@@ -4131,7 +4202,7 @@ export default function RoomScene({ initialScene = null }) {
     const room = rooms.find((entry) => entry.id === roomId);
     toast.success(room?.name ? `${item.name ?? 'Furniture'} placed in ${room.name}.` : `${item.name ?? 'Furniture'} placed.`);
     return true;
-  }, [markSceneMutation, pendingFurniturePlacement, rooms, toast]);
+  }, [isDemoMode, markSceneMutation, pendingFurniturePlacement, placedItems.length, requestDemoUpgrade, rooms, toast]);
 
   const updateItem = (id, updates) => {
     markSceneMutation();
@@ -6814,9 +6885,9 @@ export default function RoomScene({ initialScene = null }) {
         navigateTo={navigateTo}
         selectedItem={selectedWall}
         onPrecisionUpdate={(updates) => selectedWall && updateWall(selectedWall.id, updates)}
-        isPinned={isMobile || wallToolbarPinned}
+        isPinned={wallToolbarPinned}
         onPinnedChange={setWallToolbarPinned}
-        showPinButton={!isMobile}
+        showPinButton
         forceDesktopLayout={isMobile}
       />
       <ContextToolbar

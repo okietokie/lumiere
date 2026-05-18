@@ -259,7 +259,7 @@ export default function LandingSections({
     return () => unsub();
   }, [experienceScroll]);
 
-  const openDemo = () => navigate("/user/room");
+  const openDemo = () => navigate("/user/room?demo=1");
   const openLogin = () => navigate("/login");
   const openRegister = () => navigate("/register");
 

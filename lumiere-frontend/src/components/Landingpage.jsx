@@ -283,7 +283,7 @@ function Hero({ navigate, reducedMotion }) {
             <button className="lm-button lm-button-primary" onClick={() => navigate("/register")}>
               Start Designing
             </button>
-            <button className="lm-button lm-button-secondary" onClick={() => navigate("/user/room")}>
+            <button className="lm-button lm-button-secondary" onClick={() => navigate("/user/room?demo=1")}>
               <PlayCircleOutlined />
               Watch Demo
             </button>

@@ -217,7 +217,7 @@ const ScrollExpandMedia = ({
                     {/* Watch Demo Button */}
                     <button
                       type="button"
-                      onClick={() => navigate("/user/room")}
+                      onClick={() => navigate("/user/room?demo=1")}
                       className="group relative flex items-center justify-center w-[132px] h-[48px] sm:w-[50px] sm:h-[50px] sm:hover:w-[160px] rounded-lg sm:rounded-full bg-transparent overflow-hidden backdrop-blur-md transition-all duration-300 cursor-pointer font-semibold"
                       style={{
                         color: COLORS.text,

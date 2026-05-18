@@ -20,7 +20,12 @@ import { resolveModelPreviewUrls } from "../threeD/furniture/FurnitureItem";
 import { CardPreview as LiveFurnitureCardPreview } from "../threeD/furniture/FurnitureModelCard";
 import SaveModal from "../threeD/ui/SaveModal";
 import axiosClient from "../../api/axiosClient";
-import { clearAuthSession } from "../../utils/authStorage";
+import { clearAuthSession, getAccessToken } from "../../utils/authStorage";
+import {
+  buildDemoAuthRedirect,
+  isDemoQuery,
+  saveDemoProjectDraft,
+} from "../../utils/demoProjectTransfer";
 import { normalizeShareUrl } from "../../utils/shareUrl";
 import "./RoomCanvas.css";
 import OnboardingJoyride from "../onboarding/OnboardingJoyride.jsx";
@@ -1404,6 +1409,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
   const shouldPreferLiveSnapshot = searchParams.get("live") === "1";
+  const isDemoMode = !getAccessToken() && isDemoQuery(searchParams);
   const tutorialMode = searchParams.get("tour");
   const isPlannerTutorial = tutorialMode === "first-project";
   const containerRef = useRef(null);
@@ -1841,6 +1847,39 @@ export default function RoomCanvas({ initialPlan = null }) {
     }
   }, []);
 
+  const requestDemoUpgrade = useCallback(async (reason) => {
+    let manifest = [];
+    try {
+      manifest = await fetchModelManifest();
+    } catch {
+      manifest = [];
+    }
+
+    const plan = buildPlanSnapshot();
+    const scene = convert2DPlanTo3DScene(plan, { manifest });
+    saveDemoProjectDraft({
+      title: projectName || "Untitled Room",
+      scene_data: scene,
+      thumbnail_url: captureSnapshot(),
+      reason,
+      source: "2d-demo",
+    });
+
+    const confirmed = await dialogs.confirm({
+      title: "Create an Account to Continue",
+      content: "We saved this demo project for you. Create an account to keep adding furniture and use features that save work to your account.",
+      okText: "Create Account",
+      cancelText: "Stay in Demo",
+      tone: "warning",
+    });
+
+    if (confirmed) {
+      navigate(buildDemoAuthRedirect("/user/room-2d"));
+    }
+
+    return null;
+  }, [buildPlanSnapshot, captureSnapshot, dialogs, navigate, projectName]);
+
   const isBlankSceneData = useCallback((sceneData) => {
     if (!sceneData || typeof sceneData !== "object") return true;
 
@@ -1892,6 +1931,9 @@ export default function RoomCanvas({ initialPlan = null }) {
   }, [isBlankSceneData, replacePlan, syncProjectQuery]);
 
   const saveProject = useCallback(async (name = projectName, withThumbnail = true, options = {}) => {
+    if (isDemoMode || !getAccessToken()) {
+      return requestDemoUpgrade("save-project");
+    }
     setSaveStatus("saving");
     try {
       let manifest = [];
@@ -1957,15 +1999,19 @@ export default function RoomCanvas({ initialPlan = null }) {
       window.setTimeout(() => setSaveStatus("idle"), 3000);
       throw error;
     }
-  }, [buildPlanSnapshot, captureSnapshot, currentProjectId, projectName, syncProjectQuery]);
+  }, [buildPlanSnapshot, captureSnapshot, currentProjectId, isDemoMode, projectName, requestDemoUpgrade, syncProjectQuery]);
 
   const ensureProject = useCallback(async ({ persistLatest = false } = {}) => {
+    if (isDemoMode || !getAccessToken()) {
+      await requestDemoUpgrade("save-project");
+      return null;
+    }
     if (!currentProjectId || persistLatest) {
       const project = await saveProject(projectName, true);
-      return project.id;
+      return project?.id ?? null;
     }
     return currentProjectId;
-  }, [currentProjectId, projectName, saveProject]);
+  }, [currentProjectId, isDemoMode, projectName, requestDemoUpgrade, saveProject]);
 
   const leaveEditorWithSavePrompt = useCallback(async (nextAction, label) => {
     if (isSaving) return;
@@ -2061,6 +2107,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const uploadModelAsset = useCallback(async (kind, file) => {
     if (!file) return null;
     const projectId = await ensureProject({ persistLatest: true });
+    if (!projectId) return null;
     setAssetUploadStatus((prev) => ({ ...prev, [kind]: "uploading" }));
     try {
       const formData = new FormData();
@@ -2085,6 +2132,7 @@ export default function RoomCanvas({ initialPlan = null }) {
 
   const copyShareLink = useCallback(async () => {
     const projectId = await ensureProject({ persistLatest: true });
+    if (!projectId) return null;
     const url = shareUrl || `${window.location.origin}/view/${projectId}`;
     await navigator.clipboard.writeText(url);
     setShareUrl(url);
@@ -2093,6 +2141,7 @@ export default function RoomCanvas({ initialPlan = null }) {
 
   const openSharePage = useCallback(async () => {
     const projectId = await ensureProject({ persistLatest: true });
+    if (!projectId) return null;
     const url = shareUrl || `${window.location.origin}/view/${projectId}`;
     setShareUrl(url);
     window.open(url, "_blank", "noopener,noreferrer");
@@ -2293,12 +2342,12 @@ export default function RoomCanvas({ initialPlan = null }) {
       : null;
 
   useEffect(() => {
-    if (!autosaveEnabled || !currentProjectId) return undefined;
+    if (isDemoMode || !autosaveEnabled || !currentProjectId || !getAccessToken()) return undefined;
     autosaveRef.current = window.setInterval(() => {
       saveProject(projectName, true).catch(() => {});
     }, 30000);
     return () => window.clearInterval(autosaveRef.current);
-  }, [autosaveEnabled, currentProjectId, projectName, saveProject]);
+  }, [autosaveEnabled, currentProjectId, isDemoMode, projectName, saveProject]);
 
   // Keyboard
   useEffect(() => {
@@ -2367,6 +2416,21 @@ export default function RoomCanvas({ initialPlan = null }) {
   const selFurn  = selectedFurnitureId ? furniture.find(f=>f.id===selectedFurnitureId) : null;
   const selWallObj = selectedWall ? rooms.flatMap(r=>r.walls).find(w=>w.id===selectedWall.wallId) : null;
   const selectedWallRoom = selectedWall ? rooms.find((room) => room.id === selectedWall.roomId) : null;
+  const handleFurnitureCatalogueSelect = useCallback((item) => {
+    const currentKey = getPendingKey(pendingFurniture);
+    const nextKey = getModelKey(item.model ?? item);
+    const isSelectingNewItem = currentKey !== nextKey;
+
+    if (isDemoMode && furniture.length >= 1 && isSelectingNewItem) {
+      void requestDemoUpgrade("multiple-furniture");
+      return;
+    }
+
+    setPendingFurniture(isSelectingNewItem ? item : null);
+    if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
+      onboardingTour.setStep("select-furniture");
+    }
+  }, [furniture.length, isDemoMode, onboardingTour, pendingFurniture, requestDemoUpgrade, setPendingFurniture]);
   const isStandaloneWallRoom = useCallback((room) => Boolean(
     room && (
       room.kind === "wall"
@@ -2962,14 +3026,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                   <div className="sidebar-section-title">Furniture</div>
                   <div className="desktop-sidebar-scroll-shell furniture-scroll-shell">
                     <FurnitureCatalogue
-                      onSelect={(item) => {
-                        const currentKey = getPendingKey(pendingFurniture);
-                        const nextKey = getModelKey(item.model ?? item);
-                        setPendingFurniture(currentKey === nextKey ? null : item);
-                        if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
-                          onboardingTour.setStep("select-furniture");
-                        }
-                      }}
+                      onSelect={handleFurnitureCatalogueSelect}
                       pending={pendingFurniture}
                     />
                   </div>
@@ -3149,14 +3206,7 @@ export default function RoomCanvas({ initialPlan = null }) {
             <div className="sidebar-section">
               <div className="sidebar-section-title">Furniture</div>
               <FurnitureCatalogue
-                onSelect={(item) => {
-                  const currentKey = getPendingKey(pendingFurniture);
-                  const nextKey = getModelKey(item.model ?? item);
-                  setPendingFurniture(currentKey === nextKey ? null : item);
-                  if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
-                    onboardingTour.setStep("select-furniture");
-                  }
-                }}
+                onSelect={handleFurnitureCatalogueSelect}
                 pending={pendingFurniture}
               />
             </div>
@@ -3364,14 +3414,7 @@ export default function RoomCanvas({ initialPlan = null }) {
                   <div className="sidebar-section">
                     <div className="sidebar-section-title">Furniture</div>
                     <FurnitureCatalogue
-                      onSelect={(item) => {
-                        const currentKey = getPendingKey(pendingFurniture);
-                        const nextKey = getModelKey(item.model ?? item);
-                        setPendingFurniture(currentKey === nextKey ? null : item);
-                        if (onboardingTour.isActive && onboardingTour.state.step === "furniture-tool") {
-                          onboardingTour.setStep("select-furniture");
-                        }
-                      }}
+                      onSelect={handleFurnitureCatalogueSelect}
                       pending={pendingFurniture}
                     />
                   </div>

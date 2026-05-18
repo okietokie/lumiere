@@ -113,6 +113,9 @@ export default function ContextToolbar({
   forceDesktopLayout = false,
 }) {
   const toolbarRef              = useRef(null);
+  const stripRef                = useRef(null);
+  const dragStateRef            = useRef(null);
+  const suppressClickRef        = useRef(false);
   const [tintOpen, setTintOpen] = useState(false);
   const [bubble,   setBubble]   = useState(null);
   const bubbleTimer             = useRef(null);
@@ -220,8 +223,6 @@ export default function ContextToolbar({
     );
   }, [tintOpen, selectedFurnitureMesh, selectedItem?.id, selectedItem?.tint]);
 
-  if (!selectedItem || (!screenPos && !isPinned)) return null;
-
   const currentTint = normalizeTint(selectedItem?.tint);
 
   const buttons = type === 'wall' ? WALL_BUTTONS
@@ -247,7 +248,12 @@ export default function ContextToolbar({
     const r = btnEl?.getBoundingClientRect();
     setBubble(r
       ? { text, x: r.left + r.width / 2, y: isPinned ? r.bottom + 8 : r.top, placeBelow: isPinned || compactLayout }
-      : { text, x: (computedPos.x ?? 0) + 100, y: computedPos.y ?? 0, placeBelow: isPinned || compactLayout },
+      : {
+          text,
+          x: (computedPos.x ?? 0) + 100,
+          y: isPinned ? window.innerHeight - computedPos.y - 56 : (computedPos.y ?? 0),
+          placeBelow: isPinned || compactLayout,
+        },
     );
     bubbleTimer.current = setTimeout(() => setBubble(null), 3000);
   };
@@ -295,6 +301,49 @@ export default function ContextToolbar({
     onTintChange?.({ ...DEFAULT_TINT });
   };
 
+  const handleStripPointerDown = useCallback((event) => {
+    if (!compactLayout || !stripRef.current || event.pointerType === 'mouse') return;
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: stripRef.current.scrollLeft,
+      dragged: false,
+    };
+    suppressClickRef.current = false;
+    stripRef.current.setPointerCapture?.(event.pointerId);
+  }, [compactLayout]);
+
+  const handleStripPointerMove = useCallback((event) => {
+    const drag = dragStateRef.current;
+    if (!drag || !stripRef.current || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    if (!drag.dragged && Math.abs(deltaX) > 6) {
+      drag.dragged = true;
+      suppressClickRef.current = true;
+    }
+    if (!drag.dragged) return;
+    stripRef.current.scrollLeft = drag.startScrollLeft - deltaX;
+    event.preventDefault();
+  }, []);
+
+  const handleStripPointerEnd = useCallback((event) => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    stripRef.current?.releasePointerCapture?.(event.pointerId);
+    dragStateRef.current = null;
+    if (suppressClickRef.current) {
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
+  }, []);
+
+  const handleStripClickCapture = useCallback((event) => {
+    if (!suppressClickRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
   const mobilePinButtonStyle = {
     width: compactLayout ? (isPinned ? 140 : 44) : 36,
     minWidth: compactLayout ? (isPinned ? 140 : 44) : 36,
@@ -313,6 +362,8 @@ export default function ContextToolbar({
       ? `0 0 0 4px ${isPinned ? 'rgba(196, 154, 108, 0.32)' : 'rgba(122, 101, 89, 0.28)'}`
       : 'none',
   };
+
+  if (!selectedItem || (!screenPos && !isPinned)) return null;
 
   return (
     <>
@@ -342,7 +393,8 @@ export default function ContextToolbar({
         style={{
           position:       'fixed',
           left:           computedPos.x,
-          top:            computedPos.y,
+          top:            isPinned ? 'auto' : computedPos.y,
+          bottom:         isPinned ? computedPos.y : 'auto',
           width:          toolbarWidth,
           zIndex:         9999,
           display:        'flex',
@@ -364,8 +416,22 @@ export default function ContextToolbar({
           gap: compactLayout ? 8 : 2,
           padding: compactLayout ? '8px' : '5px 6px',
           overflowX: compactLayout ? 'auto' : 'visible',
+          overflowY: 'hidden',
           scrollbarWidth: 'none',
-        }}>
+          msOverflowStyle: 'none',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: compactLayout ? 'pan-x' : 'auto',
+          overscrollBehaviorX: compactLayout ? 'contain' : 'auto',
+          cursor: compactLayout ? 'grab' : 'default',
+        }}
+          ref={stripRef}
+          onPointerDown={handleStripPointerDown}
+          onPointerMove={handleStripPointerMove}
+          onPointerUp={handleStripPointerEnd}
+          onPointerCancel={handleStripPointerEnd}
+          onPointerLeave={handleStripPointerEnd}
+          onClickCapture={handleStripClickCapture}
+        >
           {showPinButton && (
             <MobilePinButton
               compact={compactLayout}
@@ -374,7 +440,7 @@ export default function ContextToolbar({
               onClick={() => {
                 const next = !isPinned;
                 onPinnedChange?.(next);
-                showBubble(next ? 'Toolbar pinned to top' : 'Toolbar follows selection again', toolbarRef.current);
+                showBubble(next ? 'Toolbar pinned to bottom' : 'Toolbar follows selection again', toolbarRef.current);
               }}
             />
           )}
@@ -1089,7 +1155,7 @@ function MobilePinButton({ compact, pinned, style, onClick }) {
     <button
       ref={btnRef}
       type="button"
-      title={pinned ? 'Unpin toolbar' : 'Pin toolbar to top'}
+      title={pinned ? 'Unpin toolbar' : 'Pin toolbar to bottom'}
       onClick={(event) => {
         if (compact && !revealed) {
           event.preventDefault();

@@ -16,6 +16,7 @@ import { normalizeShareUrl } from '../utils/shareUrl';
 import { useBudgetStore } from '../stores/useBudgetStore';
 import { normalizeFurnitureLightState } from '../utils/furnitureLight';
 import useThemedDialogs from './useThemedDialogs.jsx';
+import { saveDemoProjectDraft } from '../utils/demoProjectTransfer';
 
 const AUTOSAVE_MS = 30_000;
 const DEFAULT_PROJECT_NAME = 'Untitled Room';
@@ -297,6 +298,8 @@ export default function useProjectSave({
   setCurrentProjectId,
   skipInitialLatestLoad = false,
   localMutationVersionRef = null,
+  demoMode = false,
+  onRequireAccount = null,
 }) {
   const dialogs = useThemedDialogs();
   const [saveStatus, setSaveStatus] = useState('idle');
@@ -343,8 +346,34 @@ export default function useProjectSave({
     return takeSnapshot(getCanvas());
   }, [getCanvas, snapshotApiRef]);
 
+  const requestAccountUpgrade = useCallback(async (reason) => {
+    const scene = getSceneData();
+    const thumbnail = captureSnapshot();
+    saveDemoProjectDraft({
+      title: projectName,
+      scene_data: scene,
+      thumbnail_url: thumbnail,
+      reason,
+      source: '3d-demo',
+    });
+
+    if (onRequireAccount) {
+      await onRequireAccount({ reason, scene, thumbnail, projectName });
+    } else {
+      await dialogs.alert({
+        title: 'Create an Account to Continue',
+        content: 'This demo keeps your current project ready, but saving it requires an account.',
+        tone: 'warning',
+      });
+    }
+    return null;
+  }, [captureSnapshot, dialogs, getSceneData, onRequireAccount, projectName]);
+
   const saveProject = useCallback(async (name = projectName, withThumbnail = true, options = {}) => {
     const { silent = false, createNew = false } = options;
+    if (demoMode || !getAccessToken()) {
+      return requestAccountUpgrade('save-project');
+    }
     if (saveInFlightRef.current) {
       return null;
     }
@@ -395,7 +424,7 @@ export default function useProjectSave({
     } finally {
       saveInFlightRef.current = false;
     }
-  }, [projectName, currentProjectId, getSceneData, captureSnapshot, hydrateBudgetFromScene, setCurrentProjectId]);
+  }, [projectName, currentProjectId, demoMode, getSceneData, captureSnapshot, hydrateBudgetFromScene, requestAccountUpgrade, setCurrentProjectId]);
 
   const downloadSnapshot = useCallback(() => {
     requestAnimationFrame(() => {
@@ -494,7 +523,7 @@ export default function useProjectSave({
   }, [getLocalMutationVersion, hydrateBudgetFromScene, setRooms, setWalls, setPlacedItems, setFloorMaterial, setCeilingMaterial, lightingState, setCurrentProjectId]);
 
   const loadLatestProject = useCallback(async () => {
-    if (!getAccessToken() || currentProjectId) return null;
+    if (demoMode || !getAccessToken() || currentProjectId) return null;
     const startMutationVersion = getLocalMutationVersion();
     try {
       const { data } = await axiosClient.get('/api/projects/me/latest');
@@ -522,6 +551,7 @@ export default function useProjectSave({
       throw error;
     }
   }, [
+    demoMode,
     currentProjectId,
     getLocalMutationVersion,
     hydrateBudgetFromScene,
@@ -536,18 +566,22 @@ export default function useProjectSave({
   ]);
 
   const ensureProject = useCallback(async ({ persistLatest = false } = {}) => {
+    if (demoMode || !getAccessToken()) {
+      await requestAccountUpgrade('save-project');
+      return null;
+    }
     if (!currentProjectId) {
       const project = await saveProject(projectName, true);
-      return project.id;
+      return project?.id ?? null;
     }
 
     if (persistLatest) {
       const project = await saveProject(projectName, true);
-      return project.id;
+      return project?.id ?? null;
     }
 
     return currentProjectId;
-  }, [currentProjectId, projectName, saveProject]);
+  }, [currentProjectId, demoMode, projectName, requestAccountUpgrade, saveProject]);
 
   const uploadModelAsset = useCallback(async (kind, file) => {
     if (!file) return null;
@@ -556,6 +590,7 @@ export default function useProjectSave({
     }
 
     const projectId = await ensureProject({ persistLatest: true });
+    if (!projectId) return null;
     setAssetUploadStatus((prev) => ({ ...prev, [kind]: 'uploading' }));
     try {
       const formData = new FormData();
@@ -621,20 +656,26 @@ export default function useProjectSave({
   ]);
 
   const listProjects = useCallback(async () => {
+    if (demoMode || !getAccessToken()) return [];
     const { data } = await axiosClient.get('/api/projects/list');
     return data;
-  }, []);
+  }, [demoMode]);
 
   const deleteProject = useCallback(async (projectId) => {
+    if (demoMode || !getAccessToken()) {
+      await requestAccountUpgrade('manage-projects');
+      return;
+    }
     await axiosClient.delete(`/api/projects/${projectId}`);
     if (projectId === currentProjectId) {
       setCurrentProjectId(null);
       setShareUrl('');
     }
-  }, [currentProjectId, setCurrentProjectId]);
+  }, [currentProjectId, demoMode, requestAccountUpgrade, setCurrentProjectId]);
 
   const copyShareLink = useCallback(async () => {
     const projectId = await ensureProject({ persistLatest: true });
+    if (!projectId) return null;
     const url = shareUrl || `${window.location.origin}/view/${projectId}`;
     await navigator.clipboard.writeText(url);
     setShareUrl(url);
@@ -643,6 +684,7 @@ export default function useProjectSave({
 
   const openSharePage = useCallback(async () => {
     const projectId = await ensureProject({ persistLatest: true });
+    if (!projectId) return null;
     const url = shareUrl || `${window.location.origin}/view/${projectId}`;
     setShareUrl(url);
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -652,12 +694,12 @@ export default function useProjectSave({
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
 
   useEffect(() => {
-    if (!autosaveEnabled || !currentProjectId) return;
+    if (demoMode || !autosaveEnabled || !currentProjectId || !getAccessToken()) return;
     autosaveTimer.current = setInterval(() => {
       saveProject(projectName, false, { silent: true }).catch(() => {});
     }, AUTOSAVE_MS);
     return () => clearInterval(autosaveTimer.current);
-  }, [autosaveEnabled, currentProjectId, saveProject, projectName]);
+  }, [autosaveEnabled, currentProjectId, demoMode, saveProject, projectName]);
 
   useEffect(() => {
     if (skipInitialLatestLoad) return;

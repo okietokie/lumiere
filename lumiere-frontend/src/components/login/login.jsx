@@ -7,10 +7,16 @@ import {
   UserOutlined,
 } from "@ant-design/icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import axiosClient from "../../api/axiosClient.js";
 import { authApi } from "../../api/auth.js";
 import { getApiErrorMessage } from "../../utils/apiError.js";
 import { storeAuthSession } from "../../utils/authStorage.js";
 import { COLORS } from "../../utils/colors.js";
+import {
+  appendProjectIdToRedirect,
+  clearDemoProjectDraft,
+  getDemoProjectDraft,
+} from "../../utils/demoProjectTransfer.js";
 import landingBg from "../../assets/landing-page-bg.jpg";
 import "./login.css";
 
@@ -49,6 +55,23 @@ export const AuthExperience = ({ initialMode = "login" }) => {
     window.history.replaceState(null, "", `${nextMode === "signup" ? "/register" : "/login"}${query}`);
   };
 
+  const importDemoDraftProject = async (fallbackRedirect) => {
+    const params = new URLSearchParams(location.search);
+    const draft = getDemoProjectDraft();
+    const shouldImport = params.get("demoImport") === "1" && draft?.scene_data;
+    if (!shouldImport) return fallbackRedirect;
+
+    const response = await axiosClient.post("/api/projects/save", {
+      title: draft.title || "Untitled Room",
+      scene_data: draft.scene_data,
+      thumbnail_url: draft.thumbnail_url || null,
+    });
+
+    clearDemoProjectDraft();
+    message.success("Your demo project has been saved to your account.");
+    return appendProjectIdToRedirect(fallbackRedirect, response.data?.id);
+  };
+
   const onLoginFinish = async (values) => {
     setLoginLoading(true);
     try {
@@ -57,10 +80,14 @@ export const AuthExperience = ({ initialMode = "login" }) => {
         password: values.password,
       });
       storeAuthSession(response.data);
-      message.success("Login Successful!");
       const redirect = new URLSearchParams(location.search).get("redirect");
-      const safeRedirect = redirect?.startsWith("/") && !redirect.startsWith("//") ? redirect : "/user/dashboard";
-      navigate(safeRedirect, { replace: true });
+      const defaultRedirect = new URLSearchParams(location.search).get("demoImport") === "1"
+        ? "/user/room"
+        : "/user/dashboard";
+      const safeRedirect = redirect?.startsWith("/") && !redirect.startsWith("//") ? redirect : defaultRedirect;
+      const nextRedirect = await importDemoDraftProject(safeRedirect);
+      message.success("Login Successful!");
+      navigate(nextRedirect, { replace: true });
     } catch (error) {
       message.error(getApiErrorMessage(error, "Invalid login details. Please try again."));
     } finally {
@@ -76,8 +103,19 @@ export const AuthExperience = ({ initialMode = "login" }) => {
         email: values.email,
         password: values.password,
       });
+      const loginResponse = await authApi.login({
+        email: values.email,
+        password: values.password,
+      });
+      storeAuthSession(loginResponse.data);
+      const redirect = new URLSearchParams(location.search).get("redirect");
+      const defaultRedirect = new URLSearchParams(location.search).get("demoImport") === "1"
+        ? "/user/room"
+        : "/user/dashboard";
+      const safeRedirect = redirect?.startsWith("/") && !redirect.startsWith("//") ? redirect : defaultRedirect;
+      const nextRedirect = await importDemoDraftProject(safeRedirect);
       message.success("Account created successfully!");
-      setTimeout(() => flipTo("login"), 900);
+      navigate(nextRedirect, { replace: true });
     } catch (error) {
       message.error(getApiErrorMessage(error, "Registration failed. Please try again."));
     } finally {
