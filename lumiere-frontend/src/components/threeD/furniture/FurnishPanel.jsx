@@ -208,11 +208,12 @@ function CategoryRow({ category, active, onClick }) {
   );
 }
 
-function FurnitureTile({ model, onClick, active }) {
+function FurnitureTile({ model, onClick, onDoubleClick, active }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       style={{
         ...compactCardStyle(active),
         padding: 7,
@@ -294,6 +295,7 @@ export default function FurnishPanel({
   rooms = [],
   selectedRoomId = null,
   onBeginPlacement,
+  onPlaceDirect,
   pendingPlacement = null,
 }) {
   const [models, setModels] = useState([]);
@@ -369,6 +371,10 @@ export default function FurnishPanel({
   );
 
   const pendingRoomName = rooms.find((room) => room.id === pendingPlacement?.roomId)?.name ?? null;
+  const defaultRoomId = useMemo(() => {
+    if (selectedRoomId && rooms.some((room) => room.id === selectedRoomId)) return selectedRoomId;
+    return rooms[0]?.id ?? null;
+  }, [rooms, selectedRoomId]);
 
   useEffect(() => {
     if (!selectedModel && page === 'detail' && categoryModels[0]) {
@@ -395,6 +401,11 @@ export default function FurnishPanel({
     onBeginPlacement(selectedModel, room.id);
     setRoomPickerOpen(false);
   }, [onBeginPlacement, selectedModel]);
+
+  const handlePlaceDirect = useCallback((model) => {
+    if (!model || !onPlaceDirect || !defaultRoomId) return;
+    onPlaceDirect(model, defaultRoomId);
+  }, [defaultRoomId, onPlaceDirect]);
 
   const categoryListContent = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -466,15 +477,27 @@ export default function FurnishPanel({
         }}
       />
       {categoryModels.length ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {categoryModels.map((model) => (
-            <FurnitureTile
-              key={model.id ?? model.filename}
-              model={model}
-              active={(model.id ?? model.filename) === selectedModelId}
-              onClick={() => openModel(model)}
-            />
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{
+            ...compactCardStyle(false),
+            padding: '10px 12px',
+            color: 'rgba(240, 224, 208, 0.78)',
+            fontSize: 11,
+            lineHeight: 1.45,
+          }}>
+            Double-click any item to place it directly in {rooms.find((room) => room.id === defaultRoomId)?.name ?? 'the project'}.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {categoryModels.map((model) => (
+              <FurnitureTile
+                key={model.id ?? model.filename}
+                model={model}
+                active={(model.id ?? model.filename) === selectedModelId}
+                onClick={() => openModel(model)}
+                onDoubleClick={() => handlePlaceDirect(model)}
+              />
+            ))}
+          </div>
         </div>
       ) : (
         <div style={{ ...compactCardStyle(false), padding: '10px 0' }}>

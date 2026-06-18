@@ -14,6 +14,20 @@ const _ray   = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _wallPlane = new THREE.Plane();
 const _hit   = new THREE.Vector3();
+const _ghostBaseColor = new THREE.Color();
+const _ghostMixedColor = new THREE.Color();
+
+function getGhostWallColor(baseColor) {
+  const resolvedBase = _ghostBaseColor.set(baseColor || '#c49a6c');
+  const hsl = { h: 0, s: 0, l: 0 };
+  resolvedBase.getHSL(hsl);
+
+  return _ghostMixedColor
+    .copy(resolvedBase)
+    .lerp(new THREE.Color('#ffffff'), 0.68)
+    .setHSL(hsl.h, Math.min(hsl.s * 0.28, 0.18), Math.min(0.92, hsl.l * 0.65 + 0.28))
+    .getStyle();
+}
 
 const InteractiveWall = React.forwardRef(({
   wall, isSelected, onSelect, updateWall, setOrbitEnabled, cameraMode,
@@ -524,8 +538,9 @@ const InteractiveWall = React.forwardRef(({
   }, [onOpeningMenu, onOpeningSelect]);
 
   const ghostProps = ghost
-    ? { transparent: true, opacity: 0.15, depthWrite: false }
+    ? { transparent: true, opacity: 0.08, depthWrite: false }
     : { transparent: false, opacity: 1,   depthWrite: true  };
+  const ghostColor = useMemo(() => getGhostWallColor(color), [color]);
 
   const isLinkStartEdge = useCallback((edge) => (
     edgeLinkStart?.wallId === id && edgeLinkStart?.edge === edge
@@ -840,8 +855,8 @@ const InteractiveWall = React.forwardRef(({
         <mesh
           ref={meshRef}
           geometry={wallShapeGeometry}
-          castShadow
-          receiveShadow
+          castShadow={!ghost}
+          receiveShadow={!ghost}
           onClick={handleWallClick}
           onPointerDown={handleWallPointerDown}
           onPointerMove={handleWallPointerMove}
@@ -864,9 +879,16 @@ const InteractiveWall = React.forwardRef(({
         >
           {isSelected || hovered ? (
             <meshStandardMaterial
-              color={isSelected ? COLORS.action : COLORS.accent}
+              color={ghost ? ghostColor : (isSelected ? COLORS.action : COLORS.accent)}
               roughness={roughness}
               metalness={metalness}
+              {...ghostProps}
+            />
+          ) : ghost ? (
+            <meshStandardMaterial
+              color={ghostColor}
+              roughness={Math.min((roughness ?? 0.85) + 0.08, 1)}
+              metalness={Math.min(metalness ?? 0, 0.04)}
               {...ghostProps}
             />
           ) : (

@@ -3,7 +3,11 @@ import { useFrame } from "@react-three/fiber";
 import { useToast } from "../ui/ToastNotification";
 
 const PERFORMANCE_STORAGE_KEY = "lumiere-performance-mode";
+const PERFORMANCE_DOCK_POSITION_KEY = "lumiere-performance-dock-position";
 const PERFORMANCE_OPTIONS = ["auto", "high", "lite"];
+const PERFORMANCE_DOCK_GUTTER = 18;
+const PERFORMANCE_DOCK_ESTIMATED_WIDTH = 110;
+const PERFORMANCE_DOCK_ESTIMATED_HEIGHT = 44;
 
 const QUALITY_PROFILES = {
   high: {
@@ -66,6 +70,45 @@ function detectAutoMode() {
     (touchDevice && narrowViewport && (deviceMemory <= 6 || hardwareConcurrency <= 6));
 
   return shouldUseLite ? "lite" : "high";
+}
+
+function clampDockPosition(position, viewport = {}) {
+  const width = viewport.width ?? (typeof window !== "undefined" ? window.innerWidth : 0);
+  const height = viewport.height ?? (typeof window !== "undefined" ? window.innerHeight : 0);
+  const maxX = Math.max(PERFORMANCE_DOCK_GUTTER, width - PERFORMANCE_DOCK_ESTIMATED_WIDTH - PERFORMANCE_DOCK_GUTTER);
+  const maxY = Math.max(PERFORMANCE_DOCK_GUTTER, height - PERFORMANCE_DOCK_ESTIMATED_HEIGHT - PERFORMANCE_DOCK_GUTTER);
+
+  return {
+    x: Math.min(Math.max(position.x, PERFORMANCE_DOCK_GUTTER), maxX),
+    y: Math.min(Math.max(position.y, PERFORMANCE_DOCK_GUTTER), maxY),
+  };
+}
+
+function getDefaultDockPosition() {
+  if (typeof window === "undefined") {
+    return { x: PERFORMANCE_DOCK_GUTTER, y: PERFORMANCE_DOCK_GUTTER };
+  }
+
+  return clampDockPosition({
+    x: window.innerWidth - PERFORMANCE_DOCK_ESTIMATED_WIDTH - PERFORMANCE_DOCK_GUTTER,
+    y: window.innerHeight - PERFORMANCE_DOCK_ESTIMATED_HEIGHT - PERFORMANCE_DOCK_GUTTER,
+  });
+}
+
+function getStoredDockPosition() {
+  if (typeof window === "undefined") return getDefaultDockPosition();
+
+  try {
+    const raw = window.localStorage.getItem(PERFORMANCE_DOCK_POSITION_KEY);
+    if (!raw) return getDefaultDockPosition();
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.x !== "number" || typeof parsed?.y !== "number") {
+      return getDefaultDockPosition();
+    }
+    return clampDockPosition(parsed);
+  } catch {
+    return getDefaultDockPosition();
+  }
 }
 
 export function PerformanceModeProvider({ children }) {
@@ -173,6 +216,8 @@ export function PerformanceFrameMonitor({ label = "scene", sampleMs = 2000 }) {
 export function PerformanceModeDock() {
   const { preference, effectiveMode, autoBaseMode, autoLiteTriggered, setPreference } = usePerformanceMode();
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState(getStoredDockPosition);
+  const dragStateRef = useRef(null);
 
   const statusCopy = preference === "auto"
     ? autoLiteTriggered
@@ -180,13 +225,82 @@ export function PerformanceModeDock() {
       : `Auto is currently using ${autoBaseMode === "lite" ? "Lite" : "High"}.`
     : `Manual mode is set to ${effectiveMode === "lite" ? "Lite" : "High"}.`;
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(PERFORMANCE_DOCK_POSITION_KEY, JSON.stringify(position));
+  }, [position]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleResize = () => {
+      setPosition((current) => clampDockPosition(current));
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const handlePointerDown = useCallback((event) => {
+    if (event.button !== 0) return;
+
+    const startPosition = position;
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: startPosition.x,
+      originY: startPosition.y,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [position]);
+
+  const handlePointerMove = useCallback((event) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const nextPosition = clampDockPosition({
+      x: dragState.originX + (event.clientX - dragState.startX),
+      y: dragState.originY + (event.clientY - dragState.startY),
+    });
+
+    const movedDistance = Math.abs(event.clientX - dragState.startX) + Math.abs(event.clientY - dragState.startY);
+    if (movedDistance > 4) {
+      dragState.moved = true;
+    }
+
+    setPosition(nextPosition);
+  }, []);
+
+  const handlePointerUp = useCallback((event) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragStateRef.current = null;
+
+    if (!dragState.moved) {
+      setOpen((current) => !current);
+    }
+  }, []);
+
+  const handlePointerCancel = useCallback((event) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragStateRef.current = null;
+  }, []);
+
   return (
-    <div style={{ position: "fixed", right: 18, bottom: 18, zIndex: 9997 }}>
+    <div style={{ position: "fixed", left: position.x, top: position.y, zIndex: 9997 }}>
       {open && (
         <div
           style={{
+            position: "absolute",
+            left: 0,
+            top: "calc(100% + 10px)",
             width: 250,
-            marginBottom: 10,
             padding: 14,
             borderRadius: 16,
             background: "rgba(20, 16, 13, 0.94)",
@@ -229,8 +343,11 @@ export function PerformanceModeDock() {
 
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
         aria-label="Open performance mode settings"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
         style={{
           display: "flex",
           alignItems: "center",
@@ -243,6 +360,8 @@ export function PerformanceModeDock() {
           cursor: "pointer",
           boxShadow: "0 10px 24px rgba(0,0,0,0.24)",
           backdropFilter: "blur(12px)",
+          touchAction: "none",
+          userSelect: "none",
         }}
       >
         <span

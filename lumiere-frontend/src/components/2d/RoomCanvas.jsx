@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { Stage, Layer, Line, Circle, Rect, Arc, Group, Text, RegularPolygon } from "react-konva";
-import { AppstoreOutlined, DeleteOutlined, LogoutOutlined, RedoOutlined, SaveOutlined, UndoOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, DeleteOutlined, LogoutOutlined, SaveOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   useFloorPlan, buildWalls, PX_PER_M, GRID_SIZES,
@@ -35,6 +35,10 @@ import useThemedDialogs from "../../hooks/useThemedDialogs.jsx";
 const MIN_STAGE_SCALE = 0.25;
 const MAX_STAGE_SCALE = 4;
 const FIT_PADDING = 56;
+const VIEWPORT_CONTROLS_POSITION_KEY = "lumiere-room-canvas-viewport-controls-position";
+const VIEWPORT_CONTROLS_GUTTER = 14;
+const VIEWPORT_CONTROLS_ESTIMATED_WIDTH = 56;
+const VIEWPORT_CONTROLS_ESTIMATED_HEIGHT = 34;
 
 function clampStageScale(value) {
   return Math.max(MIN_STAGE_SCALE, Math.min(MAX_STAGE_SCALE, value));
@@ -77,6 +81,41 @@ function getEventScreenPoint(event, fallbackPoint = { x: 0, y: 0 }) {
   }
 
   return fallbackPoint;
+}
+
+function clampViewportControlsPosition(position, bounds = {}) {
+  const width = bounds.width ?? 0;
+  const height = bounds.height ?? 0;
+  const maxX = Math.max(VIEWPORT_CONTROLS_GUTTER, width - VIEWPORT_CONTROLS_ESTIMATED_WIDTH - VIEWPORT_CONTROLS_GUTTER);
+  const maxY = Math.max(VIEWPORT_CONTROLS_GUTTER, height - VIEWPORT_CONTROLS_ESTIMATED_HEIGHT - VIEWPORT_CONTROLS_GUTTER);
+
+  return {
+    x: Math.min(Math.max(position.x, VIEWPORT_CONTROLS_GUTTER), maxX),
+    y: Math.min(Math.max(position.y, VIEWPORT_CONTROLS_GUTTER), maxY),
+  };
+}
+
+function getDefaultViewportControlsPosition(stageSize = {}) {
+  return clampViewportControlsPosition({
+    x: (stageSize.width ?? 0) - VIEWPORT_CONTROLS_ESTIMATED_WIDTH - VIEWPORT_CONTROLS_GUTTER,
+    y: (stageSize.height ?? 0) - VIEWPORT_CONTROLS_ESTIMATED_HEIGHT - VIEWPORT_CONTROLS_GUTTER,
+  }, stageSize);
+}
+
+function getStoredViewportControlsPosition(stageSize = {}) {
+  if (typeof window === "undefined") return getDefaultViewportControlsPosition(stageSize);
+
+  try {
+    const raw = window.localStorage.getItem(VIEWPORT_CONTROLS_POSITION_KEY);
+    if (!raw) return getDefaultViewportControlsPosition(stageSize);
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.x !== "number" || typeof parsed?.y !== "number") {
+      return getDefaultViewportControlsPosition(stageSize);
+    }
+    return clampViewportControlsPosition(parsed, stageSize);
+  } catch {
+    return getDefaultViewportControlsPosition(stageSize);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1416,6 +1455,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const stageRef     = useRef(null);
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
   const [stageView, setStageView] = useState({ x: 0, y: 0, scale: 1 });
+  const [viewportControlsPosition, setViewportControlsPosition] = useState(() => getStoredViewportControlsPosition({ width: 800, height: 600 }));
   const [inlineRoomEditor, setInlineRoomEditor] = useState(null);
   const stageGestureRef = useRef({
     lastPinchDistance: null,
@@ -1441,6 +1481,7 @@ export default function RoomCanvas({ initialPlan = null }) {
   const [autosaveEnabled, setAutosaveEnabled] = useState(false);
   const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState("tools");
+  const [mobileWorkspaceDrawerOpen, setMobileWorkspaceDrawerOpen] = useState(true);
   const [showSelectIntro, setShowSelectIntro] = useState(false);
   const [hasShownSelectIntro, setHasShownSelectIntro] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (
@@ -1451,6 +1492,9 @@ export default function RoomCanvas({ initialPlan = null }) {
   ));
   const autosaveRef = useRef(null);
   const selectIntroTimeoutRef = useRef(null);
+  const viewportControlsDragRef = useRef(null);
+  const viewportControlsDragSuppressedClickRef = useRef(false);
+  const viewportControlsPositionInitializedRef = useRef(false);
   const isSaving = saveStatus === "saving";
 
   const collapseMobileControls = useCallback(() => {
@@ -1554,6 +1598,23 @@ export default function RoomCanvas({ initialPlan = null }) {
     return () => ro.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (stageSize.width <= 0 || stageSize.height <= 0) return;
+
+    setViewportControlsPosition((current) => {
+      if (!viewportControlsPositionInitializedRef.current) {
+        viewportControlsPositionInitializedRef.current = true;
+        return getStoredViewportControlsPosition(stageSize);
+      }
+      return clampViewportControlsPosition(current, stageSize);
+    });
+  }, [stageSize]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(VIEWPORT_CONTROLS_POSITION_KEY, JSON.stringify(viewportControlsPosition));
+  }, [viewportControlsPosition]);
+
   const planBounds = useMemo(() => {
     const xs = [];
     const ys = [];
@@ -1623,6 +1684,63 @@ export default function RoomCanvas({ initialPlan = null }) {
     x: (point.x - stageView.x) / stageView.scale,
     y: (point.y - stageView.y) / stageView.scale,
   }), [stageView.scale, stageView.x, stageView.y]);
+
+  const handleViewportControlsPointerDown = useCallback((event) => {
+    if (event.button !== 0) return;
+
+    viewportControlsDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: viewportControlsPosition.x,
+      originY: viewportControlsPosition.y,
+      moved: false,
+    };
+    viewportControlsDragSuppressedClickRef.current = false;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [viewportControlsPosition.x, viewportControlsPosition.y]);
+
+  const handleViewportControlsPointerMove = useCallback((event) => {
+    const dragState = viewportControlsDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const nextPosition = clampViewportControlsPosition({
+      x: dragState.originX + (event.clientX - dragState.startX),
+      y: dragState.originY + (event.clientY - dragState.startY),
+    }, stageSize);
+
+    const movedDistance = Math.abs(event.clientX - dragState.startX) + Math.abs(event.clientY - dragState.startY);
+    if (movedDistance > 4) {
+      dragState.moved = true;
+      viewportControlsDragSuppressedClickRef.current = true;
+    }
+
+    setViewportControlsPosition(nextPosition);
+  }, [stageSize]);
+
+  const handleViewportControlsPointerUp = useCallback((event) => {
+    const dragState = viewportControlsDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    viewportControlsDragRef.current = null;
+  }, []);
+
+  const handleViewportControlsPointerCancel = useCallback((event) => {
+    const dragState = viewportControlsDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    viewportControlsDragRef.current = null;
+  }, []);
+
+  const handleViewportControlAction = useCallback((action) => {
+    if (viewportControlsDragSuppressedClickRef.current) {
+      viewportControlsDragSuppressedClickRef.current = false;
+      return;
+    }
+    action();
+  }, []);
 
   const zoomStageAt = useCallback((screenPoint, nextScale) => {
     setStageView((prev) => {
@@ -3681,26 +3799,6 @@ export default function RoomCanvas({ initialPlan = null }) {
               Switch to 3D View
             </button>
           </div>
-          <div className="canvas-topbar-mobile-actions" role="group" aria-label="Mobile editor actions">
-            <button
-              type="button"
-              className="canvas-topbar-icon-btn"
-              onClick={undo}
-              disabled={!canUndo}
-              aria-label="Undo"
-            >
-              <UndoOutlined />
-            </button>
-            <button
-              type="button"
-              className="canvas-topbar-icon-btn"
-              onClick={redo}
-              disabled={!canRedo}
-              aria-label="Redo"
-            >
-              <RedoOutlined />
-            </button>
-          </div>
         </div>
         )}
 
@@ -3821,32 +3919,35 @@ export default function RoomCanvas({ initialPlan = null }) {
             />
           )}
 
-          <div className="canvas-viewport-controls" onPointerDown={(event) => event.stopPropagation()}>
+          <div
+            className={`canvas-viewport-controls is-draggable${isMobileViewport ? `${mobileWorkspaceDrawerOpen ? " is-above-workspace-open" : " is-above-workspace-collapsed"}` : ""}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerDownCapture={handleViewportControlsPointerDown}
+            onPointerMove={handleViewportControlsPointerMove}
+            onPointerUp={handleViewportControlsPointerUp}
+            onPointerCancel={handleViewportControlsPointerCancel}
+            style={{
+              left: `${viewportControlsPosition.x}px`,
+              top: `${viewportControlsPosition.y}px`,
+              right: "auto",
+              bottom: "auto",
+              zIndex: 72,
+              touchAction: "none",
+              userSelect: "none",
+              cursor: viewportControlsDragRef.current ? "grabbing" : "grab",
+            }}
+          >
             <button
               type="button"
               className="viewport-control-btn"
-              onClick={() => fitPlanToStage(true)}
+              onClick={() => handleViewportControlAction(() => fitPlanToStage(true))}
             >
               Fit
-            </button>
-            <button
-              type="button"
-              className="viewport-control-btn"
-              onClick={() => zoomStageAt({ x: stageSize.width / 2, y: stageSize.height / 2 }, stageView.scale * 1.18)}
-            >
-              +
-            </button>
-            <button
-              type="button"
-              className="viewport-control-btn"
-              onClick={() => zoomStageAt({ x: stageSize.width / 2, y: stageSize.height / 2 }, stageView.scale / 1.18)}
-            >
-              -
             </button>
           </div>
         </div>
 
-        <div className={`canvas-statusbar${isMobileViewport ? " canvas-statusbar-mobile" : ""}`}>
+        <div className={`canvas-statusbar${isMobileViewport ? ` canvas-statusbar-mobile${mobileWorkspaceDrawerOpen ? " is-above-workspace-open" : " is-above-workspace-collapsed"}` : ""}`}>
           <div className={`status-chip${hasDraft||mode!=="draw"?" active":""}`}>
             <span className="dot"/>
             {{draw:hasDraft?"Drawing":"Ready",select:"Edit",door:"Door",window:"Window",furniture:"Furniture"}[mode]}
@@ -3875,9 +3976,20 @@ export default function RoomCanvas({ initialPlan = null }) {
       </div>
 
       {isMobileViewport && (
-        <div className={`plan-mobile-reference-sheet${isTabletViewport ? " is-tablet" : ""}`}>
-          <div className="plan-mobile-reference-handle" />
-          <div className="plan-mobile-reference-sheet-title">Workspace</div>
+        <div className={`plan-mobile-reference-sheet${isTabletViewport ? " is-tablet" : ""}${mobileWorkspaceDrawerOpen ? " is-open" : " is-collapsed"}`}>
+          <button
+            type="button"
+            className="plan-mobile-reference-toggle"
+            onClick={() => setMobileWorkspaceDrawerOpen((open) => !open)}
+            aria-expanded={mobileWorkspaceDrawerOpen}
+            aria-label={mobileWorkspaceDrawerOpen ? "Collapse workspace drawer" : "Expand workspace drawer"}
+          >
+            <div className="plan-mobile-reference-handle" />
+            <div className="plan-mobile-reference-toggle-row">
+              <div className="plan-mobile-reference-sheet-title">Workspace</div>
+            </div>
+          </button>
+          <div className="plan-mobile-reference-body">
           <div className="plan-mobile-reference-card-row">
             <div className="plan-mobile-reference-card-track">
               {mobileWorkspaceActions.map(({ key, label, copy, icon, accent, disabled, onClick, dataTour }) => (
@@ -3915,6 +4027,30 @@ export default function RoomCanvas({ initialPlan = null }) {
             <button
               type="button"
               className="plan-mobile-reference-footer-btn"
+              onClick={undo}
+              disabled={!canUndo}
+              aria-label="Undo"
+            >
+              <span className="plan-mobile-reference-footer-icon">
+                <ToolGlyph icon={UI_ICONS.undo} />
+              </span>
+              Undo
+            </button>
+            <button
+              type="button"
+              className="plan-mobile-reference-footer-btn"
+              onClick={redo}
+              disabled={!canRedo}
+              aria-label="Redo"
+            >
+              <span className="plan-mobile-reference-footer-icon">
+                <ToolGlyph icon={UI_ICONS.redo} />
+              </span>
+              Redo
+            </button>
+            <button
+              type="button"
+              className="plan-mobile-reference-footer-btn"
               onClick={handleDashboard}
               disabled={isSaving}
             >
@@ -3934,6 +4070,7 @@ export default function RoomCanvas({ initialPlan = null }) {
               </span>
               Log out
             </button>
+          </div>
           </div>
         </div>
       )}

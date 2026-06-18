@@ -297,6 +297,25 @@ function getFootprintCentroid(points = []) {
   return [sum[0] / points.length, sum[1] / points.length];
 }
 
+function buildFurnitureItemFromModel(modelMeta, roomId, position) {
+  const lightDefaults = getFurnitureLightDefaults(modelMeta);
+  return {
+    id: uuidv4(),
+    filename: modelMeta.filename,
+    name: modelMeta.name,
+    url: modelMeta.url,
+    category: modelMeta.category || null,
+    roomId,
+    position,
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    tint: null,
+    emitsLight: lightDefaults.emitsLight,
+    lightActive: lightDefaults.lightActive,
+    lightSettings: lightDefaults.lightSettings,
+  };
+}
+
 function rangesOverlap(minA, maxA, minB, maxB, padding = 0) {
   return Math.min(maxA, maxB) - Math.max(minA, minB) >= -padding;
 }
@@ -704,6 +723,8 @@ export default function RoomScene({ initialScene = null }) {
   const [cameraMode,          setCameraMode]          = useState('orbit');
   const [gizmoMode,           setGizmoMode]           = useState('translate');
   const [surfaceSnapEnabled,  setSurfaceSnapEnabled]  = useState(true);
+  const [snapCursorVisible, setSnapCursorVisible] = useState(false);
+  const [snapCursorPosition, setSnapCursorPosition] = useState({ x: 0, y: 0 });
   const [activeTool,          setActiveTool]          = useState('select');
   const [openingPreview,      setOpeningPreview]      = useState(null);
   const [wallEdgeLinkStart,   setWallEdgeLinkStart]   = useState(null);
@@ -749,6 +770,9 @@ export default function RoomScene({ initialScene = null }) {
 
   const screens = Grid.useBreakpoint();
   const { navigateTo } = useContextNav(setActiveTab);
+  const snapGlowColor = COLORS.action;
+  const snapGlowStrong = `${COLORS.action}66`;
+  const snapGlowSoft = `${COLORS.action}33`;
   const toast = useToast();
   const dialogs = useThemedDialogs();
 
@@ -763,6 +787,7 @@ export default function RoomScene({ initialScene = null }) {
     || (navigator.maxTouchPoints ?? 0) > 0
   ));
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [mobileWorkspaceDrawerOpen, setMobileWorkspaceDrawerOpen] = useState(true);
   const [mobileDoorEditorSection, setMobileDoorEditorSection] = useState(null);
   const [mobileTopbarHeight, setMobileTopbarHeight] = useState(132);
   const isPhoneViewport = viewportWidth < PHONE_EDITOR_BREAKPOINT;
@@ -4170,6 +4195,39 @@ export default function RoomScene({ initialScene = null }) {
     toast.info(room?.name ? `Top view opened for ${room.name}. Click where you want it to be placed.` : 'Top view opened. Click where you want it to be placed.');
   }, [focusRoomTopView, isDemoMode, placedItems.length, requestDemoUpgrade, rooms, toast]);
 
+  const placeFurnitureDirectly = useCallback((modelMeta, roomId) => {
+    if (!modelMeta || !roomId) return false;
+    if (isDemoMode && placedItems.length >= 1) {
+      void requestDemoUpgrade('multiple-furniture');
+      return false;
+    }
+
+    const room = rooms.find((entry) => entry.id === roomId);
+    if (!room) return false;
+
+    const roomWalls = walls.filter((wall) => wall?.roomId === room.id && Array.isArray(wall?.start) && Array.isArray(wall?.end));
+    const surfaceBounds = roomSurfaceBounds.find((entry) => entry.roomId === room.id) ?? null;
+    const footprint = getRenderableRoomFootprint(room, roomWalls, surfaceBounds);
+    const [centerX, centerZ] = footprint?.length >= 3
+      ? getFootprintCentroid(footprint)
+      : [room.x ?? 0, room.z ?? 0];
+
+    markSceneMutation();
+    const item = buildFurnitureItemFromModel(modelMeta, roomId, [centerX, 0, centerZ]);
+    setPlacedItems((prev) => [...prev, item]);
+    setPendingFurniturePlacement(null);
+    setSelectedRoomId(roomId);
+    setSelectedFurnitureId(item.id);
+    setSelectedWallId(null);
+    setSelectedLightId(null);
+    setSelectedOpening(null);
+    setActiveTab('furniture');
+
+    requestAnimationFrame(() => focusFurnitureInScene(item));
+    toast.success(room.name ? `${item.name ?? 'Furniture'} added to ${room.name}.` : `${item.name ?? 'Furniture'} added to the project.`);
+    return true;
+  }, [focusFurnitureInScene, isDemoMode, markSceneMutation, placedItems.length, requestDemoUpgrade, roomSurfaceBounds, rooms, toast, walls]);
+
   const placeFurnitureInRoom = useCallback((roomId, point) => {
     if (!pendingFurniturePlacement?.modelMeta || !point) return false;
     if (isDemoMode && placedItems.length >= 1) {
@@ -4177,22 +4235,7 @@ export default function RoomScene({ initialScene = null }) {
       return false;
     }
     markSceneMutation();
-    const lightDefaults = getFurnitureLightDefaults(pendingFurniturePlacement.modelMeta);
-    const item = {
-      id: uuidv4(),
-      filename: pendingFurniturePlacement.modelMeta.filename,
-      name: pendingFurniturePlacement.modelMeta.name,
-      url: pendingFurniturePlacement.modelMeta.url,
-      category: pendingFurniturePlacement.modelMeta.category || null,
-      roomId,
-      position: [point.x, 0, point.z],
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
-      tint: null,
-      emitsLight: lightDefaults.emitsLight,
-      lightActive: lightDefaults.lightActive,
-      lightSettings: lightDefaults.lightSettings,
-    };
+    const item = buildFurnitureItemFromModel(pendingFurniturePlacement.modelMeta, roomId, [point.x, 0, point.z]);
     setPlacedItems((prev) => [...prev, item]);
     setSelectedFurnitureId(item.id);
     setSelectedWallId(null);
@@ -4839,6 +4882,7 @@ export default function RoomScene({ initialScene = null }) {
       rooms={rooms}
       selectedRoomId={selectedRoomId}
       onBeginPlacement={beginFurniturePlacement}
+      onPlaceDirect={placeFurnitureDirectly}
       pendingPlacement={pendingFurniturePlacement}
     />
   ) : activeTab === 'projects' ? (
@@ -4915,6 +4959,10 @@ export default function RoomScene({ initialScene = null }) {
       selectedRoomId={selectedRoomId}
       onBeginPlacement={(model, roomId) => {
         beginFurniturePlacement(model, roomId);
+        setMobilePanelOpen(false);
+      }}
+      onPlaceDirect={(model, roomId) => {
+        placeFurnitureDirectly(model, roomId);
         setMobilePanelOpen(false);
       }}
       pendingPlacement={pendingFurniturePlacement}
@@ -5140,6 +5188,7 @@ export default function RoomScene({ initialScene = null }) {
           rooms={rooms}
           selectedRoomId={selectedRoomId}
           onBeginPlacement={beginFurniturePlacement}
+          onPlaceDirect={placeFurnitureDirectly}
           pendingPlacement={pendingFurniturePlacement}
         />
       ),
@@ -5212,7 +5261,27 @@ export default function RoomScene({ initialScene = null }) {
 
       <div
         ref={canvasWrapperRef}
+        className={surfaceSnapEnabled ? 'room-scene-canvas-wrap room-scene-canvas-wrap-snap' : 'room-scene-canvas-wrap'}
         style={{ height: '100%', width: '100%' }}
+        onPointerMove={(event) => {
+          if (!surfaceSnapEnabled || isTouchDevice || event.pointerType === 'touch') return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          setSnapCursorPosition({
+            x: event.clientX - bounds.left,
+            y: event.clientY - bounds.top,
+          });
+          setSnapCursorVisible(true);
+        }}
+        onPointerEnter={(event) => {
+          if (!surfaceSnapEnabled || isTouchDevice || event.pointerType === 'touch') return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          setSnapCursorPosition({
+            x: event.clientX - bounds.left,
+            y: event.clientY - bounds.top,
+          });
+          setSnapCursorVisible(true);
+        }}
+        onPointerLeave={() => setSnapCursorVisible(false)}
         onPointerDown={() => {
           if (isMobile && budgetSummaryOpen) {
             setBudgetSummaryOpen(false);
@@ -5226,6 +5295,15 @@ export default function RoomScene({ initialScene = null }) {
           }
         }}
       >
+        {surfaceSnapEnabled && snapCursorVisible && !isTouchDevice && (
+          <div
+            className="room-scene-snap-cursor"
+            style={{
+              left: snapCursorPosition.x,
+              top: snapCursorPosition.y,
+            }}
+          />
+        )}
         <Canvas
           dpr={quality.editorDpr}
           camera={cameraMode === 'firstPerson'
@@ -6209,7 +6287,9 @@ export default function RoomScene({ initialScene = null }) {
             style={{
               position: 'fixed',
               top: `calc(${mobileFloatingPanelTop}px + env(safe-area-inset-top, 0px))`,
-              bottom: isTabletViewport ? 'calc(220px + env(safe-area-inset-bottom, 0px))' : 'calc(236px + env(safe-area-inset-bottom, 0px))',
+              bottom: mobileWorkspaceDrawerOpen
+                ? (isTabletViewport ? 'calc(220px + env(safe-area-inset-bottom, 0px))' : 'calc(236px + env(safe-area-inset-bottom, 0px))')
+                : 'calc(88px + env(safe-area-inset-bottom, 0px))',
               left: 12,
               right: 12,
               zIndex: 1100,
@@ -6250,9 +6330,20 @@ export default function RoomScene({ initialScene = null }) {
             </div>
           </div>
 
-          <div className="room-mobile-reference-sheet">
-            <div className="room-mobile-reference-handle" />
-            <div className="room-mobile-reference-sheet-title">Workspace</div>
+          <div className={mobileWorkspaceDrawerOpen ? 'room-mobile-reference-sheet is-open' : 'room-mobile-reference-sheet is-collapsed'}>
+            <button
+              type="button"
+              className="room-mobile-reference-toggle"
+              onClick={() => setMobileWorkspaceDrawerOpen((open) => !open)}
+              aria-expanded={mobileWorkspaceDrawerOpen}
+              aria-label={mobileWorkspaceDrawerOpen ? 'Collapse workspace drawer' : 'Expand workspace drawer'}
+            >
+              <div className="room-mobile-reference-handle" />
+              <div className="room-mobile-reference-toggle-row">
+                <div className="room-mobile-reference-sheet-title">Workspace</div>
+              </div>
+            </button>
+            <div className="room-mobile-reference-body">
             <div className="room-mobile-reference-card-row">
               <div className="room-mobile-reference-card-track">
                 {compactQuickActions.map(({ key, label, copy, icon, accent, disabled, onClick, dataTour }) => (
@@ -6368,6 +6459,7 @@ export default function RoomScene({ initialScene = null }) {
                 </button>
               ))}
             </div>
+            </div>
           </div>
         </>
       ) : (
@@ -6445,7 +6537,7 @@ export default function RoomScene({ initialScene = null }) {
               disabled={isSaving}
               icon={surfaceSnapEnabled ? <CheckOutlined /> : <CloseOutlined />}
               onClick={() => setSurfaceSnapEnabled((enabled) => !enabled)}
-              className="room-standalone-action-button"
+              className={surfaceSnapEnabled ? 'room-standalone-action-button room-standalone-action-button-snap-active' : 'room-standalone-action-button'}
             >
               {surfaceSnapEnabled ? 'Disable Snap' : 'Enable Snap'}
             </Button>
@@ -6533,6 +6625,7 @@ export default function RoomScene({ initialScene = null }) {
                                   rooms={rooms}
                                   selectedRoomId={selectedRoomId}
                                   onBeginPlacement={beginFurniturePlacement}
+                                  onPlaceDirect={placeFurnitureDirectly}
                                   pendingPlacement={pendingFurniturePlacement}
                                 />
                               </div>
@@ -8045,6 +8138,50 @@ export default function RoomScene({ initialScene = null }) {
           border-color: ${COLORS.action}AA !important;
           background: ${COLORS.surface} !important;
         }
+        .room-standalone-action-button-snap-active.ant-btn,
+        .room-standalone-action-button-snap-active.ant-btn:hover,
+        .room-standalone-action-button-snap-active.ant-btn:focus {
+          color: ${snapGlowColor} !important;
+          border-color: ${snapGlowColor}CC !important;
+          background:
+            radial-gradient(circle at 18% 50%, ${snapGlowSoft} 0%, transparent 56%),
+            linear-gradient(180deg, ${COLORS.surface} 0%, ${COLORS.background} 100%) !important;
+          box-shadow:
+            0 0 0 1px ${snapGlowSoft},
+            0 0 18px ${snapGlowSoft},
+            0 0 34px ${snapGlowStrong},
+            ${glassShadow} !important;
+        }
+        .room-scene-canvas-wrap {
+          position: relative;
+        }
+        .room-scene-canvas-wrap.room-scene-canvas-wrap-snap {
+          cursor: none;
+        }
+        .room-scene-snap-cursor {
+          position: absolute;
+          width: 18px;
+          height: 18px;
+          border-radius: 999px;
+          pointer-events: none;
+          z-index: 40;
+          transform: translate(-50%, -50%);
+          border: 1px solid ${snapGlowColor}DD;
+          background:
+            radial-gradient(circle, ${snapGlowColor}EE 0 22%, ${snapGlowStrong} 30%, ${snapGlowSoft} 58%, transparent 78%);
+          box-shadow:
+            0 0 10px ${snapGlowColor},
+            0 0 22px ${snapGlowStrong},
+            0 0 44px ${snapGlowSoft};
+        }
+        .room-scene-snap-cursor::after {
+          content: '';
+          position: absolute;
+          inset: 5px;
+          border-radius: 999px;
+          background: ${snapGlowColor};
+          box-shadow: 0 0 10px ${snapGlowColor};
+        }
         .room-reference-sidebar-shell {
           pointer-events: auto;
           position: relative;
@@ -8654,6 +8791,18 @@ export default function RoomScene({ initialScene = null }) {
           border: 1px solid rgba(201,171,146,0.12);
           box-shadow: 0 28px 72px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.04);
           backdrop-filter: blur(24px);
+          overflow: hidden;
+          transition: transform 0.22s ease, box-shadow 0.22s ease;
+        }
+        .room-mobile-reference-toggle {
+          width: 100%;
+          display: block;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          text-align: left;
+          cursor: pointer;
         }
         .room-mobile-reference-handle {
           width: 44px;
@@ -8661,6 +8810,11 @@ export default function RoomScene({ initialScene = null }) {
           border-radius: 999px;
           margin: 0 auto 8px;
           background: rgba(255,255,255,0.34);
+        }
+        .room-mobile-reference-toggle-row {
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
         }
         .room-mobile-reference-sheet-title {
           color: rgba(255,255,255,0.56);
@@ -8670,7 +8824,27 @@ export default function RoomScene({ initialScene = null }) {
           text-transform: uppercase;
           margin-bottom: 8px;
         }
+        .room-mobile-reference-toggle-row .room-mobile-reference-sheet-title {
+          margin-bottom: 0;
+        }
+        .room-mobile-reference-body {
+          max-height: 420px;
+          overflow: hidden;
+          opacity: 1;
+          transform: translateY(0);
+          transition: max-height 0.22s ease, opacity 0.18s ease, transform 0.22s ease, margin-top 0.22s ease;
+        }
+        .room-mobile-reference-sheet.is-collapsed {
+          box-shadow: 0 18px 38px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .room-mobile-reference-sheet.is-collapsed .room-mobile-reference-body {
+          max-height: 0;
+          opacity: 0;
+          transform: translateY(8px);
+          margin-top: 0;
+        }
         .room-mobile-reference-card-row {
+          margin-top: 8px;
           margin-bottom: 8px;
         }
         .room-mobile-reference-card-track {
