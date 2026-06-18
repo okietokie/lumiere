@@ -7,10 +7,6 @@ const MOBILE_W  = 854,  MOBILE_H  = 480;
 const FPS       = 30;
 const AUTO_DURATION_MS = 6000;
 
-function isMobile() {
-  return window.innerWidth < 768;
-}
-
 function getCanvas(canvasWrapperRef) {
   if (!canvasWrapperRef?.current) return null;
   return canvasWrapperRef.current.querySelector('canvas')
@@ -41,7 +37,7 @@ export default function useRecorder({ canvasWrapperRef, orbitControlsRef, projec
   const cleanup = useCallback(() => {
     cancelAnimationFrame(animFrameRef.current);
     if (mediaRecRef.current && mediaRecRef.current.state !== 'inactive') {
-      try { mediaRecRef.current.stop(); } catch (_) {}
+      try { mediaRecRef.current.stop(); } catch { return; }
     }
     chunksRef.current = [];
   }, []);

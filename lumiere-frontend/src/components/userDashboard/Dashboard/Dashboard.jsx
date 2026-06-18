@@ -60,22 +60,6 @@ const navItems = [
   { id: "tutorials", label: "Tutorials", icon: Wand2 },
 ];
 
-const dashboardStyle = {
-  "--dash-bg": "#090807",
-  "--dash-bg-soft": "#0f0d0c",
-  "--dash-shell": "rgba(18, 14, 12, 0.78)",
-  "--dash-shell-2": "rgba(255,255,255,0.025)",
-  "--dash-border": "rgba(236, 220, 200, 0.06)",
-  "--dash-border-strong": "rgba(236, 220, 200, 0.1)",
-  "--dash-text": COLORS.text || "#f4ede4",
-  "--dash-muted": COLORS.secondary || "#b7ab9d",
-  "--dash-action": COLORS.action || "#c99a62",
-  "--dash-accent": COLORS.accent || "#d8b07a",
-  backgroundColor: "#090807",
-  backgroundImage:
-    "radial-gradient(circle at 18% 0%, rgba(142,96,58,0.22), transparent 28%), radial-gradient(circle at 88% 10%, rgba(110,78,52,0.12), transparent 26%), linear-gradient(180deg, #120f0d 0%, #0b0908 38%, #090807 100%)",
-};
-
 const shellClass =
   "rounded-3xl bg-[var(--dash-shell)] shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_24px_70px_rgba(0,0,0,0.22)] backdrop-blur-xl";
 const cardClass = `${shellClass} p-6`;
@@ -2451,130 +2435,6 @@ const Dashboard = ({ user, onLogout }) => {
             }
       : null;
 
-  const overviewContent = (
-    <div className="space-y-8">
-      <OverviewHero
-        user={user}
-        lastProject={lastProject}
-        stats={{ ...stats, projects: stats?.projects ?? projects.length }}
-        storage={storage}
-        projects={projects}
-        onCreateNew={() => setCreateOpen(true)}
-        onOpenLastProject={() => lastProject && openProject(lastProject)}
-      />
-
-      {error && (
-        <div className="flex items-center gap-4 rounded-3xl border border-red-400/15 bg-red-400/[0.06] p-4 text-sm text-red-200/80">
-          <AlertCircle size={17} />
-          {error}
-        </div>
-      )}
-
-      <StatsStrip
-        stats={{ ...stats, projects: stats?.projects ?? projects.length }}
-        projectAssets={projectAssets}
-        projectRenders={projectRenders}
-      />
-
-      <QuickActions onAction={runQuickAction} />
-
-      <section className="space-y-4">
-        <SectionHeader
-          eyebrow="Projects"
-          title="Featured Recent Work"
-          action={
-            <button
-              type="button"
-              onClick={() => setActiveTab("projects")}
-              className="text-sm font-medium text-[var(--dash-action)] hover:text-[var(--dash-text)]"
-            >
-              View all
-            </button>
-          }
-        />
-        <ProjectGrid
-          projects={projects.slice(0, 2)}
-          loading={loading}
-          className="xl:grid-cols-2"
-          {...projectGridProps}
-        />
-      </section>
-
-      <ActivityList
-        activities={activities}
-        loading={loading}
-        onOpenProject={openProject}
-      />
-    </div>
-  );
-
-  const content = {
-    overview: overviewContent,
-    projects: (
-      <div className="space-y-8">
-        <SectionHeading
-          eyebrow="Project Hub"
-          title="All Projects"
-          copy="Every project shown here is loaded through the dashboard backend hook."
-          action={
-            <PrimaryButton onClick={() => setCreateOpen(true)}>
-              <Plus size={16} />
-              New Project
-            </PrimaryButton>
-          }
-        />
-        <ProjectGrid projects={projects} loading={loading} {...projectGridProps} />
-      </div>
-    ),
-    renders: (
-      <div className="space-y-8">
-        <SectionHeading
-          eyebrow="Renders"
-          title="Renders Gallery"
-          copy="Project thumbnails and exported render records discovered from backend project data."
-        />
-        {projectRenders.length ? (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {projectRenders.map((render) => (
-              <div
-                key={render.id}
-                className="overflow-hidden rounded-[28px] bg-[var(--dash-shell)] shadow-[0_24px_70px_rgba(0,0,0,0.2)] backdrop-blur-xl"
-              >
-                <div className="aspect-video bg-black/25">
-                  {render.url ? (
-                    <img
-                      src={render.url}
-                      alt={render.name}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center">
-                      <Camera className="text-[var(--dash-muted)]/55" />
-                    </div>
-                  )}
-                </div>
-                <div className="p-6">
-                  <p className="truncate text-[15px] font-medium text-[var(--dash-text)]">
-                    {render.name}
-                  </p>
-                  <p className="mt-2 text-[13px] text-[var(--dash-text)]/45">
-                    {render.projectName} · {formatDate(render.created_at)}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon={Camera}
-            title="No renders found"
-            copy="When projects include thumbnails, screenshots, or export records from the backend, they will appear here."
-          />
-        )}
-      </div>
-    ),
-  };
-
   const antdOverviewContent = (
     <Space direction="vertical" size={32} style={{ width: "100%" }}>
       <AntOverviewHero
@@ -2872,3 +2732,5 @@ const Dashboard = ({ user, onLogout }) => {
 };
 
 export default Dashboard;
+
+

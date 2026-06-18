@@ -50,10 +50,6 @@ function RedirectAuthenticated({ children }) {
   return getAccessToken() ? <Navigate to="/user/dashboard" replace /> : children;
 }
 
-function EditorRoute({ children }) {
-  return <>{children}</>;
-}
-
 function LiveRoomCanvasRoute() {
   const initialPlan = useMemo(() => {
     const latest = getLatestLiveEditorSnapshot();
@@ -318,9 +314,7 @@ function RouteShell() {
             path="/user/room"
             element={
               <RequireAuthOrDemo>
-                <EditorRoute mode="3d">
-                  <LiveRoomSceneRoute />
-                </EditorRoute>
+                <LiveRoomSceneRoute />
               </RequireAuthOrDemo>
             }
           />
@@ -328,9 +322,7 @@ function RouteShell() {
             path="/user/room-2d"
             element={
               <RequireAuthOrDemo>
-                <EditorRoute mode="2d">
-                  <LiveRoomCanvasRoute />
-                </EditorRoute>
+                <LiveRoomCanvasRoute />
               </RequireAuthOrDemo>
             }
           />
