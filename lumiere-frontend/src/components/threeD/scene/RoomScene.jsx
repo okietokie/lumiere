@@ -789,6 +789,7 @@ export default function RoomScene({ initialScene = null }) {
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [mobileWorkspaceDrawerOpen, setMobileWorkspaceDrawerOpen] = useState(true);
   const [mobileDoorEditorSection, setMobileDoorEditorSection] = useState(null);
+  const [mobileTopbarDrawerOpen, setMobileTopbarDrawerOpen] = useState(true);
   const [mobileTopbarHeight, setMobileTopbarHeight] = useState(132);
   const isPhoneViewport = viewportWidth < PHONE_EDITOR_BREAKPOINT;
   const isTabletViewport = viewportWidth >= PHONE_EDITOR_BREAKPOINT && viewportWidth < COMPACT_EDITOR_BREAKPOINT;
@@ -1061,7 +1062,15 @@ export default function RoomScene({ initialScene = null }) {
     return () => {
       window.removeEventListener('resize', updateTopbarHeight);
     };
-  }, [isMobile, viewportWidth, budgetEnabled, isSaving, projectSave.saveStatus, projectSave.projectName]);
+  }, [
+    isMobile,
+    viewportWidth,
+    budgetEnabled,
+    isSaving,
+    mobileTopbarDrawerOpen,
+    projectSave.saveStatus,
+    projectSave.projectName,
+  ]);
   const budgetRoomRows = useMemo(() => {
     const byRoom = budgetSummary?.byRoom ?? {};
     return Object.entries(byRoom)
@@ -2048,22 +2057,6 @@ export default function RoomScene({ initialScene = null }) {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [roomCreation.cancelPendingRoomCreation, roomCreation.pendingRoomCreation]);
-
-
-  // Apply ghost opacity to wall meshes
-  useEffect(() => {
-    walls.forEach((wall) => {
-      const mesh = wallRefs.current[wall.id];
-      if (!mesh) return;
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      mats.forEach((m) => {
-        if (!m) return;
-        if (wall.ghost) { m.transparent = true;  m.opacity = 0.15; m.depthWrite = false; }
-        else            { m.transparent = false; m.opacity = 1;    m.depthWrite = true;  }
-        m.needsUpdate = true;
-      });
-    });
-  }, [walls]);
 
   // Keyboard shortcuts 
   // Mobile touch safety
@@ -6189,19 +6182,30 @@ export default function RoomScene({ initialScene = null }) {
 
       {isMobile ? (
         <>
-          <div ref={mobileTopbarRef} className="room-mobile-reference-topbar">
+          <div
+            ref={mobileTopbarRef}
+            className={isTabletViewport ? 'room-mobile-reference-topbar is-tablet' : 'room-mobile-reference-topbar'}
+          >
             <div className="room-mobile-reference-title-block">
               <div className="room-mobile-reference-brand-text">Lumiere</div>
-              <button
-                type="button"
-                onClick={() => { if (!isSaving) openMobilePanel(activeTab && activeTab !== 'more' ? activeTab : 'projects'); }}
-                className="room-mobile-reference-title-trigger"
-              >
-                <span className="room-mobile-reference-title-text">{mobileDisplayProjectName}</span>
-                <DownOutlined style={{ fontSize: 14, opacity: 0.86 }} />
-              </button>
+              <div className="room-mobile-reference-title-row">
+                <button
+                  type="button"
+                  onClick={() => { if (!isSaving) openMobilePanel(activeTab && activeTab !== 'more' ? activeTab : 'projects'); }}
+                  className="room-mobile-reference-title-trigger"
+                >
+                  <span className="room-mobile-reference-title-text">{mobileDisplayProjectName}</span>
+                </button>
+                <button
+                  type="button"
+                  className="room-mobile-reference-collapse-hitbox"
+                  aria-label={mobileTopbarDrawerOpen ? 'Collapse top controls' : 'Expand top controls'}
+                  aria-expanded={mobileTopbarDrawerOpen}
+                  onClick={() => setMobileTopbarDrawerOpen((open) => !open)}
+                />
+              </div>
             </div>
-            <div className="room-mobile-top-pill-group">
+            <div className={mobileTopbarDrawerOpen ? 'room-mobile-top-pill-group' : 'room-mobile-top-pill-group is-collapsed'}>
               <button
                 type="button"
                 className={wallsHidden ? 'room-mobile-top-pill room-mobile-top-pill-active' : 'room-mobile-top-pill'}
@@ -8549,9 +8553,18 @@ export default function RoomScene({ initialScene = null }) {
           box-shadow: 0 28px 60px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.05);
           backdrop-filter: blur(24px);
         }
+        .room-mobile-reference-topbar.is-tablet {
+          flex-wrap: wrap;
+          gap: 10px;
+          align-items: stretch;
+          padding: 15px 16px;
+        }
         .room-mobile-reference-title-block {
           min-width: 0;
           flex: 1 1 auto;
+        }
+        .room-mobile-reference-topbar.is-tablet .room-mobile-reference-title-block {
+          flex: 1 1 100%;
         }
         .room-mobile-reference-brand-text {
           color: ${COLORS.action};
@@ -8575,11 +8588,37 @@ export default function RoomScene({ initialScene = null }) {
           cursor: pointer;
           min-width: 0;
         }
+        .room-mobile-reference-title-row {
+          display: flex;
+          align-items: stretch;
+          gap: 8px;
+          min-width: 0;
+        }
+        .room-mobile-reference-title-row .room-mobile-reference-title-trigger {
+          flex: 1 1 auto;
+        }
         .room-mobile-reference-title-text {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
           max-width: 100%;
+        }
+        .room-mobile-reference-collapse-hitbox {
+          flex: 0 0 74px;
+          min-height: 40px;
+          border: 0;
+          border-radius: 16px;
+          background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%);
+          cursor: pointer;
+          transition: background 0.2s ease, box-shadow 0.2s ease;
+        }
+        .room-mobile-reference-collapse-hitbox:hover {
+          background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .room-mobile-reference-topbar.is-tablet .room-mobile-reference-title-trigger {
+          width: 100%;
+          justify-content: space-between;
         }
         .room-mobile-top-pill {
           min-height: 54px;
@@ -8610,7 +8649,13 @@ export default function RoomScene({ initialScene = null }) {
           scrollbar-width: none;
           padding-bottom: 2px;
         }
+        .room-mobile-reference-topbar.is-tablet .room-mobile-top-pill-group {
+          width: 100%;
+        }
         .room-mobile-top-pill-group::-webkit-scrollbar {
+          display: none;
+        }
+        .room-mobile-top-pill-group.is-collapsed {
           display: none;
         }
         .room-mobile-top-pill-active {
@@ -9435,6 +9480,14 @@ export default function RoomScene({ initialScene = null }) {
             font-size: 15px;
             width: 100%;
             justify-content: space-between;
+          }
+          .room-mobile-reference-title-row {
+            gap: 6px;
+          }
+          .room-mobile-reference-collapse-hitbox {
+            flex-basis: 58px;
+            min-height: 36px;
+            border-radius: 14px;
           }
           .room-mobile-top-pill {
             min-height: 48px;

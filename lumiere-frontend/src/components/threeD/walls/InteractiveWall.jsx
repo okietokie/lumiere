@@ -879,6 +879,7 @@ const InteractiveWall = React.forwardRef(({
         >
           {isSelected || hovered ? (
             <meshStandardMaterial
+              key={ghost ? 'wall-ghost-highlight' : 'wall-highlight'}
               color={ghost ? ghostColor : (isSelected ? COLORS.action : COLORS.accent)}
               roughness={roughness}
               metalness={metalness}
@@ -886,6 +887,7 @@ const InteractiveWall = React.forwardRef(({
             />
           ) : ghost ? (
             <meshStandardMaterial
+              key="wall-ghost"
               color={ghostColor}
               roughness={Math.min((roughness ?? 0.85) + 0.08, 1)}
               metalness={Math.min(metalness ?? 0, 0.04)}
@@ -893,6 +895,7 @@ const InteractiveWall = React.forwardRef(({
             />
           ) : (
             <SurfaceMaterial
+              key="wall-surface"
               mat={{ color, roughness, metalness, textureId }}
               repeat={[2, 1]}
               {...ghostProps}
